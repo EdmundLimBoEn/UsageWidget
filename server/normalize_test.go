@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -218,6 +219,47 @@ func TestNormalize(t *testing.T) {
 			name:    "malformed JSON rejected",
 			body:    `{"providers": [ this is not json }`,
 			wantErr: true,
+		},
+		{
+			name: "real codexbar array with nested usage and object error",
+			body: `[
+				{
+					"provider": "codex",
+					"source": "auto",
+					"usage": {
+						"primary": {"usedPercent": 28, "windowMinutes": 300, "resetsAt": "2025-12-04T19:15:00Z"},
+						"secondary": {"usedPercent": 59, "windowMinutes": 10080, "resetsAt": "2025-12-05T17:00:00Z"},
+						"tertiary": null
+					},
+					"credits": {"remaining": 112.4}
+				},
+				{
+					"provider": "openai",
+					"error": {"kind": "provider", "code": 1, "message": "No available fetch strategy for openai."}
+				}
+			]`,
+			check: func(t *testing.T, snap Snapshot) {
+				if len(snap.Providers) != 2 {
+					t.Fatalf("expected 2 providers, got %d", len(snap.Providers))
+				}
+				codex := snap.Providers[0]
+				if codex.ID != "codex" || codex.Name != "Codex" {
+					t.Fatalf("unexpected codex: %+v", codex)
+				}
+				if len(codex.Windows) != 2 {
+					t.Fatalf("expected 2 windows, got %d: %+v", len(codex.Windows), codex.Windows)
+				}
+				if codex.Windows[0].Title != "5h limit" || codex.Windows[1].Title != "Weekly" {
+					t.Fatalf("unexpected titles: %q %q", codex.Windows[0].Title, codex.Windows[1].Title)
+				}
+				if codex.Credits != nil {
+					t.Fatalf("float remaining credits should not map to availableCount: %+v", codex.Credits)
+				}
+				openai := snap.Providers[1]
+				if openai.Error == "" || !strings.Contains(openai.Error, "No available fetch strategy") {
+					t.Fatalf("expected object error message, got %q", openai.Error)
+				}
+			},
 		},
 	}
 

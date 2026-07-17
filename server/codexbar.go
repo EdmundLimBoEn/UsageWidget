@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,10 @@ type CodexBarClient struct {
 }
 
 func NewCodexBarClient(url string) *CodexBarClient {
+	// Prefer all enabled providers when the caller only passed the bare /usage path.
+	if !strings.Contains(url, "?") {
+		url = strings.TrimRight(url, "/") + "?provider=all"
+	}
 	return &CodexBarClient{
 		URL:        url,
 		httpClient: &http.Client{Timeout: 10 * time.Second},

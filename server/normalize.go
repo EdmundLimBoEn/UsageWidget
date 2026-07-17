@@ -36,94 +36,26 @@ type Credits struct {
 	AvailableCount int `json:"availableCount"`
 }
 
-type upstreamResponse struct {
-	Providers []json.RawMessage `json:"providers"`
-}
-
-type upstreamProvider struct {
-	ID                string                `json:"id"`
-	Name              string                `json:"name"`
-	Primary           *upstreamWindow       `json:"primary"`
-	Secondary         *upstreamWindow       `json:"secondary"`
-	Tertiary          *upstreamWindow       `json:"tertiary"`
-	ExtraRateWindows  []upstreamExtraWindow `json:"extraRateWindows"`
-	CodexResetCredits *upstreamCredits      `json:"codexResetCredits"`
-	Error             *string               `json:"error"`
-}
-
-type upstreamWindow struct {
-	Title       string     `json:"title"`
-	UsedPercent float64    `json:"usedPercent"`
-	ResetsAt    *time.Time `json:"resetsAt"`
-}
-
-type upstreamExtraWindow struct {
-	Key         string     `json:"key"`
-	Title       string     `json:"title"`
-	UsedPercent float64    `json:"usedPercent"`
-	ResetsAt    *time.Time `json:"resetsAt"`
-}
-
-type upstreamCredits struct {
-	AvailableCount int `json:"availableCount"`
-}
-
+// CodexBar serve/CLI emits either:
+//   - a single provider payload
+//   - an array of provider payloads
+//   - { "providers": [ ... ] } (forward-compatible wrapper)
+//
+// Real payload fields (see CodexBar docs/cli.md):
+//
+//	provider, usage.{primary,secondary,tertiary}, credits.remaining, error.message
 func Normalize(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snapshot, error) {
-	var upstream upstreamResponse
-	if err := json.Unmarshal(body, &upstream); err != nil {
-		return Snapshot{}, fmt.Errorf("normalize: decode response: %w", err)
+	rawProviders, err := extractProviderRaw(body)
+	if err != nil {
+		return Snapshot{}, err
 	}
 
-	providers := make([]Provider, 0, len(upstream.Providers))
-	for _, rawProvider := range upstream.Providers {
-		var up upstreamProvider
-		if err := json.Unmarshal(rawProvider, &up); err != nil {
-			return Snapshot{}, fmt.Errorf("normalize: decode provider: %w", err)
+	providers := make([]Provider, 0, len(rawProviders))
+	for _, rawProvider := range rawProviders {
+		p, err := normalizeOne(rawProvider)
+		if err != nil {
+			return Snapshot{}, err
 		}
-
-		p := Provider{
-			ID:   up.ID,
-			Name: up.Name,
-			Raw:  rawProvider,
-		}
-		if up.Error != nil {
-			p.Error = *up.Error
-		}
-		if up.CodexResetCredits != nil {
-			p.Credits = &Credits{AvailableCount: up.CodexResetCredits.AvailableCount}
-		}
-
-		usedKeys := make(map[string]bool)
-		addWindow := func(key, title string, usedPercent float64, resetsAt *time.Time) {
-			p.Windows = append(p.Windows, Window{
-				ID:               up.ID + "." + key,
-				Key:              key,
-				Title:            title,
-				UsedPercent:      usedPercent,
-				RemainingPercent: 100 - usedPercent,
-				ResetsAt:         resetsAt,
-			})
-			usedKeys[key] = true
-		}
-
-		if up.Primary != nil {
-			addWindow("primary", up.Primary.Title, up.Primary.UsedPercent, up.Primary.ResetsAt)
-		}
-		if up.Secondary != nil {
-			addWindow("secondary", up.Secondary.Title, up.Secondary.UsedPercent, up.Secondary.ResetsAt)
-		}
-		if up.Tertiary != nil {
-			addWindow("tertiary", up.Tertiary.Title, up.Tertiary.UsedPercent, up.Tertiary.ResetsAt)
-		}
-		for _, extra := range up.ExtraRateWindows {
-			key := extra.Key
-			if key == "" {
-				key = slugify(extra.Title)
-			}
-			key = uniqueKey(key, usedKeys)
-			addWindow(key, extra.Title, extra.UsedPercent, extra.ResetsAt)
-		}
-
 		providers = append(providers, p)
 	}
 
@@ -133,6 +65,226 @@ func Normalize(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snaps
 		Providers:           providers,
 		PollIntervalMinutes: pollIntervalMinutes,
 	}, nil
+}
+
+func extractProviderRaw(body []byte) ([]json.RawMessage, error) {
+	trim := strings.TrimSpace(string(body))
+	if trim == "" {
+		return nil, fmt.Errorf("normalize: empty body")
+	}
+
+	switch trim[0] {
+	case '[':
+		var arr []json.RawMessage
+		if err := json.Unmarshal(body, &arr); err != nil {
+			return nil, fmt.Errorf("normalize: decode array: %w", err)
+		}
+		return arr, nil
+	case '{':
+		// Wrapped form from plan.
+		var wrapped struct {
+			Providers []json.RawMessage `json:"providers"`
+		}
+		if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Providers) > 0 {
+			return wrapped.Providers, nil
+		}
+		// Single provider payload.
+		var single json.RawMessage
+		if err := json.Unmarshal(body, &single); err != nil {
+			return nil, fmt.Errorf("normalize: decode object: %w", err)
+		}
+		return []json.RawMessage{single}, nil
+	default:
+		return nil, fmt.Errorf("normalize: unexpected JSON start %q", trim[:1])
+	}
+}
+
+type codexBarPayload struct {
+	Provider string `json:"provider"`
+	// Alternate id field used by plan-shaped fixtures.
+	ID   string `json:"id"`
+	Name string `json:"name"`
+
+	// Nested usage windows (real CodexBar shape).
+	Usage *struct {
+		Primary   *codexBarWindow `json:"primary"`
+		Secondary *codexBarWindow `json:"secondary"`
+		Tertiary  *codexBarWindow `json:"tertiary"`
+	} `json:"usage"`
+
+	// Flat windows (plan-shaped fixtures / possible future).
+	Primary          *codexBarWindow       `json:"primary"`
+	Secondary        *codexBarWindow       `json:"secondary"`
+	Tertiary         *codexBarWindow       `json:"tertiary"`
+	ExtraRateWindows []codexBarExtraWindow `json:"extraRateWindows"`
+
+	Credits *struct {
+		Remaining      *float64 `json:"remaining"`
+		AvailableCount *int     `json:"availableCount"`
+	} `json:"credits"`
+	CodexResetCredits *struct {
+		AvailableCount int `json:"availableCount"`
+	} `json:"codexResetCredits"`
+
+	// error can be a string or {message, kind, code}.
+	Error json.RawMessage `json:"error"`
+}
+
+type codexBarWindow struct {
+	Title         string     `json:"title"`
+	UsedPercent   float64    `json:"usedPercent"`
+	WindowMinutes *float64   `json:"windowMinutes"`
+	ResetsAt      *time.Time `json:"resetsAt"`
+}
+
+type codexBarExtraWindow struct {
+	Key           string     `json:"key"`
+	Title         string     `json:"title"`
+	UsedPercent   float64    `json:"usedPercent"`
+	WindowMinutes *float64   `json:"windowMinutes"`
+	ResetsAt      *time.Time `json:"resetsAt"`
+}
+
+func normalizeOne(raw json.RawMessage) (Provider, error) {
+	var up codexBarPayload
+	if err := json.Unmarshal(raw, &up); err != nil {
+		return Provider{}, fmt.Errorf("normalize: decode provider: %w", err)
+	}
+
+	id := up.Provider
+	if id == "" {
+		id = up.ID
+	}
+	if id == "" {
+		return Provider{}, fmt.Errorf("normalize: provider missing id")
+	}
+
+	name := up.Name
+	if name == "" {
+		name = displayName(id)
+	}
+
+	p := Provider{
+		ID:   id,
+		Name: name,
+		Raw:  raw,
+	}
+	if msg := decodeErrorMessage(up.Error); msg != "" {
+		p.Error = msg
+	}
+
+	if up.CodexResetCredits != nil {
+		p.Credits = &Credits{AvailableCount: up.CodexResetCredits.AvailableCount}
+	} else if up.Credits != nil && up.Credits.AvailableCount != nil {
+		p.Credits = &Credits{AvailableCount: *up.Credits.AvailableCount}
+	}
+
+	usedKeys := make(map[string]bool)
+	add := func(key string, w *codexBarWindow) {
+		if w == nil {
+			return
+		}
+		title := w.Title
+		if title == "" {
+			title = windowTitle(key, w.WindowMinutes)
+		}
+		p.Windows = append(p.Windows, Window{
+			ID:               id + "." + key,
+			Key:              key,
+			Title:            title,
+			UsedPercent:      w.UsedPercent,
+			RemainingPercent: 100 - w.UsedPercent,
+			ResetsAt:         w.ResetsAt,
+		})
+		usedKeys[key] = true
+	}
+
+	// Prefer nested usage.* (real CodexBar), fall back to flat fields.
+	if up.Usage != nil {
+		add("primary", up.Usage.Primary)
+		add("secondary", up.Usage.Secondary)
+		add("tertiary", up.Usage.Tertiary)
+	} else {
+		add("primary", up.Primary)
+		add("secondary", up.Secondary)
+		add("tertiary", up.Tertiary)
+	}
+
+	for _, extra := range up.ExtraRateWindows {
+		key := extra.Key
+		if key == "" {
+			key = slugify(extra.Title)
+		}
+		key = uniqueKey(key, usedKeys)
+		title := extra.Title
+		if title == "" {
+			title = windowTitle(key, extra.WindowMinutes)
+		}
+		p.Windows = append(p.Windows, Window{
+			ID:               id + "." + key,
+			Key:              key,
+			Title:            title,
+			UsedPercent:      extra.UsedPercent,
+			RemainingPercent: 100 - extra.UsedPercent,
+			ResetsAt:         extra.ResetsAt,
+		})
+		usedKeys[key] = true
+	}
+
+	return p, nil
+}
+
+func decodeErrorMessage(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var obj struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj.Message
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func displayName(id string) string {
+	if id == "" {
+		return "Unknown"
+	}
+	return strings.ToUpper(id[:1]) + id[1:]
+}
+
+func windowTitle(key string, minutes *float64) string {
+	if minutes != nil {
+		m := *minutes
+		switch {
+		case m >= 60*24*6.5 && m <= 60*24*7.5:
+			return "Weekly"
+		case m >= 60*24*29 && m <= 60*24*32:
+			return "Monthly"
+		case m >= 60*4.5 && m <= 60*5.5:
+			return "5h limit"
+		case m >= 60:
+			h := int(m+0.5) / 60
+			return fmt.Sprintf("%dh limit", h)
+		case m > 0:
+			return fmt.Sprintf("%.0fm limit", m)
+		}
+	}
+	switch key {
+	case "primary":
+		return "Primary"
+	case "secondary":
+		return "Secondary"
+	case "tertiary":
+		return "Tertiary"
+	default:
+		return key
+	}
 }
 
 func slugify(title string) string {
