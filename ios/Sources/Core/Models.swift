@@ -213,7 +213,10 @@ public enum JSONCoding {
             let s = try c.decode(String.self)
             let basic = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
             let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
-            if let date = try? Date(s, strategy: basic) ?? Date(s, strategy: fractional) {
+            if let date = try? Date(s, strategy: basic) {
+                return date
+            }
+            if let date = try? Date(s, strategy: fractional) {
                 return date
             }
             throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid date: \(s)")

@@ -60,13 +60,12 @@ public struct APIClient: Sendable {
     }
 
     public func deleteDevice(id: String) async throws {
-        var request = try makeRequest(path: "/v1/devices/\(id)", method: "DELETE")
+        let request = try makeRequest(path: "/v1/devices/\(id)", method: "DELETE")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw APIError.httpStatus(http.statusCode, nil)
         }
-        _ = request
     }
 
     // MARK: - Internals
