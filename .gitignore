@@ -24,3 +24,9 @@ ios/DerivedData/
 **/env
 .env
 .env.*
+
+# Local signing material (never commit)
+ios/signing/
+*.p12
+*.cer
+*.csr
