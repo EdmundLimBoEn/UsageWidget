@@ -1,0 +1,22 @@
+[Unit]
+Description=UsageWidget companion (CodexBar poller + APNs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/usagewidget/env
+WorkingDirectory=/var/lib/usagewidget
+ExecStart=/usr/local/bin/usagewidgetd
+Restart=on-failure
+RestartSec=5
+User=usagewidget
+Group=usagewidget
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/usagewidget
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
