@@ -1,1 +1,3 @@
 .superpowers/
+*.db
+server/usagewidget.db
