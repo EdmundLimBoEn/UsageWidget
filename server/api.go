@@ -152,7 +152,11 @@ type Settings struct {
 var validPollIntervals = map[int]bool{1: true, 5: true, 15: true, 30: true, 60: true}
 
 func (a *API) readSettings() (Settings, error) {
-	raw, err := a.store.AllSettings()
+	return loadSettings(a.store)
+}
+
+func loadSettings(store *Store) (Settings, error) {
+	raw, err := store.AllSettings()
 	if err != nil {
 		return Settings{}, err
 	}
