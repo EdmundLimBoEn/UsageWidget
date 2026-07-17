@@ -2,6 +2,11 @@
 
 Checklist items that cannot be fully automated from this repo.
 
+## Repo / git
+
+- [ ] Re-auth GitHub CLI (`gh auth login`) — push failed with invalid token for `EdmundLimBoEn`.
+- [ ] Create remote and push: `gh repo create EdmundLimBoEn/UsageWidget --private --source=. --remote=origin --push` (or add an existing remote).
+
 ## Apple Developer / device
 
 - [ ] Create an APNs Auth Key (.p8) in Apple Developer → Keys (Apple Push Notifications service).
