@@ -197,6 +197,14 @@ func (s *Store) ListDevices() ([]Device, error) {
 	return devices, rows.Err()
 }
 
+func (s *Store) DeleteDevice(deviceID string) error {
+	_, err := s.db.Exec(`DELETE FROM devices WHERE device_id = ?`, deviceID)
+	if err != nil {
+		return fmt.Errorf("store: delete device: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) EventNotified(eventKey string) (bool, error) {
 	var exists int
 	err := s.db.QueryRow(`SELECT 1 FROM events WHERE event_key = ?`, eventKey).Scan(&exists)

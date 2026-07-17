@@ -106,6 +106,40 @@ func TestStoreEventDedup(t *testing.T) {
 	}
 }
 
+func TestStoreDeviceUpsertAndDelete(t *testing.T) {
+	s := openTestStore(t)
+
+	if err := s.UpsertDevice("dev-1", "apns-a", "widget-a"); err != nil {
+		t.Fatalf("UpsertDevice: %v", err)
+	}
+	if err := s.UpsertDevice("dev-1", "apns-b", "widget-b"); err != nil {
+		t.Fatalf("UpsertDevice (rotation): %v", err)
+	}
+
+	devices, err := s.ListDevices()
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	if len(devices) != 1 || devices[0].APNsToken != "apns-b" || devices[0].WidgetToken != "widget-b" {
+		t.Fatalf("expected rotated tokens for dev-1, got %+v", devices)
+	}
+
+	if err := s.DeleteDevice("dev-1"); err != nil {
+		t.Fatalf("DeleteDevice: %v", err)
+	}
+	devices, err = s.ListDevices()
+	if err != nil {
+		t.Fatalf("ListDevices after delete: %v", err)
+	}
+	if len(devices) != 0 {
+		t.Fatalf("expected no devices after delete, got %+v", devices)
+	}
+
+	if err := s.DeleteDevice("does-not-exist"); err != nil {
+		t.Fatalf("DeleteDevice missing device should be a no-op: %v", err)
+	}
+}
+
 func TestStoreWindowStateRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	resetsAt := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
