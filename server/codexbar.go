@@ -21,7 +21,8 @@ func NewCodexBarClient(url string) *CodexBarClient {
 	}
 	return &CodexBarClient{
 		URL:        url,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		// CodexBar can take a while when providers re-auth / scrape dashboards.
+		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
