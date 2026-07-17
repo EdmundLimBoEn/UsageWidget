@@ -174,6 +174,26 @@ type Device struct {
 	UpdatedAt   time.Time
 }
 
+func (s *Store) GetDevice(deviceID string) (Device, bool, error) {
+	var d Device
+	var updatedAtStr string
+	err := s.db.QueryRow(
+		`SELECT device_id, apns_token, widget_token, updated_at FROM devices WHERE device_id = ?`,
+		deviceID,
+	).Scan(&d.DeviceID, &d.APNsToken, &d.WidgetToken, &updatedAtStr)
+	if err == sql.ErrNoRows {
+		return Device{}, false, nil
+	}
+	if err != nil {
+		return Device{}, false, fmt.Errorf("store: get device: %w", err)
+	}
+	d.UpdatedAt, err = time.Parse(time.RFC3339, updatedAtStr)
+	if err != nil {
+		return Device{}, false, fmt.Errorf("store: parse device updated_at: %w", err)
+	}
+	return d, true, nil
+}
+
 func (s *Store) ListDevices() ([]Device, error) {
 	rows, err := s.db.Query(`SELECT device_id, apns_token, widget_token, updated_at FROM devices`)
 	if err != nil {

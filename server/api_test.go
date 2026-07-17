@@ -239,6 +239,41 @@ func TestDeviceUpsertRotationAndDelete(t *testing.T) {
 	}
 }
 
+func TestDevicePartialUpdatePreservesOtherToken(t *testing.T) {
+	api, store := newTestAPI(t)
+
+	rec := doRequest(t, api, http.MethodPost, "/v1/devices", "secret-token",
+		[]byte(`{"deviceID":"dev-1","apnsToken":"apns-a","widgetToken":"widget-a"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec2 := doRequest(t, api, http.MethodPost, "/v1/devices", "secret-token",
+		[]byte(`{"deviceID":"dev-1","widgetToken":"widget-b"}`))
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	var got deviceResponse
+	if err := json.Unmarshal(rec2.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode device response: %v", err)
+	}
+	if got.APNsToken != "apns-a" {
+		t.Fatalf("expected apnsToken preserved as apns-a, got %q", got.APNsToken)
+	}
+	if got.WidgetToken != "widget-b" {
+		t.Fatalf("expected widgetToken updated to widget-b, got %q", got.WidgetToken)
+	}
+
+	devices, err := store.ListDevices()
+	if err != nil {
+		t.Fatalf("ListDevices: %v", err)
+	}
+	if len(devices) != 1 || devices[0].APNsToken != "apns-a" || devices[0].WidgetToken != "widget-b" {
+		t.Fatalf("unexpected persisted device: %+v", devices)
+	}
+}
+
 func TestDevicePostRequiresDeviceID(t *testing.T) {
 	api, _ := newTestAPI(t)
 	rec := doRequest(t, api, http.MethodPost, "/v1/devices", "secret-token", []byte(`{"apnsToken":"x"}`))

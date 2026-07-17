@@ -205,25 +205,35 @@ func (a *API) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var setErr error
+	set := func(key, value string) {
+		if setErr == nil {
+			setErr = a.store.SetSetting(key, value)
+		}
+	}
 	if req.PollIntervalMinutes != nil {
-		a.store.SetSetting("poll_interval_minutes", strconv.Itoa(*req.PollIntervalMinutes))
+		set("poll_interval_minutes", strconv.Itoa(*req.PollIntervalMinutes))
 	}
 	if req.ProviderOrder != nil {
 		b, _ := json.Marshal(*req.ProviderOrder)
-		a.store.SetSetting("provider_order", string(b))
+		set("provider_order", string(b))
 	}
 	if req.HiddenProviders != nil {
 		b, _ := json.Marshal(*req.HiddenProviders)
-		a.store.SetSetting("hidden_providers", string(b))
+		set("hidden_providers", string(b))
 	}
 	if req.NotificationsEnabled != nil {
-		a.store.SetSetting("notifications_enabled", strconv.FormatBool(*req.NotificationsEnabled))
+		set("notifications_enabled", strconv.FormatBool(*req.NotificationsEnabled))
 	}
 	if req.EarlyThresholdPct != nil {
-		a.store.SetSetting("early_threshold_pct", strconv.FormatFloat(*req.EarlyThresholdPct, 'f', -1, 64))
+		set("early_threshold_pct", strconv.FormatFloat(*req.EarlyThresholdPct, 'f', -1, 64))
 	}
 	if req.DangerThresholdPct != nil {
-		a.store.SetSetting("danger_threshold_pct", strconv.FormatFloat(*req.DangerThresholdPct, 'f', -1, 64))
+		set("danger_threshold_pct", strconv.FormatFloat(*req.DangerThresholdPct, 'f', -1, 64))
+	}
+	if setErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": setErr.Error()})
+		return
 	}
 
 	a.handleGetSettings(w, r)
@@ -234,6 +244,12 @@ func inRange(pct float64) bool {
 }
 
 type deviceRequest struct {
+	DeviceID    string  `json:"deviceID"`
+	APNsToken   *string `json:"apnsToken"`
+	WidgetToken *string `json:"widgetToken"`
+}
+
+type deviceResponse struct {
 	DeviceID    string `json:"deviceID"`
 	APNsToken   string `json:"apnsToken"`
 	WidgetToken string `json:"widgetToken"`
@@ -249,11 +265,25 @@ func (a *API) handlePostDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "deviceID is required"})
 		return
 	}
-	if err := a.store.UpsertDevice(req.DeviceID, req.APNsToken, req.WidgetToken); err != nil {
+
+	existing, _, err := a.store.GetDevice(req.DeviceID)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, req)
+	resp := deviceResponse{DeviceID: req.DeviceID, APNsToken: existing.APNsToken, WidgetToken: existing.WidgetToken}
+	if req.APNsToken != nil {
+		resp.APNsToken = *req.APNsToken
+	}
+	if req.WidgetToken != nil {
+		resp.WidgetToken = *req.WidgetToken
+	}
+
+	if err := a.store.UpsertDevice(resp.DeviceID, resp.APNsToken, resp.WidgetToken); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *API) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
