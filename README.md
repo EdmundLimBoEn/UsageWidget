@@ -34,6 +34,27 @@ go run ./cmd/usagewidgetd
 
 Deploy docs: [`server/deploy/README.md`](server/deploy/README.md).
 
+### API
+
+All routes require `Authorization: Bearer <USAGEWIDGET_TOKEN>`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/v1/health` | Service, CodexBar, DB, polling, APNs readiness |
+| `GET` | `/v1/snapshot` | Normalized providers, windows, freshness |
+| `GET`/`PUT` | `/v1/settings` | Poll interval, order/visibility, thresholds |
+| `POST` | `/v1/devices` | Register/rotate APNs + WidgetKit push tokens |
+| `DELETE` | `/v1/devices/{deviceID}` | Invalidate a device |
+
+### Demo flow
+
+1. CodexBar serves `/usage` on localhost on edServe.
+2. `usagewidgetd` polls on the configured interval, stores SQLite snapshots, fires
+   APNs alerts + widget refreshes when data changes.
+3. iPhone (Tailscale on) connects with HTTPS URL + bearer token.
+4. Dashboard + large widget show live providers; hide/reorder in Settings.
+5. Force real CodexBar usage changes for the demo — no simulated events.
+
 ## iOS quick start
 
 ```bash
@@ -42,9 +63,16 @@ xcodegen generate
 open UsageWidget.xcodeproj
 ```
 
-In the app: enter the Tailscale HTTPS base URL and the same bearer token, then
-Test connection. Add the **UsageWidget** large widget from the Home Screen
-gallery.
+Set your Development Team in Xcode (or `DEVELOPMENT_TEAM`). In the app: enter the
+Tailscale HTTPS base URL and the same bearer token, then **Test connection**.
+Add the **Usage** systemLarge widget from the Home Screen gallery.
+
+Build without signing (CI / smoke):
+
+```bash
+xcodebuild -scheme UsageWidget -destination 'generic/platform=iOS' \
+  CODE_SIGNING_ALLOWED=NO build
+```
 
 ## Configuration defaults
 
@@ -54,6 +82,10 @@ gallery.
   appended and hidden until enabled
 - App Group: `group.systems.edmundlim.usagewidget`
 - Bundle ID: `systems.edmundlim.UsageWidget` (widget: `.widget`)
+
+WidgetKit push and timeline delivery are system-budgeted — a 1-minute poll
+interval drives server sampling and push attempts, not a guaranteed one-minute
+render on the Home Screen.
 
 ## Human setup checklist
 

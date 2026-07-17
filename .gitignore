@@ -1,3 +1,26 @@
-.superpowers/
-*.db
+# Go
+server/usagewidgetd
 server/usagewidget.db
+*.db
+*.db-journal
+
+# Xcode / macOS
+ios/DerivedData/
+**/xcuserdata/
+**/*.xcuserstate
+.DS_Store
+*.moved-aside
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+
+# Secrets — never commit
+**/AuthKey_*.p8
+**/env
+.env
+.env.*
