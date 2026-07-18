@@ -4,9 +4,20 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 )
+
+var errInvalidDemoPatch = errors.New("invalid demo patch")
+
+// demoActionMu serializes the state read/commit portion of an admitted demo
+// action. SQLite transactions make writes atomic; this lock also prevents a
+// slow poll from committing an earlier state snapshot over a concurrent PATCH.
+// Stores are intentionally single-process for this demo surface.
+var demoActionMu sync.Mutex
 
 const demoSchema = `
 CREATE TABLE IF NOT EXISTS demo_state (
@@ -60,7 +71,7 @@ type DemoEventRecord struct {
 	After        *EventValue        `json:"after,omitempty"`
 	Deduplicated bool               `json:"deduplicated"`
 	Delivery     DemoDeliveryResult `json:"delivery"`
-	DemoRunID    string             `json:"demoRunID,omitempty"`
+	DemoRunID    string             `json:"-"`
 
 	// Compatibility fields for the preliminary Task 1 store contract. New code
 	// uses Key and Type; these fields are never included in persisted JSON.
@@ -116,6 +127,26 @@ func (s *Store) seedDefaultDemoState(now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("store: seed demo state: %w", err)
 	}
+	// Task 1--4 payloads predate revisions. Upgrade only the zero-value
+	// historical payload, preserving every other field and its timestamp.
+	var existing string
+	if err := s.db.QueryRow(`SELECT payload FROM demo_state WHERE key = 'demo.state'`).Scan(&existing); err != nil {
+		return fmt.Errorf("store: load seeded demo state: %w", err)
+	}
+	var persisted DemoState
+	if err := json.Unmarshal([]byte(existing), &persisted); err != nil {
+		return fmt.Errorf("store: decode seeded demo state: %w", err)
+	}
+	if persisted.Revision == 0 {
+		persisted.Revision = 1
+		upgraded, err := json.Marshal(persisted)
+		if err != nil {
+			return fmt.Errorf("store: encode migrated demo state: %w", err)
+		}
+		if _, err := s.db.Exec(`UPDATE demo_state SET payload = ? WHERE key = 'demo.state'`, string(upgraded)); err != nil {
+			return fmt.Errorf("store: migrate demo state revision: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -153,6 +184,211 @@ func (s *Store) SaveDemoState(state DemoState, actionIDs ...string) error {
 		return fmt.Errorf("store: save demo state: %w", err)
 	}
 	return nil
+}
+
+// DemoActionCommit is the one durable boundary for an admitted demo action.
+// State, the optional run and feed records, and the required audit record are
+// committed together or not at all.
+type DemoActionCommit struct {
+	State  *DemoState
+	Run    *DemoRun
+	Events []DemoEvent
+	Audit  DemoAuditEntry
+}
+
+func (s *Store) CommitDemoAction(commit DemoActionCommit) (int64, error) {
+	if commit.Audit.DemoRunID == "" || commit.Audit.Identity == "" || commit.Audit.Route == "" || commit.Audit.Action == "" || commit.Audit.Result == "" || commit.Audit.CreatedAt.IsZero() {
+		return 0, fmt.Errorf("store: incomplete demo action audit")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("store: begin demo action: %w", err)
+	}
+	defer tx.Rollback()
+	if commit.State != nil {
+		if err := saveDemoStateTx(tx, *commit.State, commit.Audit.DemoRunID); err != nil {
+			return 0, err
+		}
+	}
+	var runID int64
+	if commit.Run != nil {
+		var err error
+		runID, err = saveDemoExecutionTx(tx, *commit.Run, commit.Events)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO demo_audit (demo_run_id, identity, route, action, result, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, commit.Audit.DemoRunID, commit.Audit.Identity, commit.Audit.Route, commit.Audit.Action, commit.Audit.Result, commit.Audit.Status, commit.Audit.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return 0, fmt.Errorf("store: save demo action audit: %w", err)
+	}
+	if err := pruneDemoRetention(tx, "demo_audit", time.Now().UTC()); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit demo action: %w", err)
+	}
+	return runID, nil
+}
+
+// CommitDemoPatch performs the entire PATCH read/apply/revision/action write
+// while holding the demo action lock. It prevents lost updates between distinct
+// idempotency keys without broadening the normal Store API.
+func (s *Store) CommitDemoPatch(action DemoAction, patch DemoStatePatch, status int, result string) (DemoState, error) {
+	demoActionMu.Lock()
+	defer demoActionMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return DemoState{}, fmt.Errorf("store: begin demo patch: %w", err)
+	}
+	defer tx.Rollback()
+	state, err := loadDemoStateTx(tx)
+	if err != nil {
+		return DemoState{}, err
+	}
+	next, err := ApplyDemoPatch(state, patch, time.Now().UTC())
+	if err != nil {
+		return DemoState{}, fmt.Errorf("%w: %v", errInvalidDemoPatch, err)
+	}
+	next.LastDemoRunID = action.ID
+	if err := saveDemoStateTx(tx, next, action.ID); err != nil {
+		return DemoState{}, err
+	}
+	run := DemoRun{StartedAt: action.CreatedAt, CompletedAt: time.Now().UTC(), Success: status < 400, DemoRunID: action.ID}
+	event := DemoEvent{Key: "demo.manual_poll:" + action.ID, Type: "manual_poll", CreatedAt: run.CompletedAt, DemoRunID: action.ID}
+	if _, err := saveDemoExecutionTx(tx, run, []DemoEvent{event}); err != nil {
+		return DemoState{}, err
+	}
+	audit := DemoAuditEntry{DemoRunID: action.ID, Identity: action.Identity, Route: action.Route, Action: action.Route, Result: result, Status: status, CreatedAt: action.CreatedAt}
+	if _, err := tx.Exec(`INSERT INTO demo_audit (demo_run_id, identity, route, action, result, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, audit.DemoRunID, audit.Identity, audit.Route, audit.Action, audit.Result, audit.Status, audit.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return DemoState{}, fmt.Errorf("store: save demo patch audit: %w", err)
+	}
+	if err := pruneDemoRetention(tx, "demo_audit", time.Now().UTC()); err != nil {
+		return DemoState{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return DemoState{}, fmt.Errorf("store: commit demo patch: %w", err)
+	}
+	return next, nil
+}
+
+// CommitDemoActionWithCurrentState records a non-patch action against the
+// state current at commit time. It is used after synchronous alert delivery so
+// an earlier state read cannot overwrite a concurrent PATCH.
+func (s *Store) CommitDemoActionWithCurrentState(commit DemoActionCommit) (int64, error) {
+	demoActionMu.Lock()
+	defer demoActionMu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("store: begin demo current-state action: %w", err)
+	}
+	defer tx.Rollback()
+	state, err := loadDemoStateTx(tx)
+	if err != nil {
+		return 0, err
+	}
+	state.LastDemoRunID = commit.Audit.DemoRunID
+	commit.State = &state
+	if commit.Audit.DemoRunID == "" || commit.Audit.Identity == "" || commit.Audit.Route == "" || commit.Audit.Action == "" || commit.Audit.Result == "" || commit.Audit.CreatedAt.IsZero() {
+		return 0, fmt.Errorf("store: incomplete demo action audit")
+	}
+	if err := saveDemoStateTx(tx, state, commit.Audit.DemoRunID); err != nil {
+		return 0, err
+	}
+	var runID int64
+	if commit.Run != nil {
+		runID, err = saveDemoExecutionTx(tx, *commit.Run, commit.Events)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO demo_audit (demo_run_id, identity, route, action, result, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, commit.Audit.DemoRunID, commit.Audit.Identity, commit.Audit.Route, commit.Audit.Action, commit.Audit.Result, commit.Audit.Status, commit.Audit.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return 0, fmt.Errorf("store: save demo action audit: %w", err)
+	}
+	if err := pruneDemoRetention(tx, "demo_audit", time.Now().UTC()); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit demo current-state action: %w", err)
+	}
+	return runID, nil
+}
+
+func loadDemoStateTx(tx *sql.Tx) (DemoState, error) {
+	var payload string
+	if err := tx.QueryRow(`SELECT payload FROM demo_state WHERE key = 'demo.state'`).Scan(&payload); err != nil {
+		return DemoState{}, fmt.Errorf("store: load demo state: %w", err)
+	}
+	var state DemoState
+	if err := json.Unmarshal([]byte(payload), &state); err != nil {
+		return DemoState{}, fmt.Errorf("store: decode demo state: %w", err)
+	}
+	return state, nil
+}
+
+func saveDemoStateTx(tx *sql.Tx, state DemoState, demoRunID string) error {
+	if err := validateDemoState(state, state.UpdatedAt); err != nil {
+		return fmt.Errorf("store: validate demo state: %w", err)
+	}
+	state.LastDemoRunID = demoRunID
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("store: encode demo state: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO demo_state (key, payload, updated_at, last_demo_run_id) VALUES ('demo.state', ?, ?, ?) ON CONFLICT(key) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at, last_demo_run_id = excluded.last_demo_run_id`, string(payload), state.UpdatedAt.Format(time.RFC3339Nano), demoRunID); err != nil {
+		return fmt.Errorf("store: save demo state: %w", err)
+	}
+	return nil
+}
+
+func saveDemoExecutionTx(tx *sql.Tx, run DemoRun, events []DemoEvent) (int64, error) {
+	if run.StartedAt.IsZero() || run.CompletedAt.IsZero() || run.CompletedAt.Before(run.StartedAt) {
+		return 0, fmt.Errorf("store: invalid demo execution timestamps")
+	}
+	canonical := make([]DemoEventRecord, len(events))
+	for i, event := range events {
+		normalized, err := normalizeDemoEventRecord(event)
+		if err != nil {
+			return 0, fmt.Errorf("store: demo event %d: %w", i, err)
+		}
+		canonical[i] = normalized
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		return 0, fmt.Errorf("store: encode demo run: %w", err)
+	}
+	res, err := tx.Exec(`INSERT INTO demo_runs (started_at, completed_at, success, payload, demo_run_id) VALUES (?, ?, ?, ?, ?)`, run.StartedAt.Format(time.RFC3339Nano), run.CompletedAt.Format(time.RFC3339Nano), run.Success, string(payload), run.DemoRunID)
+	if err != nil {
+		return 0, fmt.Errorf("store: save demo execution run: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("store: get demo run id: %w", err)
+	}
+	run.ID = id
+	payload, err = json.Marshal(run)
+	if err != nil {
+		return 0, fmt.Errorf("store: encode identified demo run: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE demo_runs SET payload = ? WHERE id = ?`, string(payload), id); err != nil {
+		return 0, fmt.Errorf("store: update demo run payload: %w", err)
+	}
+	for i := range canonical {
+		canonical[i].RunID, canonical[i].DemoRunID = &id, run.DemoRunID
+		payload, err := json.Marshal(canonical[i])
+		if err != nil {
+			return 0, fmt.Errorf("store: encode demo event: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO demo_event_log (run_id, event_key, event_type, created_at, payload, demo_run_id) VALUES (?, ?, ?, ?, ?, ?)`, id, canonical[i].Key, canonical[i].Type, canonical[i].CreatedAt.Format(time.RFC3339Nano), string(payload), canonical[i].DemoRunID); err != nil {
+			return 0, fmt.Errorf("store: append demo execution event: %w", err)
+		}
+	}
+	if err := pruneDemoRetention(tx, "demo_event_log", time.Now().UTC()); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(`DELETE FROM demo_runs WHERE id NOT IN (SELECT id FROM demo_runs ORDER BY id DESC LIMIT 20)`); err != nil {
+		return 0, fmt.Errorf("store: prune demo execution runs: %w", err)
+	}
+	return id, nil
 }
 
 func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
@@ -277,11 +513,11 @@ func (s *Store) SaveDemoExecution(run DemoRun, events []DemoEvent) (int64, error
 func (s *Store) LatestDemoRun() (DemoRun, bool, error) {
 	var run DemoRun
 	var id int64
-	var startedAt, completedAt, payload string
+	var startedAt, completedAt, payload, demoRunID string
 	var success int
 	err := s.db.QueryRow(
-		`SELECT id, started_at, completed_at, success, payload FROM demo_runs ORDER BY id DESC LIMIT 1`,
-	).Scan(&id, &startedAt, &completedAt, &success, &payload)
+		`SELECT id, started_at, completed_at, success, payload, demo_run_id FROM demo_runs ORDER BY id DESC LIMIT 1`,
+	).Scan(&id, &startedAt, &completedAt, &success, &payload, &demoRunID)
 	if err == sql.ErrNoRows {
 		return DemoRun{}, false, nil
 	}
@@ -292,6 +528,7 @@ func (s *Store) LatestDemoRun() (DemoRun, bool, error) {
 		return DemoRun{}, false, fmt.Errorf("store: decode demo run: %w", err)
 	}
 	run.ID = id
+	run.DemoRunID = demoRunID
 	run.StartedAt, err = time.Parse(time.RFC3339Nano, startedAt)
 	if err != nil {
 		return DemoRun{}, false, fmt.Errorf("store: parse demo run started_at: %w", err)
@@ -351,7 +588,7 @@ func (s *Store) ListDemoEvents(limit int) ([]DemoEvent, error) {
 		limit = 100
 	}
 	rows, err := s.db.Query(
-		`SELECT id, run_id, event_key, event_type, created_at, payload FROM demo_event_log ORDER BY id DESC LIMIT ?`,
+		`SELECT id, run_id, event_key, event_type, created_at, payload, demo_run_id FROM demo_event_log ORDER BY id DESC LIMIT ?`,
 		limit,
 	)
 	if err != nil {
@@ -363,10 +600,10 @@ func (s *Store) ListDemoEvents(limit int) ([]DemoEvent, error) {
 	for rows.Next() {
 		var event DemoEvent
 		var runID sql.NullInt64
-		var createdAt, payload string
+		var createdAt, payload, demoRunID string
 		var id int64
 		var key, eventType string
-		if err := rows.Scan(&id, &runID, &key, &eventType, &createdAt, &payload); err != nil {
+		if err := rows.Scan(&id, &runID, &key, &eventType, &createdAt, &payload, &demoRunID); err != nil {
 			return nil, fmt.Errorf("store: scan demo event: %w", err)
 		}
 		if err := json.Unmarshal([]byte(payload), &event); err != nil {
@@ -375,6 +612,7 @@ func (s *Store) ListDemoEvents(limit int) ([]DemoEvent, error) {
 		event.ID = id
 		event.Key = key
 		event.Type = eventType
+		event.DemoRunID = demoRunID
 		if runID.Valid {
 			value := runID.Int64
 			event.RunID = &value
@@ -457,18 +695,40 @@ func (s *Store) DemoTargets(allowed []string) ([]Device, error) {
 	if len(allowed) == 0 {
 		return []Device{}, nil
 	}
-	allowedSet := make(map[string]bool, len(allowed))
+	placeholders := make([]string, 0, len(allowed))
+	args := make([]any, 0, len(allowed))
 	for _, id := range allowed {
-		allowedSet[id] = true
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
 	}
-	devices, err := s.ListDevices()
+	rows, err := s.db.Query(`SELECT device_id, apns_token, widget_token, updated_at FROM devices WHERE device_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("store: select demo targets: %w", err)
 	}
-	targets := make([]Device, 0, len(devices))
-	for _, d := range devices {
-		if allowedSet[d.DeviceID] {
+	defer rows.Close()
+	byID := make(map[string]Device, len(allowed))
+	for rows.Next() {
+		var d Device
+		var updatedAt string
+		if err := rows.Scan(&d.DeviceID, &d.APNsToken, &d.WidgetToken, &updatedAt); err != nil {
+			return nil, fmt.Errorf("store: scan demo target: %w", err)
+		}
+		parsed, err := time.Parse(time.RFC3339, updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: parse demo target: %w", err)
+		}
+		d.UpdatedAt = parsed
+		byID[d.DeviceID] = d
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterate demo targets: %w", err)
+	}
+	targets := make([]Device, 0, len(byID))
+	seen := make(map[string]bool, len(allowed))
+	for _, id := range allowed {
+		if d, ok := byID[id]; ok && !seen[id] {
 			targets = append(targets, d)
+			seen[id] = true
 		}
 	}
 	return targets, nil

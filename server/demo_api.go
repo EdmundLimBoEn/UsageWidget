@@ -52,9 +52,11 @@ type DemoAPI struct {
 	idem           *idempotencyStore
 }
 
+func (d *DemoAPI) SetNotifier(notifier Notifier) { d.notifier = notifier }
+
 // NewDemoAPI intentionally has no bearer middleware. Cloudflare Access is the
 // listener's trust boundary and supplies the configured identity header.
-func NewDemoAPI(store *Store, poller DemoPoller, cfg Config) *DemoAPI {
+func NewDemoAPI(store *Store, poller DemoPoller, cfg Config, notifiers ...Notifier) *DemoAPI {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		panic("crypto/rand unavailable: " + err.Error())
@@ -69,7 +71,11 @@ func NewDemoAPI(store *Store, poller DemoPoller, cfg Config) *DemoAPI {
 	}
 	// ponytail: this process-lifetime key intentionally invalidates outstanding
 	// tokens on restart. Use an env-provided key if restart stability is needed.
-	return &DemoAPI{store: store, poller: poller, deviceIDs: ids, identityHeader: header, csrfKey: key, limiter: newRateLimiter(), idem: newIdempotencyStore()}
+	var notifier Notifier
+	if len(notifiers) > 0 {
+		notifier = notifiers[0]
+	}
+	return &DemoAPI{store: store, poller: poller, notifier: notifier, deviceIDs: ids, identityHeader: header, csrfKey: key, limiter: newRateLimiter(), idem: newIdempotencyStore()}
 }
 
 func (d *DemoAPI) Handler() http.Handler {
@@ -87,11 +93,22 @@ func (d *DemoAPI) Handler() http.Handler {
 
 func (d *DemoAPI) withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Cache-Control", "no-store")
-		next.ServeHTTP(w, r)
+		capture := &demoResponseWriter{header: make(http.Header), limit: 256 << 10}
+		capture.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
+		capture.Header().Set("X-Content-Type-Options", "nosniff")
+		capture.Header().Set("Referrer-Policy", "no-referrer")
+		capture.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(capture, r)
+		if capture.overflow {
+			capture = &demoResponseWriter{header: capture.header, limit: 256 << 10, status: http.StatusInternalServerError}
+			capture.Header().Set("Content-Type", "application/json")
+			_, _ = capture.Write([]byte(`{"error":"demo state unavailable"}` + "\n"))
+		}
+		for k, values := range capture.header {
+			w.Header()[k] = append([]string(nil), values...)
+		}
+		w.WriteHeader(capture.statusCode())
+		_, _ = w.Write(capture.body.Bytes())
 	})
 }
 
@@ -128,7 +145,11 @@ func (d *DemoAPI) handleGetDemo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := demoViewResponse{State: state, CSRFToken: issueCSRFToken(d.csrfKey, time.Now().UTC()), DeliveryHealth: "ok"}
-	if run, ok, err := d.store.LatestDemoRun(); err == nil && ok {
+	if run, ok, err := d.store.LatestDemoRun(); err != nil {
+		d.logError("load latest demo run", err)
+		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
+		return
+	} else if ok {
 		view.Pipeline = &run
 		if !run.Success || run.Delivery.Alerts.Failed > 0 || run.Delivery.WidgetRefresh.Failed > 0 {
 			view.DeliveryHealth = "degraded"
@@ -169,21 +190,20 @@ func (d *DemoAPI) handleDemoEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 type demoMutationHandler func(http.ResponseWriter, *http.Request, DemoAction)
-type demoTargetsContextKey struct{}
 
 func (d *DemoAPI) guardMutation(route string, next demoMutationHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !sameOriginOK(r) {
-			d.writeError(w, http.StatusForbidden, demoErrInvalidRequest)
+			d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
 			return
 		}
 		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 		if err != nil || mediaType != "application/json" {
-			d.writeError(w, http.StatusUnsupportedMediaType, demoErrInvalidRequest)
+			d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
 			return
 		}
 		if err := verifyCSRFToken(d.csrfKey, r.Header.Get("X-Demo-CSRF"), time.Now().UTC()); err != nil {
-			d.writeError(w, http.StatusForbidden, demoErrInvalidRequest)
+			d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
 			return
 		}
 		identity := strings.TrimSpace(r.Header.Get(d.identityHeader))
@@ -226,29 +246,40 @@ func (d *DemoAPI) guardMutation(route string, next demoMutationHandler) http.Han
 			d.writeError(w, http.StatusConflict, demoErrInProgress)
 			return
 		}
-		targets, err := d.store.DemoTargets(d.allowlist())
-		if err != nil {
-			d.logError("select demo targets", err)
-			d.writeError(w, http.StatusServiceUnavailable, demoErrDelivery)
-			d.idem.complete(idemKey, http.StatusServiceUnavailable, []byte("{\"error\":\"demo delivery enqueue failed\"}\n"), time.Now().UTC())
-			return
-		}
 		action := NewDemoAction(identity, route, time.Now().UTC())
 		capture := &demoResponseWriter{header: make(http.Header), limit: 64 << 10}
-		next(capture, r.WithContext(context.WithValue(r.Context(), demoTargetsContextKey{}, targets)), action)
+		committed := &demoActionCommitted{}
+		next(capture, r.WithContext(context.WithValue(r.Context(), demoActionCommittedKey{}, committed)), action)
+		if capture.overflow {
+			capture = &demoResponseWriter{header: make(http.Header), limit: 64 << 10, status: http.StatusInternalServerError}
+			d.writeError(capture, http.StatusInternalServerError, demoErrState)
+		}
+		if !committed.value {
+			result := "ok"
+			if capture.statusCode() >= 400 {
+				result = demoResult(capture.body.Bytes())
+			}
+			if _, err := d.store.CommitDemoAction(DemoActionCommit{Audit: DemoAuditEntry{DemoRunID: action.ID, Identity: identity, Route: route, Action: route, Result: result, Status: capture.statusCode(), CreatedAt: action.CreatedAt}}); err != nil {
+				d.logError("save demo audit", err)
+				capture = &demoResponseWriter{header: make(http.Header), limit: 64 << 10, status: http.StatusServiceUnavailable}
+				d.writeError(capture, http.StatusServiceUnavailable, demoErrState)
+			}
+		}
 		for k, values := range capture.header {
 			w.Header()[k] = append([]string(nil), values...)
 		}
 		w.WriteHeader(capture.statusCode())
 		_, _ = w.Write(capture.body.Bytes())
 		d.idem.complete(idemKey, capture.statusCode(), capture.body.Bytes(), time.Now().UTC())
-		result := "ok"
-		if capture.statusCode() >= 400 {
-			result = demoResult(capture.body.Bytes())
-		}
-		if err := d.store.SaveDemoAudit(DemoAuditEntry{DemoRunID: action.ID, Identity: identity, Route: route, Action: route, Result: result, Status: capture.statusCode(), CreatedAt: action.CreatedAt}); err != nil {
-			d.logError("save demo audit", err)
-		}
+	}
+}
+
+type demoActionCommittedKey struct{}
+type demoActionCommitted struct{ value bool }
+
+func markDemoActionCommitted(r *http.Request) {
+	if committed, _ := r.Context().Value(demoActionCommittedKey{}).(*demoActionCommitted); committed != nil {
+		committed.value = true
 	}
 }
 
@@ -274,29 +305,17 @@ func (d *DemoAPI) handlePatchDemo(w http.ResponseWriter, r *http.Request, action
 		d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
 		return
 	}
-	state, err := d.store.LoadDemoState()
+	next, err := d.store.CommitDemoPatch(action, patch, http.StatusOK, "ok")
 	if err != nil {
-		d.logError("load demo patch state", err)
+		if errors.Is(err, errInvalidDemoPatch) {
+			d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
+			return
+		}
+		d.logError("commit demo patch", err)
 		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
 		return
 	}
-	next, err := ApplyDemoPatch(state, patch, time.Now().UTC())
-	if err != nil {
-		d.logError("apply demo patch", err)
-		d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
-		return
-	}
-	next.LastDemoRunID = action.ID
-	if err := d.store.SaveDemoState(next, action.ID); err != nil {
-		d.logError("save demo state", err)
-		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
-		return
-	}
-	if err := d.recordStandaloneAction(action, "manual_poll"); err != nil {
-		d.logError("record demo patch action", err)
-		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
-		return
-	}
+	markDemoActionCommitted(r)
 	d.writeJSON(w, http.StatusOK, map[string]any{"state": next, "demoRunID": action.ID, "deliveryHealth": "ok"})
 }
 
@@ -308,30 +327,29 @@ func (d *DemoAPI) handleDemoPoll(w http.ResponseWriter, r *http.Request, action 
 		d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
 		return
 	}
-	targets, _ := r.Context().Value(demoTargetsContextKey{}).([]Device)
+	targets, err := d.store.DemoTargets(d.allowlist())
+	if err != nil {
+		d.logError("select demo targets", err)
+		d.writeError(w, http.StatusServiceUnavailable, demoErrDelivery)
+		return
+	}
 	if d.poller == nil {
 		d.writeError(w, http.StatusServiceUnavailable, demoErrPoll)
 		return
 	}
-	state, err := d.store.LoadDemoState()
-	if err != nil {
-		d.logError("load demo poll state", err)
-		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
-		return
-	}
-	if request.ExpectedRevision != 0 && request.ExpectedRevision != state.Revision {
-		d.writeJSON(w, http.StatusConflict, map[string]any{"error": demoErrRevision, "currentRevision": state.Revision})
-		return
-	}
-	state.LastDemoRunID = action.ID
-	if err := d.store.SaveDemoState(state, action.ID); err != nil {
-		d.logError("save demo poll state", err)
-		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
-	pipeline, err := d.poller.PollDemoNow(ctx, request.ExpectedRevision, action.ID, targets)
+	var pipeline DemoPipelineResult
+	if actionPoller, ok := d.poller.(interface {
+		PollDemoAction(context.Context, int64, DemoAction, []Device) (DemoPipelineResult, error)
+	}); ok {
+		pipeline, err = actionPoller.PollDemoAction(ctx, request.ExpectedRevision, action, targets)
+		if err == nil {
+			markDemoActionCommitted(r)
+		}
+	} else {
+		pipeline, err = d.poller.PollDemoNow(ctx, request.ExpectedRevision, action.ID, targets)
+	}
 	if errors.Is(err, ErrDemoRevisionConflict) {
 		state, loadErr := d.store.LoadDemoState()
 		if loadErr != nil {
@@ -361,29 +379,50 @@ func (d *DemoAPI) handleDemoAlert(w http.ResponseWriter, r *http.Request, action
 		d.writeError(w, http.StatusBadRequest, demoErrInvalidRequest)
 		return
 	}
-	if err := d.recordStandaloneAction(action, "test_alert"); err != nil {
-		d.logError("record demo alert", err)
+	targets, err := d.store.DemoTargets(d.allowlist())
+	if err != nil {
+		d.logError("select demo alert targets", err)
+		d.writeError(w, http.StatusServiceUnavailable, demoErrDelivery)
+		return
+	}
+	if len(targets) > 0 && d.notifier == nil {
+		d.writeError(w, http.StatusBadGateway, demoErrDelivery)
+		return
+	}
+	delivery := DemoDeliveryResult{}
+	if d.notifier != nil {
+		ev := demoEvent()
+		for _, target := range targets {
+			if target.APNsToken != "" {
+				delivery.Alerts.Attempted++
+				if err := d.notifier.SendAlert(r.Context(), target.APNsToken, ev); err != nil {
+					delivery.Alerts.Failed++
+					d.logError("send demo alert", err)
+				} else {
+					delivery.Alerts.Succeeded++
+				}
+			}
+			if target.WidgetToken != "" {
+				delivery.WidgetRefresh.Attempted++
+				if err := d.notifier.SendWidgetRefresh(r.Context(), target.WidgetToken); err != nil {
+					delivery.WidgetRefresh.Failed++
+					d.logError("refresh demo widget", err)
+				} else {
+					delivery.WidgetRefresh.Succeeded++
+				}
+			}
+		}
+	}
+	now := time.Now().UTC()
+	run := DemoRun{StartedAt: action.CreatedAt, CompletedAt: now, Success: true, Delivery: delivery, DemoRunID: action.ID}
+	event := DemoEvent{Key: "demo.test_alert:" + action.ID, Type: "test_alert", CreatedAt: now, Delivery: delivery, DemoRunID: action.ID}
+	if _, err := d.store.CommitDemoActionWithCurrentState(DemoActionCommit{Run: &run, Events: []DemoEvent{event}, Audit: DemoAuditEntry{DemoRunID: action.ID, Identity: action.Identity, Route: action.Route, Action: action.Route, Result: "ok", Status: http.StatusOK, CreatedAt: action.CreatedAt}}); err != nil {
+		d.logError("commit demo alert", err)
 		d.writeError(w, http.StatusServiceUnavailable, demoErrState)
 		return
 	}
-	d.writeJSON(w, http.StatusOK, map[string]any{"delivery": DemoDeliveryResult{}, "demoRunID": action.ID, "deliveryHealth": "ok"})
-}
-
-func (d *DemoAPI) recordStandaloneAction(action DemoAction, eventType string) error {
-	state, err := d.store.LoadDemoState()
-	if err != nil {
-		return err
-	}
-	state.LastDemoRunID = action.ID
-	if err := d.store.SaveDemoState(state, action.ID); err != nil {
-		return err
-	}
-	run := DemoPipelineResult{StartedAt: action.CreatedAt, CompletedAt: time.Now().UTC(), Success: true, DemoRunID: action.ID}
-	event := DemoEventRecord{Key: "demo." + eventType + ":" + action.ID, Type: eventType, CreatedAt: run.CompletedAt, Delivery: DemoDeliveryResult{}, DemoRunID: action.ID}
-	if _, err := d.store.SaveDemoExecution(run, []DemoEvent{event}); err != nil {
-		return err
-	}
-	return nil
+	markDemoActionCommitted(r)
+	d.writeJSON(w, http.StatusOK, map[string]any{"delivery": delivery, "demoRunID": action.ID, "deliveryHealth": deliveryHealth(run)})
 }
 
 func (d *DemoAPI) allowlist() []string {
@@ -420,10 +459,11 @@ func decodeDemoRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
 }
 
 type demoResponseWriter struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
-	limit  int
+	header   http.Header
+	body     bytes.Buffer
+	status   int
+	limit    int
+	overflow bool
 }
 
 func (w *demoResponseWriter) Header() http.Header { return w.header }
@@ -437,6 +477,7 @@ func (w *demoResponseWriter) Write(p []byte) (int, error) {
 		w.status = http.StatusOK
 	}
 	if w.body.Len()+len(p) > w.limit {
+		w.overflow = true
 		return 0, io.ErrShortWrite
 	}
 	return w.body.Write(p)

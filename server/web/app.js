@@ -5,6 +5,9 @@ function mutationHeaders(csrfToken, idempotencyKey) {
 function makePollBody(state) {
   return { expectedRevision: state.revision };
 }
+function makePollBodyForPatch(response) {
+  return makePollBody(response.state);
+}
 function makePatch(values) {
   const primary = { usedPercent: values.primaryUsed };
   if (values.primaryResetsAt !== undefined) {
@@ -506,13 +509,13 @@ function mutationRequest(path, body) {
 async function patchDemo(patch) {
   return mutationRequest("/v1/demo", patch);
 }
-async function pollDemo() {
+async function pollDemo(state, patched) {
   if (!latestView) {
     throw new Error("Demo state is not loaded.");
   }
   return requestJSON("/v1/demo/poll", {
     method: "POST",
-    body: JSON.stringify(makePollBody(latestView.state)),
+    body: JSON.stringify(patched ? makePollBodyForPatch(patched) : makePollBody(state)),
     headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID())
   });
 }
@@ -544,8 +547,8 @@ applyPollButton.addEventListener("click", () => {
     return;
   }
   perform("Applying demo state and polling.", async () => {
-    await patchDemo(patch);
-    await pollDemo();
+    const patched = await patchDemo(patch);
+    await pollDemo(patched.state, patched);
     await loadAll();
   }, "Demo state applied and poll complete.");
 });
@@ -555,8 +558,8 @@ surpriseResetButton.addEventListener("click", () => {
     if (!canSurpriseReset(baseline)) {
       throw new Error("Surprise reset requires a normalized primary baseline of at least 20%.");
     }
-    await patchDemo({ primary: { usedPercent: 5 } });
-    await pollDemo();
+    const patched = await patchDemo({ primary: { usedPercent: 5 } });
+    await pollDemo(patched.state, patched);
     await loadAll();
   }, "Surprise reset complete.");
 });

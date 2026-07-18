@@ -58,7 +58,7 @@ type DemoPipelineResult struct {
 	Stages             []DemoPipelineStage `json:"stages"`
 	Delivery           DemoDeliveryResult  `json:"delivery"`
 	Error              string              `json:"error,omitempty"`
-	DemoRunID          string              `json:"demoRunID,omitempty"`
+	DemoRunID          string              `json:"-"`
 }
 
 var demoPipelineStageIDs = []string{"demo_state", "normalize", "snapshot_persisted", "event_engine", "apns"}
@@ -109,25 +109,38 @@ func (p *Poller) interval() time.Duration {
 func (p *Poller) PollNow(ctx context.Context) PollResult {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.poll(ctx, false, nil, "", nil, nil).poll
+	return p.poll(ctx, false, nil, "", nil, nil, nil).poll
 }
 
 // PollDemoNow runs persisted demo state through the same serialized poll
 // pipeline as real and scheduled polls, recording the detailed outcome.
 func (p *Poller) PollDemoNow(ctx context.Context, expectedRevision int64, demoRunID string, targets []Device) (DemoPipelineResult, error) {
+	return p.pollDemo(ctx, expectedRevision, demoRunID, targets, nil)
+}
+
+// PollDemoAction is used by the embedded API. The action's audit row is
+// committed with its state/run/events after the serialized demo poll.
+func (p *Poller) PollDemoAction(ctx context.Context, expectedRevision int64, action DemoAction, targets []Device) (DemoPipelineResult, error) {
+	return p.pollDemo(ctx, expectedRevision, action.ID, targets, &action)
+}
+
+func (p *Poller) pollDemo(ctx context.Context, expectedRevision int64, demoRunID string, targets []Device, action *DemoAction) (DemoPipelineResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// Keep a demo state snapshot from being committed over a concurrent PATCH.
+	demoActionMu.Lock()
+	defer demoActionMu.Unlock()
 	if targets == nil {
 		targets = []Device{}
 	}
 	state, err := p.store.LoadDemoState()
 	if err != nil {
-		return p.poll(ctx, true, targets, demoRunID, nil, err).demo, nil
+		return p.poll(ctx, true, targets, demoRunID, nil, err, action).demo, nil
 	}
 	if expectedRevision != 0 && expectedRevision != state.Revision {
 		return DemoPipelineResult{}, fmt.Errorf("%w: current %d", ErrDemoRevisionConflict, state.Revision)
 	}
-	return p.poll(ctx, true, targets, demoRunID, &state, nil).demo, nil
+	return p.poll(ctx, true, targets, demoRunID, &state, nil, action).demo, nil
 }
 
 // pollOnce is retained for package-internal compatibility and participates in
@@ -135,7 +148,7 @@ func (p *Poller) PollDemoNow(ctx context.Context, expectedRevision int64, demoRu
 func (p *Poller) pollOnce(ctx context.Context) PollResult {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.poll(ctx, false, nil, "", nil, nil).poll
+	return p.poll(ctx, false, nil, "", nil, nil, nil).poll
 }
 
 type pollExecution struct {
@@ -145,7 +158,7 @@ type pollExecution struct {
 	dispatched dispatchResult
 }
 
-func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, demoRunID string, demoState *DemoState, demoStateErr error) pollExecution {
+func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, demoRunID string, demoState *DemoState, demoStateErr error, action *DemoAction) pollExecution {
 	now := time.Now().UTC()
 	execution := pollExecution{poll: PollResult{PolledAt: now}}
 	if recordDemo {
@@ -153,23 +166,23 @@ func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, de
 		execution.demo.DemoRunID = demoRunID
 		started := time.Now()
 		if demoStateErr != nil {
-			return p.failPoll(execution, "demo_state", started, demoStateErr, false)
+			return p.failPoll(execution, "demo_state", started, demoStateErr, false, action, nil)
 		}
 		setDemoStage(&execution.demo, "demo_state", DemoStageOK, "", started)
-		execution = p.pollWithInputs(ctx, execution, now, demoState, targets)
+		execution = p.pollWithInputs(ctx, execution, now, demoState, targets, action)
 	} else {
-		execution = p.pollWithInputs(ctx, execution, now, nil, nil)
+		execution = p.pollWithInputs(ctx, execution, now, nil, nil, nil)
 	}
 	return execution
 }
 
-func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, now time.Time, demoState *DemoState, targets []Device) pollExecution {
+func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, now time.Time, demoState *DemoState, targets []Device, action *DemoAction) pollExecution {
 	recordDemo := demoState != nil
 	settings, err := loadSettings(p.store)
 	if err != nil {
 		log.Printf("poller: load settings: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "normalize", time.Now(), err, false)
+			return p.failPoll(execution, "normalize", time.Now(), err, false, action, demoState)
 		}
 		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
@@ -181,7 +194,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	if err != nil {
 		log.Printf("poller: fetch failed, keeping last snapshot: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "normalize", normalizeStarted, fmt.Errorf("fetch upstream: %w", err), false)
+			return p.failPoll(execution, "normalize", normalizeStarted, fmt.Errorf("fetch upstream: %w", err), false, action, demoState)
 		}
 		p.markStale()
 		p.recordPollResult(now, false)
@@ -192,7 +205,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		body, err = InjectDemoProvider(body, *demoState)
 		if err != nil {
 			log.Printf("poller: inject demo provider: %v", err)
-			return p.failPoll(execution, "normalize", normalizeStarted, err, false)
+			return p.failPoll(execution, "normalize", normalizeStarted, err, false, action, demoState)
 		}
 	}
 
@@ -200,7 +213,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	if err != nil {
 		log.Printf("poller: normalize failed: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "normalize", normalizeStarted, err, false)
+			return p.failPoll(execution, "normalize", normalizeStarted, err, false, action, demoState)
 		}
 		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
@@ -216,7 +229,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	if err != nil {
 		log.Printf("poller: marshal snapshot: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false)
+			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false, action, demoState)
 		}
 		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
@@ -225,7 +238,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	if err := p.store.SaveSnapshot(now, payload); err != nil {
 		log.Printf("poller: save snapshot: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false)
+			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false, action, demoState)
 		}
 		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
@@ -241,7 +254,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	if err != nil {
 		log.Printf("poller: process events: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "event_engine", eventStarted, err, changed)
+			return p.failPoll(execution, "event_engine", eventStarted, err, changed, action, demoState)
 		}
 		p.recordPollResult(now, true)
 		execution.poll.Success = true
@@ -267,7 +280,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		setDemoStage(&execution.demo, "apns", execution.dispatched.Status, execution.dispatched.Detail, dispatchStarted)
 		execution.demo.Success = true
 		execution.demo.CompletedAt = time.Now().UTC()
-		p.persistDemoExecution(&execution)
+		p.persistDemoExecution(&execution, action, demoState)
 	}
 	p.recordPollResult(now, true)
 	execution.poll.Success = true
@@ -367,7 +380,7 @@ func setDemoStage(result *DemoPipelineResult, id string, status DemoStageStatus,
 	}
 }
 
-func (p *Poller) failPoll(execution pollExecution, stage string, started time.Time, err error, snapshotChanged bool) pollExecution {
+func (p *Poller) failPoll(execution pollExecution, stage string, started time.Time, err error, snapshotChanged bool, action *DemoAction, state *DemoState) pollExecution {
 	execution.poll.Error = err.Error()
 	execution.poll.SnapshotChanged = snapshotChanged
 	execution.demo.Success = false
@@ -377,11 +390,30 @@ func (p *Poller) failPoll(execution pollExecution, stage string, started time.Ti
 	execution.demo.CompletedAt = time.Now().UTC()
 	setDemoStage(&execution.demo, stage, DemoStageFailed, err.Error(), started)
 	p.recordPollResult(execution.poll.PolledAt, false)
-	p.persistDemoExecution(&execution)
+	p.persistDemoExecution(&execution, action, state)
 	return execution
 }
 
-func (p *Poller) persistDemoExecution(execution *pollExecution) {
+func (p *Poller) persistDemoExecution(execution *pollExecution, action *DemoAction, state *DemoState) {
+	if action != nil {
+		if state != nil {
+			copy := *state
+			copy.LastDemoRunID = action.ID
+			state = &copy
+		}
+		id, err := p.store.CommitDemoAction(DemoActionCommit{
+			State: state, Run: &execution.demo, Events: demoEventRecords(execution, true),
+			Audit: DemoAuditEntry{DemoRunID: action.ID, Identity: action.Identity, Route: action.Route, Action: action.Route, Result: demoActionResult(execution.demo), Status: httpStatusForDemo(execution.demo), CreatedAt: action.CreatedAt},
+		})
+		if err != nil {
+			log.Printf("poller: commit demo action: %v", err)
+			execution.demo.Success = false
+			execution.demo.Error = joinErrors(execution.demo.Error, "persist demo action")
+		} else {
+			execution.demo.ID = id
+		}
+		return
+	}
 	persistStarted := time.Now()
 	records := demoEventRecords(execution, true)
 	id, err := p.store.SaveDemoExecution(execution.demo, records)
@@ -408,6 +440,19 @@ func (p *Poller) persistDemoExecution(execution *pollExecution) {
 	}
 	log.Printf("poller: save demo persistence failure: %v", retryErr)
 	execution.demo.Error = joinErrors(execution.demo.Error, fmt.Sprintf("persist demo failure record: %v", retryErr))
+}
+
+func demoActionResult(run DemoPipelineResult) string {
+	if run.Success {
+		return "ok"
+	}
+	return "failed"
+}
+func httpStatusForDemo(run DemoPipelineResult) int {
+	if run.Success {
+		return 200
+	}
+	return 502
 }
 
 func demoEventRecords(execution *pollExecution, includeOutcomes bool) []DemoEvent {

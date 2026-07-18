@@ -1,11 +1,64 @@
 package server
 
 import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestOpenStoreMigratesHistoricalRevisionZeroState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "historical.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := DefaultDemoState(time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
+	state.Revision = 0
+	payload, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE demo_state (key TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL); CREATE TABLE demo_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, completed_at TEXT NOT NULL, success INTEGER NOT NULL, payload TEXT NOT NULL); CREATE TABLE demo_event_log (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, event_key TEXT NOT NULL, event_type TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL); INSERT INTO demo_state (key, payload, updated_at) VALUES ('demo.state', ?, ?)`, string(payload), state.UpdatedAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	got, err := store.LoadDemoState()
+	if err != nil || got.Revision != 1 {
+		t.Fatalf("state=%+v err=%v", got, err)
+	}
+	for _, tableColumn := range [][2]string{{"demo_state", "last_demo_run_id"}, {"demo_runs", "demo_run_id"}, {"demo_event_log", "demo_run_id"}} {
+		rows, err := store.db.Query(`PRAGMA table_info(` + tableColumn[0] + `)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for rows.Next() {
+			var cid, notNull, pk int
+			var name, typ string
+			var dflt any
+			if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+				t.Fatal(err)
+			}
+			found = found || name == tableColumn[1]
+		}
+		rows.Close()
+		if !found {
+			t.Fatalf("missing migrated %s.%s", tableColumn[0], tableColumn[1])
+		}
+	}
+}
 
 func TestDemoStateSeedAndPersistence(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "demo.db")
@@ -227,6 +280,62 @@ func TestDemoAuditRetention(t *testing.T) {
 	}
 	if len(audit) != 1 || audit[0].DemoRunID != "edge" {
 		t.Fatalf("audit=%+v", audit)
+	}
+}
+
+func TestDemoRetentionKeepsNewestThousand(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Now().UTC()
+	events := make([]DemoEvent, 1001)
+	for i := range events {
+		events[i] = DemoEvent{Key: "demo.test_alert", Type: "test_alert", CreatedAt: now.Add(time.Duration(i) * time.Nanosecond)}
+	}
+	if err := store.AppendDemoEvents(events); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_event_log`).Scan(&count); err != nil || count != 1000 {
+		t.Fatalf("event count=%d err=%v", count, err)
+	}
+	for i := 0; i < 1001; i++ {
+		if err := store.SaveDemoAudit(DemoAuditEntry{DemoRunID: fmt.Sprintf("audit-%d", i), Identity: "id", Route: "patch", Action: "patch", Result: "ok", Status: 200, CreatedAt: now.Add(time.Duration(i) * time.Nanosecond)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_audit`).Scan(&count); err != nil || count != 1000 {
+		t.Fatalf("audit count=%d err=%v", count, err)
+	}
+}
+
+func TestCommitDemoActionRollsBackWhenAuditFails(t *testing.T) {
+	store := openTestStore(t)
+	before, err := store.LoadDemoState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`CREATE TRIGGER fail_demo_audit BEFORE INSERT ON demo_audit BEGIN SELECT RAISE(ABORT, 'audit failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	next := before
+	next.LastDemoRunID = "failed"
+	run := DemoRun{StartedAt: time.Now().UTC(), CompletedAt: time.Now().UTC().Add(time.Nanosecond), Success: true, DemoRunID: "failed"}
+	_, err = store.CommitDemoAction(DemoActionCommit{State: &next, Run: &run, Events: []DemoEvent{{Key: "demo.test_alert:failed", Type: "test_alert", CreatedAt: run.CompletedAt, DemoRunID: "failed"}}, Audit: DemoAuditEntry{DemoRunID: "failed", Identity: "id", Route: "alert", Action: "alert", Result: "ok", Status: 200, CreatedAt: run.StartedAt}})
+	if err == nil {
+		t.Fatal("expected audit failure")
+	}
+	after, err := store.LoadDemoState()
+	if err != nil || after != before {
+		t.Fatalf("state=%+v before=%+v err=%v", after, before, err)
+	}
+	var runs, events int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_event_log`).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 0 || events != 0 {
+		t.Fatalf("partial action persisted: runs=%d events=%d", runs, events)
 	}
 }
 

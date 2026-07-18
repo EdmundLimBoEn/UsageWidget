@@ -2,6 +2,8 @@ package server
 
 import (
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -81,5 +83,53 @@ func TestIdempotencyStoreReplayAndEvict(t *testing.T) {
 	_, owner, _ = s.reserve(key, now.Add(16*time.Minute))
 	if !owner {
 		t.Fatal("expired entry did not evict")
+	}
+}
+
+func TestIdempotencyStoreNeverEvictsLiveReservation(t *testing.T) {
+	now := time.Now()
+	s := &idempotencyStore{ttl: time.Minute, cap: 1, entries: make(map[idempotencyKey]idempotencyEntry)}
+	first := idempotencyKey{"id", "patch", "first"}
+	_, owner, _ := s.reserve(first, now)
+	if !owner {
+		t.Fatal("first reservation not owner")
+	}
+	// TTL and capacity pressure must not turn this reservation into a second
+	// owner. A live reservation is intentionally allowed to exceed the cache cap.
+	_, owner, _ = s.reserve(first, now.Add(2*time.Minute))
+	if owner {
+		t.Fatal("expired live reservation was replaced")
+	}
+	_, owner, _ = s.reserve(idempotencyKey{"other", "patch", "second"}, now.Add(2*time.Minute))
+	if !owner {
+		t.Fatal("unrelated request should be admitted without evicting live reservation")
+	}
+	_, owner, _ = s.reserve(first, now.Add(2*time.Minute))
+	if owner {
+		t.Fatal("capacity pressure evicted live reservation")
+	}
+}
+
+func TestIdempotencyStoreConcurrentDuplicate(t *testing.T) {
+	s := newIdempotencyStore()
+	key := idempotencyKey{"id", "patch", "same"}
+	start := make(chan struct{})
+	var owners atomic.Int32
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, owner, _ := s.reserve(key, time.Now())
+			if owner {
+				owners.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if owners.Load() != 1 {
+		t.Fatalf("owners=%d, want one", owners.Load())
 	}
 }

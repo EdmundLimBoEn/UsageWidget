@@ -117,10 +117,16 @@ export interface DemoPollResponse {
   deliveryHealth: "ok" | "degraded";
 }
 
-export interface DemoMutationResponse {
-  state?: DemoState;
-  demoRunID: string;
-  deliveryHealth: "ok" | "degraded";
+export interface DemoPatchResponse {
+	state: DemoState;
+	demoRunID: string;
+	deliveryHealth: "ok" | "degraded";
+}
+
+export interface DemoAlertResponse {
+	delivery: DemoDeliveryResult;
+	demoRunID: string;
+	deliveryHealth: "ok" | "degraded";
 }
 
 export function mutationHeaders(csrfToken: string, idempotencyKey: string): Record<string, string> {
@@ -129,6 +135,12 @@ export function mutationHeaders(csrfToken: string, idempotencyKey: string): Reco
 
 export function makePollBody(state: DemoState): { expectedRevision: number } {
   return { expectedRevision: state.revision };
+}
+
+// A PATCH advances the revision, so chained apply/poll actions must derive the
+// poll precondition from the returned state rather than the stale loaded view.
+export function makePollBodyForPatch(response: DemoPatchResponse): { expectedRevision: number } {
+  return makePollBody(response.state);
 }
 
 export interface DemoEventsResponse {

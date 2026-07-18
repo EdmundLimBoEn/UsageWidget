@@ -3,17 +3,19 @@ import {
   filterEvents,
   formatBeforeAfter,
   formatDelivery,
-  makePatch,
+	makePatch,
 	makePollBody,
+	makePollBodyForPatch,
   mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
   type DemoDeliveryResult,
+	type DemoAlertResponse,
   type DemoEventRecord,
   type DemoEventsResponse,
   type DemoPipelineResult,
   type DemoPollResponse,
-  type DemoMutationResponse,
+	type DemoPatchResponse,
   type DemoProvider,
   type DemoState,
   type DemoStatePatch,
@@ -472,26 +474,26 @@ function mutationRequest<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
-async function patchDemo(patch: DemoStatePatch): Promise<DemoMutationResponse> {
-  return mutationRequest<DemoMutationResponse>("/v1/demo", patch);
+async function patchDemo(patch: DemoStatePatch): Promise<DemoPatchResponse> {
+  return mutationRequest<DemoPatchResponse>("/v1/demo", patch);
 }
 
-async function pollDemo(): Promise<DemoPollResponse> {
+async function pollDemo(state: DemoState, patched?: DemoPatchResponse): Promise<DemoPollResponse> {
   if (!latestView) {
     throw new Error("Demo state is not loaded.");
   }
   return requestJSON<DemoPollResponse>("/v1/demo/poll", {
     method: "POST",
-    body: JSON.stringify(makePollBody(latestView.state)),
+    body: JSON.stringify(patched ? makePollBodyForPatch(patched) : makePollBody(state)),
     headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID()),
   });
 }
 
-async function alertDemo(): Promise<DemoMutationResponse> {
+async function alertDemo(): Promise<DemoAlertResponse> {
   if (!latestView) {
     throw new Error("Demo state is not loaded.");
   }
-  return requestJSON<DemoMutationResponse>("/v1/demo/alert", {
+  return requestJSON<DemoAlertResponse>("/v1/demo/alert", {
     method: "POST",
     body: "{}",
     headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID()),
@@ -519,8 +521,8 @@ applyPollButton.addEventListener("click", () => {
     return;
   }
   void perform("Applying demo state and polling.", async () => {
-    await patchDemo(patch);
-    await pollDemo();
+    const patched = await patchDemo(patch);
+    await pollDemo(patched.state, patched);
     await loadAll();
   }, "Demo state applied and poll complete.");
 });
@@ -531,8 +533,8 @@ surpriseResetButton.addEventListener("click", () => {
     if (!canSurpriseReset(baseline)) {
       throw new Error("Surprise reset requires a normalized primary baseline of at least 20%.");
     }
-    await patchDemo({ primary: { usedPercent: 5 } });
-    await pollDemo();
+    const patched = await patchDemo({ primary: { usedPercent: 5 } });
+    await pollDemo(patched.state, patched);
     await loadAll();
   }, "Surprise reset complete.");
 });

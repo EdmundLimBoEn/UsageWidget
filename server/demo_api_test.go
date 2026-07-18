@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type demoPollerStub struct {
@@ -63,10 +66,28 @@ func TestDemoRouteAllowlist(t *testing.T) {
 	}
 }
 
+func TestDemoRouteMethodsAreAllowlisted(t *testing.T) {
+	api := NewDemoAPI(openTestStore(t), nil, Config{})
+	for _, tc := range []struct{ method, path string }{{http.MethodPost, "/"}, {http.MethodPatch, "/styles.css"}, {http.MethodDelete, "/v1/demo"}, {http.MethodGet, "/v1/demo/poll"}, {http.MethodPost, "/v1/demo/events"}, {http.MethodGet, "/v1/demo/alert"}} {
+		rec := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s %s = %d, want 405", tc.method, tc.path, rec.Code)
+		}
+	}
+	for _, path := range []string{"/v1/demo/unknown", "/not-embedded"} {
+		rec := httptest.NewRecorder()
+		api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s = %d, want 404", path, rec.Code)
+		}
+	}
+}
+
 func TestDemoMutationRequiresCSRF(t *testing.T) {
 	api := NewDemoAPI(openTestStore(t), nil, Config{})
 	rec := demoMutation(t, api, http.MethodPatch, "/v1/demo", "", "operator@example.test", "one", `{}`)
-	if rec.Code != http.StatusForbidden {
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
@@ -83,7 +104,7 @@ func TestDemoMutationRejectsCrossOrigin(t *testing.T) {
 	req.Header.Set("Idempotency-Key", "one")
 	rec := httptest.NewRecorder()
 	api.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d", rec.Code)
 	}
 }
@@ -97,6 +118,25 @@ func TestDemoMutationRejectsMissingOrBlankIdentity403(t *testing.T) {
 		}
 	}
 }
+func TestDemoMutationRequiresIdempotencyKey(t *testing.T) {
+	api := NewDemoAPI(openTestStore(t), nil, Config{})
+	rec := demoMutation(t, api, http.MethodPatch, "/v1/demo", demoCSRF(t, api), "operator", "", `{}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), demoErrInvalidRequest) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+func TestDemoMutationRateLimited(t *testing.T) {
+	api := NewDemoAPI(openTestStore(t), nil, Config{})
+	api.limiter = &rateLimiter{window: time.Minute, perID: 1, global: 100}
+	token := demoCSRF(t, api)
+	if rec := demoMutation(t, api, http.MethodPatch, "/v1/demo", token, "operator", "one", `{}`); rec.Code != http.StatusOK {
+		t.Fatal(rec.Code)
+	}
+	rec := demoMutation(t, api, http.MethodPatch, "/v1/demo", token, "operator", "two", `{}`)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" || !strings.Contains(rec.Body.String(), demoErrRate) {
+		t.Fatalf("status=%d header=%q body=%s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
+	}
+}
 func TestDemoIdempotentReplay(t *testing.T) {
 	store := openTestStore(t)
 	api := NewDemoAPI(store, nil, Config{})
@@ -108,6 +148,69 @@ func TestDemoIdempotentReplay(t *testing.T) {
 	}
 	state, err := store.LoadDemoState()
 	if err != nil || state.Revision != 2 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+}
+
+func TestDemoIdempotentConcurrentDuplicate(t *testing.T) {
+	store := openTestStore(t)
+	api := NewDemoAPI(store, nil, Config{})
+	token := demoCSRF(t, api)
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- demoMutation(t, api, http.MethodPatch, "/v1/demo", token, "operator", "same", `{}`)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	var replay int
+	for result := range results {
+		if result.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", result.Code, result.Body.String())
+		}
+		if result.Header().Get("Idempotency-Replayed") == "true" {
+			replay++
+		}
+	}
+	if replay != 1 {
+		t.Fatalf("replays=%d, want one", replay)
+	}
+	state, err := store.LoadDemoState()
+	if err != nil || state.Revision != 2 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+}
+
+func TestDemoConcurrentDistinctPatchesDoNotLoseUpdates(t *testing.T) {
+	store := openTestStore(t)
+	api := NewDemoAPI(store, nil, Config{})
+	token := demoCSRF(t, api)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	requests := []struct{ key, body string }{{"a", `{"stale":true}`}, {"b", `{"providerError":true}`}}
+	for _, request := range requests {
+		request := request
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := demoMutation(t, api, http.MethodPatch, "/v1/demo", token, "operator", request.key, request.body)
+			if rec.Code != http.StatusOK {
+				t.Errorf("%s: %d %s", request.key, rec.Code, rec.Body.String())
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	state, err := store.LoadDemoState()
+	if err != nil || state.Revision != 3 || !state.Stale || !state.ProviderError {
 		t.Fatalf("state=%+v err=%v", state, err)
 	}
 }
@@ -142,13 +245,48 @@ func TestDemoMutationReturnsAndPersistsDemoRunID(t *testing.T) {
 		t.Fatalf("events=%+v err=%v", events, err)
 	}
 }
+
+func TestEmbeddedDemoAlertDeliversOnlyExplicitTargets(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.UpsertDevice("allowed", "alert-1", "widget-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDevice("other", "alert-2", "widget-2"); err != nil {
+		t.Fatal(err)
+	}
+	api := NewDemoAPI(store, nil, Config{DemoDeviceIDs: []string{"allowed"}})
+	notifier := &recordingNotifier{}
+	api.SetNotifier(notifier)
+	rec := demoMutation(t, api, http.MethodPost, "/v1/demo/alert", demoCSRF(t, api), "operator", "alert", `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Delivery DemoDeliveryResult `json:"delivery"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Delivery.Alerts.Succeeded != 1 || response.Delivery.WidgetRefresh.Succeeded != 1 || len(notifier.alerts) != 1 || notifier.widgets != 1 {
+		t.Fatalf("delivery=%+v alerts=%d widgets=%d", response.Delivery, len(notifier.alerts), notifier.widgets)
+	}
+	api = NewDemoAPI(store, nil, Config{})
+	api.SetNotifier(notifier)
+	rec = demoMutation(t, api, http.MethodPost, "/v1/demo/alert", demoCSRF(t, api), "operator", "empty", `{}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("empty status=%d", rec.Code)
+	}
+	if len(notifier.alerts) != 1 || notifier.widgets != 1 {
+		t.Fatal("empty allowlist delivered")
+	}
+}
 func TestDemoPollRevisionConflict(t *testing.T) {
 	store := openTestStore(t)
-	poller := &demoPollerStub{}
+	poller := &demoPollerStub{err: fmt.Errorf("%w: current 1", ErrDemoRevisionConflict)}
 	api := NewDemoAPI(store, poller, Config{})
 	token := demoCSRF(t, api)
 	rec := demoMutation(t, api, http.MethodPost, "/v1/demo/poll", token, "operator", "poll", `{"expectedRevision":999}`)
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), demoErrRevision) || poller.calls != 0 {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), demoErrRevision) || poller.calls != 1 {
 		t.Fatalf("status=%d body=%s calls=%d", rec.Code, rec.Body.String(), poller.calls)
 	}
 }
@@ -161,10 +299,10 @@ func TestDemoPatchRejectsOversizeBody(t *testing.T) {
 	}
 }
 func TestDemoErrorsRedacted(t *testing.T) {
-	api := NewDemoAPI(openTestStore(t), &demoPollerStub{err: context.DeadlineExceeded}, Config{})
+	api := NewDemoAPI(openTestStore(t), &demoPollerStub{err: fmt.Errorf("poll https://secret.example/private: %w", fmt.Errorf("/absolute/private/path"))}, Config{})
 	token := demoCSRF(t, api)
 	rec := demoMutation(t, api, http.MethodPost, "/v1/demo/poll", token, "operator", "error", `{}`)
-	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "http") || strings.Contains(rec.Body.String(), "/") || !strings.Contains(rec.Body.String(), demoErrPoll) {
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "https://secret.example") || strings.Contains(rec.Body.String(), "/absolute/private/path") || !strings.Contains(rec.Body.String(), demoErrPoll) {
 		t.Fatalf("body=%s", rec.Body.String())
 	}
 }

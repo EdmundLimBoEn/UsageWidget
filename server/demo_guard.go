@@ -182,7 +182,7 @@ func (s *idempotencyStore) reserve(key idempotencyKey, now time.Time) (idempoten
 		s.entries = make(map[idempotencyKey]idempotencyEntry)
 	}
 	for k, entry := range s.entries {
-		if now.Sub(entry.createdAt) > s.ttl {
+		if entry.complete && now.Sub(entry.createdAt) > s.ttl {
 			delete(s.entries, k)
 		}
 	}
@@ -193,9 +193,14 @@ func (s *idempotencyStore) reserve(key idempotencyKey, now time.Time) (idempoten
 		var oldestKey idempotencyKey
 		var oldest time.Time
 		for k, entry := range s.entries {
-			if oldest.IsZero() || entry.createdAt.Before(oldest) {
+			if entry.complete && (oldest.IsZero() || entry.createdAt.Before(oldest)) {
 				oldestKey, oldest = k, entry.createdAt
 			}
+		}
+		// All cache slots are live reservations. Preserve them: accepting a new
+		// owner here could repeat a still-running side effect.
+		if oldest.IsZero() {
+			break
 		}
 		delete(s.entries, oldestKey)
 	}

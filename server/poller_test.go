@@ -128,6 +128,45 @@ func TestPollDemoNowRevisionConflict(t *testing.T) {
 	}
 }
 
+func TestPollDemoActionAndPatchRacePreservesPatch(t *testing.T) {
+	poller, store, _ := newPollerHarness(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	poller.codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		close(entered)
+		<-release
+		return testHTTPResponse(http.StatusOK, codexBarBody), nil
+	})}
+	pollDone := make(chan DemoPipelineResult, 1)
+	go func() {
+		result, _ := poller.PollDemoAction(context.Background(), 1, DemoAction{ID: "poll-action", Identity: "id", Route: "poll", CreatedAt: time.Now().UTC()}, nil)
+		pollDone <- result
+	}()
+	<-entered
+	patchDone := make(chan error, 1)
+	value := true
+	go func() {
+		_, err := store.CommitDemoPatch(DemoAction{ID: "patch-action", Identity: "id", Route: "patch", CreatedAt: time.Now().UTC()}, DemoStatePatch{Stale: &value}, http.StatusOK, "ok")
+		patchDone <- err
+	}()
+	select {
+	case err := <-patchDone:
+		t.Fatalf("patch committed before serialized poll: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if result := <-pollDone; result.DemoRunID != "poll-action" {
+		t.Fatalf("poll result=%+v", result)
+	}
+	if err := <-patchDone; err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.LoadDemoState()
+	if err != nil || state.Revision != 2 || !state.Stale || state.LastDemoRunID != "patch-action" {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+}
+
 func TestPollerNoRepeatEventsOnDuplicate(t *testing.T) {
 	poller, store, _ := newPollerHarness(t)
 

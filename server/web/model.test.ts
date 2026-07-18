@@ -7,6 +7,7 @@ import {
   formatDelivery,
   makePatch,
 	makePollBody,
+	makePollBodyForPatch,
 	mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
@@ -33,6 +34,7 @@ describe("demo controls", () => {
       "Content-Type": "application/json", "X-Demo-CSRF": "csrf", "Idempotency-Key": "request-id",
     });
     expect(makePollBody({ primary: { usedPercent: 1, resetsAt: "x" }, secondary: { usedPercent: 2, resetsAt: "y" }, creditsAvailable: 0, stale: false, providerError: false, updatedAt: "z", revision: 7 })).toEqual({ expectedRevision: 7 });
+		expect(makePollBodyForPatch({ state: { primary: { usedPercent: 1, resetsAt: "x" }, secondary: { usedPercent: 2, resetsAt: "y" }, creditsAvailable: 0, stale: false, providerError: false, updatedAt: "z", revision: 8 }, demoRunID: "patch", deliveryHealth: "ok" })).toEqual({ expectedRevision: 8 });
   });
   test("surprise reset requires an established primary baseline", () => {
     expect(canSurpriseReset(19)).toBe(false);
