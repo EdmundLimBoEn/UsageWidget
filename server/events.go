@@ -18,6 +18,24 @@ type Event struct {
 	ResetsAt         *time.Time
 }
 
+type EventValue struct {
+	UsedPercent      *float64   `json:"usedPercent,omitempty"`
+	ResetsAt         *time.Time `json:"resetsAt,omitempty"`
+	CreditsAvailable *int       `json:"creditsAvailable,omitempty"`
+}
+
+type EventOutcome struct {
+	Event        Event
+	Before       EventValue
+	After        EventValue
+	Deduplicated bool
+}
+
+type EventProcessResult struct {
+	Emitted  []Event
+	Outcomes []EventOutcome
+}
+
 type EventEngine struct {
 	store *Store
 }
@@ -27,30 +45,41 @@ func NewEventEngine(store *Store) *EventEngine {
 }
 
 func (e *EventEngine) Process(snap Snapshot, s Settings, now time.Time) ([]Event, error) {
+	result, err := e.ProcessDetailed(snap, s, now)
+	return result.Emitted, err
+}
+
+func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) (EventProcessResult, error) {
 	hidden := make(map[string]bool, len(s.HiddenProviders))
 	for _, id := range s.HiddenProviders {
 		hidden[id] = true
 	}
 
-	var out []Event
+	var result EventProcessResult
 	for _, p := range snap.Providers {
-		if hidden[p.ID] {
+		if hidden[p.ID] || p.Stale || p.Error != "" {
 			continue
 		}
 
 		for _, w := range p.Windows {
 			prev, had, err := e.store.GetWindowState(w.ID)
 			if err != nil {
-				return nil, err
+				return EventProcessResult{}, err
 			}
 			if had && s.NotificationsEnabled {
 				for _, ev := range detectWindowEvents(prev, w, p, s, now) {
 					claimed, err := e.claim(ev.Key)
 					if err != nil {
-						return nil, err
+						return EventProcessResult{}, err
 					}
+					result.Outcomes = append(result.Outcomes, EventOutcome{
+						Event:        ev,
+						Before:       windowEventValue(prev.UsedPercent, prev.ResetsAt),
+						After:        windowEventValue(w.UsedPercent, w.ResetsAt),
+						Deduplicated: !claimed,
+					})
 					if claimed {
-						out = append(out, ev)
+						result.Emitted = append(result.Emitted, ev)
 					}
 				}
 			}
@@ -59,19 +88,19 @@ func (e *EventEngine) Process(snap Snapshot, s Settings, now time.Time) ([]Event
 				UsedPercent: w.UsedPercent,
 				ResetsAt:    w.ResetsAt,
 			}); err != nil {
-				return nil, err
+				return EventProcessResult{}, err
 			}
 		}
 
 		if p.Credits != nil {
-			creditsID := p.ID + "#credits"
+			creditsID := creditsWindowID(p.ID)
 			prev, had, err := e.store.GetWindowState(creditsID)
 			if err != nil {
-				return nil, err
+				return EventProcessResult{}, err
 			}
 			if had && s.NotificationsEnabled && prev.CreditsAvailable != nil && p.Credits.AvailableCount > *prev.CreditsAvailable {
 				ev := Event{
-					Key:          fmt.Sprintf("credits:%s:%d", p.ID, p.Credits.AvailableCount),
+					Key:          creditsEventKey(p.ID, p.Credits.AvailableCount),
 					Type:         "credits_increase",
 					Title:        "Reset credits available",
 					ProviderID:   p.ID,
@@ -79,10 +108,17 @@ func (e *EventEngine) Process(snap Snapshot, s Settings, now time.Time) ([]Event
 				}
 				claimed, err := e.claim(ev.Key)
 				if err != nil {
-					return nil, err
+					return EventProcessResult{}, err
 				}
+				count := p.Credits.AvailableCount
+				result.Outcomes = append(result.Outcomes, EventOutcome{
+					Event:        ev,
+					Before:       EventValue{CreditsAvailable: prev.CreditsAvailable},
+					After:        EventValue{CreditsAvailable: &count},
+					Deduplicated: !claimed,
+				})
 				if claimed {
-					out = append(out, ev)
+					result.Emitted = append(result.Emitted, ev)
 				}
 			}
 			count := p.Credits.AvailableCount
@@ -90,11 +126,29 @@ func (e *EventEngine) Process(snap Snapshot, s Settings, now time.Time) ([]Event
 				WindowID:         creditsID,
 				CreditsAvailable: &count,
 			}); err != nil {
-				return nil, err
+				return EventProcessResult{}, err
 			}
 		}
 	}
-	return out, nil
+	return result, nil
+}
+
+func windowEventValue(usedPercent float64, resetsAt *time.Time) EventValue {
+	return EventValue{UsedPercent: &usedPercent, ResetsAt: resetsAt}
+}
+
+func creditsWindowID(providerID string) string {
+	if providerID == "demo" {
+		return "demo.credits"
+	}
+	return providerID + "#credits"
+}
+
+func creditsEventKey(providerID string, count int) string {
+	if providerID == "demo" {
+		return fmt.Sprintf("demo.event.credits:%d", count)
+	}
+	return fmt.Sprintf("credits:%s:%d", providerID, count)
 }
 
 func (e *EventEngine) claim(key string) (bool, error) {
@@ -115,12 +169,12 @@ func detectWindowEvents(prev WindowState, w Window, p Provider, s Settings, now 
 	var evs []Event
 
 	if prev.UsedPercent < s.EarlyThresholdPct && w.UsedPercent >= s.EarlyThresholdPct {
-		evs = append(evs, mkEvent("early_threshold", "Approaching limit", eventKey("early", w.ID, w.ResetsAt), p, w))
+		evs = append(evs, mkEvent("early_threshold", "Approaching limit", providerEventKey("early", p.ID, w.ID, w.ResetsAt), p, w))
 	}
 
 	prevRemaining := 100 - prev.UsedPercent
 	if prevRemaining > s.DangerThresholdPct && w.RemainingPercent <= s.DangerThresholdPct {
-		evs = append(evs, mkEvent("danger_threshold", "Almost out", eventKey("danger", w.ID, w.ResetsAt), p, w))
+		evs = append(evs, mkEvent("danger_threshold", "Almost out", providerEventKey("danger", p.ID, w.ID, w.ResetsAt), p, w))
 	}
 
 	if prev.ResetsAt != nil {
@@ -128,14 +182,14 @@ func detectWindowEvents(prev WindowState, w Window, p Provider, s Settings, now 
 			resetChanged := w.ResetsAt == nil || !w.ResetsAt.Equal(*prev.ResetsAt)
 			usageDropped := w.UsedPercent < prev.UsedPercent
 			if resetChanged || usageDropped {
-				evs = append(evs, mkEvent("reset", "Limit reset", eventKey("reset", w.ID, prev.ResetsAt), p, w))
+				evs = append(evs, mkEvent("reset", "Limit reset", providerEventKey("reset", p.ID, w.ID, prev.ResetsAt), p, w))
 			}
 		} else if isSurpriseReset(prev.UsedPercent, w.UsedPercent) {
 			title := "Surprise reset"
 			if p.ID == "codex" {
 				title = "Tibo blessed"
 			}
-			evs = append(evs, mkEvent("tibo_reset", title, eventKey("tibo", w.ID, prev.ResetsAt), p, w))
+			evs = append(evs, mkEvent("tibo_reset", title, providerEventKey("tibo", p.ID, w.ID, prev.ResetsAt), p, w))
 		}
 	}
 
@@ -162,6 +216,17 @@ func mkEvent(typ, title, key string, p Provider, w Window) Event {
 		RemainingPercent: w.RemainingPercent,
 		ResetsAt:         w.ResetsAt,
 	}
+}
+
+func providerEventKey(kind, providerID, windowID string, resetsAt *time.Time) string {
+	if providerID == "demo" {
+		token := "epoch"
+		if resetsAt != nil {
+			token = resetsAt.UTC().Format(time.RFC3339)
+		}
+		return fmt.Sprintf("demo.event.%s:%s:%s", kind, windowID, token)
+	}
+	return eventKey(kind, windowID, resetsAt)
 }
 
 func eventKey(kind, windowID string, resetsAt *time.Time) string {

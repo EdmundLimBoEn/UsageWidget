@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -373,15 +374,15 @@ func (a *API) handleForcePoll(w http.ResponseWriter, r *http.Request) {
 }
 
 type demoAlertResponse struct {
-	OK                bool `json:"ok"`
-	DevicesAlerted    int  `json:"devicesAlerted"`
-	WidgetsRefreshed  int  `json:"widgetsRefreshed"`
+	OK               bool `json:"ok"`
+	DevicesAlerted   int  `json:"devicesAlerted"`
+	WidgetsRefreshed int  `json:"widgetsRefreshed"`
 }
 
 func demoEvent() Event {
 	return Event{
-		Key:              "demo",
-		Type:             "demo",
+		Key:              fmt.Sprintf("demo.test_alert.%d", time.Now().UTC().UnixNano()),
+		Type:             "test_alert",
 		Title:            "UsageWidget demo",
 		ProviderID:       "demo",
 		ProviderName:     "Demo",

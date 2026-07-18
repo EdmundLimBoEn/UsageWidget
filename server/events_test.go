@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -355,5 +356,164 @@ func TestNotificationsDisabledSuppressesButAdvancesBaseline(t *testing.T) {
 	ws, ok, _ := s.GetWindowState("codex.primary")
 	if !ok || ws.UsedPercent != 15 {
 		t.Fatalf("expected baseline advanced to 15, got ok=%v used=%v", ok, ws.UsedPercent)
+	}
+}
+
+func TestProcessDetailedReturnsDeduplicatedOutcome(t *testing.T) {
+	s := openTestStore(t)
+	e := NewEventEngine(s)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(5 * time.Hour)
+	seedWindow(t, s, "demo.primary", 5, &reset)
+	snap := oneWindowSnap("demo", "Demo", "primary", "Primary", 15, &reset, now)
+
+	first, err := e.ProcessDetailed(snap, testSettings(), now)
+	if err != nil {
+		t.Fatalf("ProcessDetailed first: %v", err)
+	}
+	if len(first.Emitted) != 1 || len(first.Outcomes) != 1 || first.Outcomes[0].Deduplicated {
+		t.Fatalf("expected one newly emitted outcome, got %+v", first)
+	}
+	if first.Outcomes[0].Before.UsedPercent == nil || *first.Outcomes[0].Before.UsedPercent != 5 {
+		t.Fatalf("unexpected before value: %+v", first.Outcomes[0].Before)
+	}
+	if first.Outcomes[0].After.UsedPercent == nil || *first.Outcomes[0].After.UsedPercent != 15 {
+		t.Fatalf("unexpected after value: %+v", first.Outcomes[0].After)
+	}
+
+	// Recreate the same candidate as after a restart that retained the event claim.
+	seedWindow(t, s, "demo.primary", 5, &reset)
+	second, err := e.ProcessDetailed(snap, testSettings(), now)
+	if err != nil {
+		t.Fatalf("ProcessDetailed second: %v", err)
+	}
+	if len(second.Emitted) != 0 || len(second.Outcomes) != 1 || !second.Outcomes[0].Deduplicated {
+		t.Fatalf("expected one deduplicated outcome and no emitted event, got %+v", second)
+	}
+}
+
+func TestStaleDemoProviderDoesNotEmitOrAdvanceBaseline(t *testing.T) {
+	s := openTestStore(t)
+	e := NewEventEngine(s)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	seedWindow(t, s, "demo.primary", 5, nil)
+	snap := oneWindowSnap("demo", "Demo", "primary", "Primary", 95, nil, now)
+	snap.Providers[0].Stale = true
+
+	result, err := e.ProcessDetailed(snap, testSettings(), now)
+	if err != nil {
+		t.Fatalf("ProcessDetailed: %v", err)
+	}
+	if len(result.Emitted) != 0 || len(result.Outcomes) != 0 {
+		t.Fatalf("stale provider produced events: %+v", result)
+	}
+	ws, ok, err := s.GetWindowState("demo.primary")
+	if err != nil || !ok || ws.UsedPercent != 5 {
+		t.Fatalf("stale provider advanced baseline: ok=%v state=%+v err=%v", ok, ws, err)
+	}
+}
+
+func TestErroredProviderDoesNotEmitOrAdvanceBaseline(t *testing.T) {
+	s := openTestStore(t)
+	e := NewEventEngine(s)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	seedWindow(t, s, "demo.primary", 5, nil)
+	snap := oneWindowSnap("demo", "Demo", "primary", "Primary", 95, nil, now)
+	snap.Providers[0].Error = "demo provider unavailable"
+
+	result, err := e.ProcessDetailed(snap, testSettings(), now)
+	if err != nil {
+		t.Fatalf("ProcessDetailed: %v", err)
+	}
+	if len(result.Emitted) != 0 || len(result.Outcomes) != 0 {
+		t.Fatalf("errored provider produced events: %+v", result)
+	}
+	ws, ok, err := s.GetWindowState("demo.primary")
+	if err != nil || !ok || ws.UsedPercent != 5 {
+		t.Fatalf("errored provider advanced baseline: ok=%v state=%+v err=%v", ok, ws, err)
+	}
+}
+
+func TestDemoEventKeysAreNamespaced(t *testing.T) {
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(5 * time.Hour)
+
+	windowCases := []struct {
+		name        string
+		previous    float64
+		current     float64
+		previousAt  time.Time
+		currentAt   time.Time
+		wantKeyKind string
+		wantCycle   time.Time
+	}{
+		{name: "early", previous: 5, current: 15, previousAt: reset, currentAt: reset, wantKeyKind: "early", wantCycle: reset},
+		{name: "danger", previous: 50, current: 95, previousAt: reset, currentAt: reset, wantKeyKind: "danger", wantCycle: reset},
+		{name: "reset", previous: 80, current: 5, previousAt: now.Add(-time.Hour), currentAt: reset, wantKeyKind: "reset", wantCycle: now.Add(-time.Hour)},
+		{name: "tibo", previous: 60, current: 5, previousAt: reset, currentAt: reset, wantKeyKind: "tibo", wantCycle: reset},
+	}
+	for _, tc := range windowCases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := openTestStore(t)
+			e := NewEventEngine(s)
+			seedWindow(t, s, "demo.primary", tc.previous, &tc.previousAt)
+			result, err := e.ProcessDetailed(oneWindowSnap("demo", "Demo", "primary", "Primary", tc.current, &tc.currentAt, now), testSettings(), now)
+			if err != nil {
+				t.Fatalf("ProcessDetailed: %v", err)
+			}
+			want := "demo.event." + tc.wantKeyKind + ":demo.primary:" + tc.wantCycle.Format(time.RFC3339)
+			if len(result.Emitted) != 1 || result.Emitted[0].Key != want || !strings.HasPrefix(result.Emitted[0].Key, "demo.") {
+				t.Fatalf("unexpected demo event key: %+v, want %q", result.Emitted, want)
+			}
+		})
+	}
+
+	t.Run("credits", func(t *testing.T) {
+		s := openTestStore(t)
+		e := NewEventEngine(s)
+		if _, err := e.ProcessDetailed(creditsSnap("demo", 1, now), testSettings(), now); err != nil {
+			t.Fatalf("baseline: %v", err)
+		}
+		if _, ok, err := s.GetWindowState("demo.credits"); err != nil || !ok {
+			t.Fatalf("expected demo.credits baseline: ok=%v err=%v", ok, err)
+		}
+		if _, ok, err := s.GetWindowState("demo#credits"); err != nil || ok {
+			t.Fatalf("unexpected legacy demo credits baseline: ok=%v err=%v", ok, err)
+		}
+		result, err := e.ProcessDetailed(creditsSnap("demo", 3, now), testSettings(), now)
+		if err != nil {
+			t.Fatalf("ProcessDetailed: %v", err)
+		}
+		if len(result.Emitted) != 1 || result.Emitted[0].Key != "demo.event.credits:3" {
+			t.Fatalf("unexpected demo credits event: %+v", result.Emitted)
+		}
+		outcome := result.Outcomes[0]
+		if outcome.Before.CreditsAvailable == nil || *outcome.Before.CreditsAvailable != 1 || outcome.After.CreditsAvailable == nil || *outcome.After.CreditsAvailable != 3 {
+			t.Fatalf("unexpected credits outcome values: %+v", outcome)
+		}
+	})
+}
+
+func TestRealProviderKeysRemainUnchanged(t *testing.T) {
+	s := openTestStore(t)
+	e := NewEventEngine(s)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(5 * time.Hour)
+	seedWindow(t, s, "codex.primary", 5, &reset)
+
+	result, err := e.ProcessDetailed(oneWindowSnap("codex", "Codex", "primary", "Primary", 15, &reset, now), testSettings(), now)
+	if err != nil {
+		t.Fatalf("ProcessDetailed: %v", err)
+	}
+	want := "early:codex.primary:" + reset.Format(time.RFC3339)
+	if len(result.Emitted) != 1 || result.Emitted[0].Key != want {
+		t.Fatalf("real-provider key changed: got %+v want %q", result.Emitted, want)
+	}
+
+	if _, err := e.ProcessDetailed(creditsSnap("codex", 1, now), testSettings(), now); err != nil {
+		t.Fatalf("credits baseline: %v", err)
+	}
+	if _, ok, err := s.GetWindowState("codex#credits"); err != nil || !ok {
+		t.Fatalf("real-provider credits key changed: ok=%v err=%v", ok, err)
 	}
 }

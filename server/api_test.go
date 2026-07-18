@@ -476,13 +476,13 @@ func TestDemoAlertSendsWithoutRecordingEvents(t *testing.T) {
 	if !got.OK || got.DevicesAlerted != 1 || got.WidgetsRefreshed != 1 {
 		t.Fatalf("unexpected response: %+v", got)
 	}
-	if len(recN.alerts) != 1 || recN.alerts[0].Type != "demo" {
-		t.Fatalf("expected one demo alert, got %+v", recN.alerts)
+	if len(recN.alerts) != 1 || recN.alerts[0].Type != "test_alert" || !strings.HasPrefix(recN.alerts[0].Key, "demo.test_alert.") {
+		t.Fatalf("expected one namespaced test alert, got %+v", recN.alerts)
 	}
 	if recN.widgets != 1 {
 		t.Fatalf("expected one widget refresh, got %d", recN.widgets)
 	}
-	notified, err := store.EventNotified("demo")
+	notified, err := store.EventNotified(recN.alerts[0].Key)
 	if err != nil {
 		t.Fatalf("EventNotified: %v", err)
 	}
