@@ -49,6 +49,19 @@ final class AppModel {
         return "Updated \(RelativeTime.string(for: fetched))"
     }
 
+    var freshness: DataFreshness {
+        if isLoading { return .collecting }
+        if snapshot == nil { return errorMessage == nil ? .collecting : .unavailable }
+        if snapshot?.stale == true { return .stale }
+        if let collector = health?.collector, collector.status == "down" || collector.status == "degraded" {
+            return .stale
+        }
+        if let fetched = snapshot?.fetchedAt, Date().timeIntervalSince(fetched) > 10 * 60 {
+            return .stale
+        }
+        return .current
+    }
+
     func client() throws -> APIClient {
         guard let credentials else { throw APIError.invalidBaseURL }
         return try APIClient.make(credentials: credentials)
@@ -161,6 +174,9 @@ final class AppModel {
             let widget = widgetToken ?? store.pendingWidgetToken()
             let reg = DeviceRegistration(deviceID: deviceID, apnsToken: apnsToken, widgetToken: widget)
             _ = try await client.registerDevice(reg)
+            if widget != nil {
+                store.setPendingWidgetToken(nil)
+            }
             errorMessage = nil
         } catch {
             // Soft-fail — connection may not be configured yet.
@@ -205,4 +221,3 @@ final class AppModel {
         }
     }
 }
-

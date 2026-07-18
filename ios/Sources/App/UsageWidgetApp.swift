@@ -7,6 +7,7 @@ import WidgetKit
 struct UsageWidgetApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -14,6 +15,13 @@ struct UsageWidgetApp: App {
                 .environment(model)
                 .onAppear {
                     appDelegate.model = model
+                    Task {
+                        await model.refresh()
+                        await model.registerTokensIfNeeded()
+                    }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active, model.isConfigured else { return }
                     Task {
                         await model.refresh()
                         await model.registerTokensIfNeeded()

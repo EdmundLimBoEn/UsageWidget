@@ -292,8 +292,10 @@ func TestDevicePostRequiresDeviceID(t *testing.T) {
 	}
 }
 
-func TestHealthReportsCodexBarReachable(t *testing.T) {
+func TestHealthIsPassiveAndReportsLastPollOutcome(t *testing.T) {
+	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		w.Write([]byte(`{"providers":[]}`))
 	}))
 	defer upstream.Close()
@@ -301,6 +303,7 @@ func TestHealthReportsCodexBarReachable(t *testing.T) {
 	store := openTestStore(t)
 	cfg := Config{Token: "secret-token", CodexBarURL: upstream.URL}
 	api := NewAPI(cfg, store, NewCodexBarClient(upstream.URL))
+	api.RecordPollOutcome(PollResult{PolledAt: time.Now().UTC(), Success: true})
 
 	rec := doRequest(t, api, http.MethodGet, "/v1/health", "secret-token", nil)
 	var got healthResponse
@@ -308,7 +311,10 @@ func TestHealthReportsCodexBarReachable(t *testing.T) {
 		t.Fatalf("decode health: %v", err)
 	}
 	if !got.CodexBar {
-		t.Fatalf("expected codexbar true when upstream reachable")
+		t.Fatalf("expected codexbar true after a successful poll")
+	}
+	if requests != 0 {
+		t.Fatalf("health must not fetch upstream, got %d request(s)", requests)
 	}
 }
 

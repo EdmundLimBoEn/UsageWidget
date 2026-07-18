@@ -166,6 +166,46 @@ func TestStoreDeviceUpsertAndDelete(t *testing.T) {
 	}
 }
 
+func TestStoreClearsTokensIndependently(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.UpsertDevice("dev-1", "apns", "widget"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearWidgetToken("dev-1"); err != nil {
+		t.Fatal(err)
+	}
+	device, ok, err := s.GetDevice("dev-1")
+	if err != nil || !ok || device.APNsToken != "apns" || device.WidgetToken != "" {
+		t.Fatalf("unexpected device after widget clear: %+v ok=%v err=%v", device, ok, err)
+	}
+	if err := s.ClearAPNsToken("dev-1"); err != nil {
+		t.Fatal(err)
+	}
+	device, _, _ = s.GetDevice("dev-1")
+	if device.APNsToken != "" {
+		t.Fatalf("APNs token was not cleared: %+v", device)
+	}
+}
+
+func TestStoreRetainsBoundedPollHistory(t *testing.T) {
+	s := openTestStore(t)
+	for i := 0; i < 55; i++ {
+		if err := s.SavePollOutcome(PollResult{
+			PolledAt: time.Date(2026, 7, 18, 0, i, 0, 0, time.UTC),
+			Success:  i%2 == 0, SnapshotChanged: i == 54, DurationMS: int64(i),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	results, err := s.RecentPollOutcomes(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 50 || results[0].DurationMS != 5 || results[49].DurationMS != 54 {
+		t.Fatalf("unexpected retained poll history: first=%+v last=%+v count=%d", results[0], results[len(results)-1], len(results))
+	}
+}
+
 func TestStoreWindowStateRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	resetsAt := time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)

@@ -113,6 +113,36 @@ final class ModelsAndStoreTests: XCTestCase {
         XCTAssertEqual(a, b)
         XCTAssertFalse(a.isEmpty)
     }
+
+    func testDecodeCollectorAndWidgetHealth() throws {
+        let json = """
+        {
+          "service":"ok", "codexbar":false, "database":true, "polling":true, "apns":true,
+          "collector": {
+            "source":"codexbar-cli-sidecar", "status":"degraded",
+            "lastAttemptAt":"2026-07-18T10:00:00Z", "lastSuccessAt":"2026-07-18T09:55:00Z",
+            "durationMs":720, "consecutiveFailures":1, "lastError":"collector rate limited"
+          },
+          "widgetDelivery": {
+            "status":"warning", "attempted":1, "succeeded":0, "failed":1,
+            "lastError":"InvalidProviderToken"
+          }
+        }
+        """.data(using: .utf8)!
+        let health = try JSONCoding.decoder.decode(Health.self, from: json)
+        XCTAssertEqual(health.collector?.source, "codexbar-cli-sidecar")
+        XCTAssertEqual(health.collector?.consecutiveFailures, 1)
+        XCTAssertEqual(health.widgetDelivery?.failed, 1)
+    }
+
+    func testDecodeLegacyHealthWithoutDiagnostics() throws {
+        let json = """
+        {"service":"ok","codexbar":true,"database":true,"polling":true,"apns":false}
+        """.data(using: .utf8)!
+        let health = try JSONCoding.decoder.decode(Health.self, from: json)
+        XCTAssertNil(health.collector)
+        XCTAssertNil(health.widgetDelivery)
+    }
 }
 
 final class APIClientRequestTests: XCTestCase {

@@ -100,6 +100,8 @@ public struct Health: Codable, Equatable, Sendable {
     public var apns: Bool
     public var lastPollAt: Date?
     public var lastSuccessAt: Date?
+    public var collector: CollectorHealth?
+    public var widgetDelivery: WidgetDeliveryHealth?
 
     public init(
         service: String,
@@ -108,7 +110,9 @@ public struct Health: Codable, Equatable, Sendable {
         polling: Bool,
         apns: Bool,
         lastPollAt: Date? = nil,
-        lastSuccessAt: Date? = nil
+        lastSuccessAt: Date? = nil,
+        collector: CollectorHealth? = nil,
+        widgetDelivery: WidgetDeliveryHealth? = nil
     ) {
         self.service = service
         self.codexbar = codexbar
@@ -117,7 +121,37 @@ public struct Health: Codable, Equatable, Sendable {
         self.apns = apns
         self.lastPollAt = lastPollAt
         self.lastSuccessAt = lastSuccessAt
+        self.collector = collector
+        self.widgetDelivery = widgetDelivery
     }
+}
+
+public struct CollectorHealth: Codable, Equatable, Sendable {
+    public var source: String
+    public var status: String
+    public var lastAttemptAt: Date?
+    public var lastSuccessAt: Date?
+    public var lastChangedAt: Date?
+    public var nextAttemptAt: Date?
+    public var durationMs: Int
+    public var consecutiveFailures: Int
+    public var lastError: String?
+}
+
+public struct WidgetDeliveryHealth: Codable, Equatable, Sendable {
+    public var status: String
+    public var lastAttemptAt: Date?
+    public var attempted: Int
+    public var succeeded: Int
+    public var failed: Int
+    public var lastError: String?
+}
+
+public enum DataFreshness: Equatable, Sendable {
+    case collecting
+    case current
+    case stale
+    case unavailable
 }
 
 public struct ServerSettings: Codable, Equatable, Sendable {

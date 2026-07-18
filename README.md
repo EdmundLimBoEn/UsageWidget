@@ -6,10 +6,10 @@ over Tailscale HTTPS, with APNs alerts for thresholds, scheduled resets, surpris
 “Tibo” resets, and reset-credit increases.
 
 ```
-┌─────────────┐   Tailscale HTTPS    ┌──────────────────┐   localhost   ┌──────────┐
-│  iPhone app │ ───────────────────► │  usagewidgetd    │ ────────────► │ CodexBar │
-│  + widget   │ ◄── APNs / WidgetKit │  (Go + SQLite)   │               │  /usage  │
-└─────────────┘                      └──────────────────┘               └──────────┘
+┌─────────────┐   Tailscale HTTPS    ┌──────────────────┐  Unix socket  ┌──────────────┐
+│  iPhone app │ ───────────────────► │  usagewidgetd    │ ────────────► │ CLI collector│
+│  + widget   │ ◄── APNs / WidgetKit │  (Go + SQLite)   │               │  (CodexBar)  │
+└─────────────┘                      └──────────────────┘               └──────────────┘
 ```
 
 ## Components
@@ -28,17 +28,19 @@ credentials ever leave the Linux host.
 ```bash
 cd server
 export USAGEWIDGET_TOKEN="$(openssl rand -hex 32)"
+export CODEXBAR_URL=http://127.0.0.1:8765/usage # local-development override
 go run ./cmd/usagewidgetd
 # listens on :8377 by default
 ```
 
-Both sources honor CodexBar's in-app provider toggles, so only enabled
-providers are returned — no error rows for disabled ones:
+All sources honor CodexBar's provider toggles, so disabled providers do not
+become permanent error rows:
 
-- Default: poll `CODEXBAR_URL` (`http://127.0.0.1:8765/usage` — fast, cached
-  by CodexBar serve; do not append `?provider=all`).
-- Alternative: set `CODEXBAR_CMD="codexbar usage --json"` to shell out to the
-  CLI instead (slower — a full live fetch per poll).
+- Production default: read fresh CLI output from the isolated collector at
+  `COLLECTOR_SOCKET` (`/run/usagewidget/codexbar.sock`).
+- Development override: set `CODEXBAR_URL` to an existing CodexBar serve URL.
+- Legacy override: set `CODEXBAR_CMD="codexbar usage --json"` only when the
+  daemon account itself owns the provider sessions.
 
 Providers hidden in the app's Settings are also stripped from `/v1/snapshot`
 server-side, so the phone never receives them.
@@ -84,7 +86,7 @@ is available through `usagewidget demo-provider on|off|poll`.
 
 ### Demo flow
 
-1. CodexBar serves `/usage` on localhost on edServe.
+1. The collector runs `CodexBarCLI usage --json` as the account that owns the provider sessions.
 2. `usagewidgetd` polls on the configured interval, stores SQLite snapshots, fires
    APNs alerts + widget refreshes when data changes.
 3. iPhone (Tailscale on) connects with HTTPS URL + bearer token.

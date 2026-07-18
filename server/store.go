@@ -39,6 +39,14 @@ CREATE TABLE IF NOT EXISTS window_state (
 	credits_available INTEGER,
 	updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS poll_runs (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	polled_at TEXT NOT NULL,
+	success INTEGER NOT NULL,
+	snapshot_changed INTEGER NOT NULL,
+	duration_ms INTEGER NOT NULL,
+	error TEXT NOT NULL DEFAULT ''
+);
 `
 
 var defaultSettings = map[string]string{
@@ -147,6 +155,71 @@ func (s *Store) SaveSnapshot(fetchedAt time.Time, payload []byte) error {
 	return tx.Commit()
 }
 
+func (s *Store) SavePollOutcome(result PollResult) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("store: begin poll outcome: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
+		`INSERT INTO poll_runs (polled_at, success, snapshot_changed, duration_ms, error) VALUES (?, ?, ?, ?, ?)`,
+		result.PolledAt.Format(time.RFC3339Nano), result.Success, result.SnapshotChanged, result.DurationMS, truncateDiagnostic(result.Error, 240),
+	); err != nil {
+		return fmt.Errorf("store: save poll outcome: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM poll_runs WHERE id NOT IN (SELECT id FROM poll_runs ORDER BY id DESC LIMIT 50)`); err != nil {
+		return fmt.Errorf("store: prune poll outcomes: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (s *Store) LatestPollOutcome() (PollResult, bool, error) {
+	var result PollResult
+	var polledAt string
+	err := s.db.QueryRow(
+		`SELECT polled_at, success, snapshot_changed, duration_ms, error FROM poll_runs ORDER BY id DESC LIMIT 1`,
+	).Scan(&polledAt, &result.Success, &result.SnapshotChanged, &result.DurationMS, &result.Error)
+	if err == sql.ErrNoRows {
+		return PollResult{}, false, nil
+	}
+	if err != nil {
+		return PollResult{}, false, fmt.Errorf("store: latest poll outcome: %w", err)
+	}
+	result.PolledAt, err = time.Parse(time.RFC3339Nano, polledAt)
+	if err != nil {
+		return PollResult{}, false, fmt.Errorf("store: parse poll outcome: %w", err)
+	}
+	return result, true, nil
+}
+
+func (s *Store) RecentPollOutcomes(limit int) ([]PollResult, error) {
+	if limit < 1 || limit > 50 {
+		limit = 50
+	}
+	rows, err := s.db.Query(
+		`SELECT polled_at, success, snapshot_changed, duration_ms, error FROM (SELECT * FROM poll_runs ORDER BY id DESC LIMIT ?) ORDER BY id ASC`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store: recent poll outcomes: %w", err)
+	}
+	defer rows.Close()
+	var results []PollResult
+	for rows.Next() {
+		var result PollResult
+		var polledAt string
+		if err := rows.Scan(&polledAt, &result.Success, &result.SnapshotChanged, &result.DurationMS, &result.Error); err != nil {
+			return nil, fmt.Errorf("store: scan poll outcome: %w", err)
+		}
+		result.PolledAt, err = time.Parse(time.RFC3339Nano, polledAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: parse poll outcome: %w", err)
+		}
+		results = append(results, result)
+	}
+	return results, rows.Err()
+}
+
 func (s *Store) LatestSnapshot() (fetchedAt time.Time, payload []byte, ok bool, err error) {
 	var fetchedAtStr, payloadStr string
 	row := s.db.QueryRow(`SELECT fetched_at, payload FROM snapshots ORDER BY id DESC LIMIT 1`)
@@ -230,6 +303,22 @@ func (s *Store) DeleteDevice(deviceID string) error {
 	_, err := s.db.Exec(`DELETE FROM devices WHERE device_id = ?`, deviceID)
 	if err != nil {
 		return fmt.Errorf("store: delete device: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ClearAPNsToken(deviceID string) error {
+	_, err := s.db.Exec(`UPDATE devices SET apns_token = '', updated_at = ? WHERE device_id = ?`, time.Now().UTC().Format(time.RFC3339), deviceID)
+	if err != nil {
+		return fmt.Errorf("store: clear APNs token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ClearWidgetToken(deviceID string) error {
+	_, err := s.db.Exec(`UPDATE devices SET widget_token = '', updated_at = ? WHERE device_id = ?`, time.Now().UTC().Format(time.RFC3339), deviceID)
+	if err != nil {
+		return fmt.Errorf("store: clear widget token: %w", err)
 	}
 	return nil
 }

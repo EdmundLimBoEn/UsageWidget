@@ -22,8 +22,11 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.CodexBarURL != "http://127.0.0.1:8765/usage" {
+	if cfg.CodexBarURL != "" {
 		t.Fatalf("unexpected default CodexBarURL: %s", cfg.CodexBarURL)
+	}
+	if cfg.CollectorSocket != "/run/usagewidget/codexbar.sock" {
+		t.Fatalf("unexpected collector socket: %s", cfg.CollectorSocket)
 	}
 	if cfg.DBPath != "./usagewidget.db" {
 		t.Fatalf("unexpected default DBPath: %s", cfg.DBPath)

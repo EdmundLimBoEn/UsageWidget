@@ -17,6 +17,7 @@ type PollResult struct {
 	Events          int       `json:"events"`
 	SnapshotChanged bool      `json:"snapshotChanged"`
 	Error           string    `json:"error,omitempty"`
+	DurationMS      int64     `json:"durationMs"`
 }
 
 type DemoStageStatus string
@@ -86,15 +87,46 @@ func NewPoller(store *Store, codexbar *CodexBarClient, notifier Notifier, api *A
 }
 
 func (p *Poller) Run(ctx context.Context) {
-	p.PollNow(ctx)
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(p.interval()):
+		cycleStarted := time.Now()
+		result := p.PollNow(ctx)
+		if !result.Success && retryablePollError(result.Error) {
+			retryAt := time.Now().Add(30 * time.Second)
+			p.setNextPollAt(retryAt)
+			if !waitUntil(ctx, retryAt) {
+				return
+			}
 			p.PollNow(ctx)
 		}
+
+		next := cycleStarted.Add(p.interval())
+		if !next.After(time.Now()) {
+			next = time.Now().Add(p.interval())
+		}
+		p.setNextPollAt(next)
+		if !waitUntil(ctx, next) {
+			return
+		}
 	}
+}
+
+func waitUntil(ctx context.Context, at time.Time) bool {
+	timer := time.NewTimer(time.Until(at))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func retryablePollError(detail string) bool {
+	lower := strings.ToLower(detail)
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "overload") || strings.Contains(lower, "authentication") {
+		return false
+	}
+	return strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline") || strings.Contains(lower, "eof") || strings.Contains(lower, "connect")
 }
 
 func (p *Poller) interval() time.Duration {
@@ -158,7 +190,17 @@ type pollExecution struct {
 	dispatched dispatchResult
 }
 
-func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, demoRunID string, demoState *DemoState, demoStateErr error, action *DemoAction) pollExecution {
+func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, demoRunID string, demoState *DemoState, demoStateErr error, action *DemoAction) (result pollExecution) {
+	started := time.Now()
+	defer func() {
+		result.poll.DurationMS = time.Since(started).Milliseconds()
+		if err := p.store.SavePollOutcome(result.poll); err != nil {
+			log.Printf("poller: persist poll outcome: %v", err)
+		}
+		if p.api != nil {
+			p.api.RecordPollOutcome(result.poll)
+		}
+	}()
 	now := time.Now().UTC()
 	execution := pollExecution{poll: PollResult{PolledAt: now}}
 	if recordDemo {
@@ -176,6 +218,12 @@ func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, de
 	return execution
 }
 
+func (p *Poller) setNextPollAt(at time.Time) {
+	if p.api != nil {
+		p.api.SetNextPollAt(at.UTC())
+	}
+}
+
 func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, now time.Time, demoState *DemoState, targets []Device, action *DemoAction) pollExecution {
 	recordDemo := demoState != nil
 	settings, err := loadSettings(p.store)
@@ -184,7 +232,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		if recordDemo {
 			return p.failPoll(execution, "normalize", time.Now(), err, false, action, demoState)
 		}
-		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
 		return execution
 	}
@@ -193,7 +240,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		state, loadErr := p.store.LoadDemoState()
 		if loadErr != nil {
 			log.Printf("poller: load enabled demo provider: %v", loadErr)
-			p.recordPollResult(now, false)
 			execution.poll.Error = loadErr.Error()
 			return execution
 		}
@@ -208,7 +254,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 			return p.failPoll(execution, "normalize", normalizeStarted, fmt.Errorf("fetch upstream: %w", err), false, action, demoState)
 		}
 		p.markStale()
-		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
 		return execution
 	}
@@ -219,7 +264,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 			if recordDemo {
 				return p.failPoll(execution, "normalize", normalizeStarted, err, false, action, demoState)
 			}
-			p.recordPollResult(now, false)
 			execution.poll.Error = err.Error()
 			return execution
 		}
@@ -231,7 +275,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		if recordDemo {
 			return p.failPoll(execution, "normalize", normalizeStarted, err, false, action, demoState)
 		}
-		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
 		return execution
 	}
@@ -247,7 +290,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		if recordDemo {
 			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false, action, demoState)
 		}
-		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
 		return execution
 	}
@@ -256,7 +298,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		if recordDemo {
 			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false, action, demoState)
 		}
-		p.recordPollResult(now, false)
 		execution.poll.Error = err.Error()
 		return execution
 	}
@@ -272,7 +313,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		if recordDemo {
 			return p.failPoll(execution, "event_engine", eventStarted, err, changed, action, demoState)
 		}
-		p.recordPollResult(now, true)
 		execution.poll.Success = true
 		execution.poll.SnapshotChanged = changed
 		execution.poll.Error = err.Error()
@@ -291,6 +331,13 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 
 	dispatchStarted := time.Now()
 	execution.dispatched = p.dispatch(ctx, processed.Emitted, changed, targets)
+	if p.api != nil && changed {
+		p.api.RecordWidgetDelivery(
+			execution.dispatched.Delivery.WidgetRefresh,
+			execution.dispatched.Status,
+			execution.dispatched.Detail,
+		)
+	}
 	if recordDemo {
 		execution.demo.Delivery = execution.dispatched.Delivery
 		setDemoStage(&execution.demo, "apns", execution.dispatched.Status, execution.dispatched.Detail, dispatchStarted)
@@ -298,7 +345,6 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		execution.demo.CompletedAt = time.Now().UTC()
 		p.persistDemoExecution(&execution, action, demoState)
 	}
-	p.recordPollResult(now, true)
 	execution.poll.Success = true
 	execution.poll.Events = len(processed.Emitted)
 	execution.poll.SnapshotChanged = changed
@@ -339,6 +385,12 @@ func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool, tar
 			result.Delivery.Alerts.Attempted++
 			if err := p.notifier.SendAlert(ctx, d.APNsToken, ev); err != nil {
 				log.Printf("poller: send alert to %s: %v", d.DeviceID, err)
+				var apnsErr *APNSError
+				if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
+					if clearErr := p.store.ClearAPNsToken(d.DeviceID); clearErr != nil {
+						log.Printf("poller: clear APNs token for %s: %v", d.DeviceID, clearErr)
+					}
+				}
 				count.Failed++
 				result.Delivery.Alerts.Failed++
 			} else {
@@ -356,6 +408,12 @@ func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool, tar
 			result.Delivery.WidgetRefresh.Attempted++
 			if err := p.notifier.SendWidgetRefresh(ctx, d.WidgetToken); err != nil {
 				log.Printf("poller: widget refresh to %s: %v", d.DeviceID, err)
+				var apnsErr *APNSError
+				if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
+					if clearErr := p.store.ClearWidgetToken(d.DeviceID); clearErr != nil {
+						log.Printf("poller: clear widget token for %s: %v", d.DeviceID, clearErr)
+					}
+				}
 				result.Delivery.WidgetRefresh.Failed++
 			} else {
 				result.Delivery.WidgetRefresh.Succeeded++
@@ -405,7 +463,6 @@ func (p *Poller) failPoll(execution pollExecution, stage string, started time.Ti
 	execution.demo.Error = err.Error()
 	execution.demo.CompletedAt = time.Now().UTC()
 	setDemoStage(&execution.demo, stage, DemoStageFailed, err.Error(), started)
-	p.recordPollResult(execution.poll.PolledAt, false)
 	p.persistDemoExecution(&execution, action, state)
 	return execution
 }
@@ -515,12 +572,6 @@ func joinErrors(current, next string) string {
 		return next
 	}
 	return current + "; " + next
-}
-
-func (p *Poller) recordPollResult(at time.Time, success bool) {
-	if p.api != nil {
-		p.api.RecordPollResult(at, success)
-	}
 }
 
 func (p *Poller) snapshotChanged(snap Snapshot) bool {

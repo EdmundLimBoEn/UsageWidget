@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +27,19 @@ type Notifier interface {
 
 type notifierStatus interface {
 	Enabled() bool
+}
+
+type APNSError struct {
+	Status int
+	Reason string
+}
+
+func (e *APNSError) Error() string {
+	return fmt.Sprintf("apns: status %d: %s", e.Status, e.Reason)
+}
+
+func (e *APNSError) TerminalDeviceToken() bool {
+	return e.Reason == "BadDeviceToken" || e.Reason == "Unregistered" || e.Reason == "DeviceTokenNotForTopic"
 }
 
 func NewNotifier(cfg Config) (Notifier, error) {
@@ -99,12 +113,26 @@ func (c *apnsClient) push(ctx context.Context, deviceToken, pushType, topic, pri
 	if err != nil {
 		return err
 	}
+	err = c.pushWithToken(ctx, deviceToken, pushType, topic, priority, body, tok)
+	var apnsErr *APNSError
+	if errors.As(err, &apnsErr) && apnsErr.Reason == "InvalidProviderToken" {
+		c.invalidateProviderToken()
+		tok, tokenErr := c.providerToken()
+		if tokenErr != nil {
+			return tokenErr
+		}
+		return c.pushWithToken(ctx, deviceToken, pushType, topic, priority, body, tok)
+	}
+	return err
+}
+
+func (c *apnsClient) pushWithToken(ctx context.Context, deviceToken, pushType, topic, priority string, body []byte, token string) error {
 	url := "https://" + c.host + "/3/device/" + deviceToken
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("apns: build request: %w", err)
 	}
-	req.Header.Set("authorization", "bearer "+tok)
+	req.Header.Set("authorization", "bearer "+token)
 	req.Header.Set("apns-topic", topic)
 	req.Header.Set("apns-push-type", pushType)
 	req.Header.Set("apns-priority", priority)
@@ -116,9 +144,23 @@ func (c *apnsClient) push(ctx context.Context, deviceToken, pushType, topic, pri
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("apns: status %d: %s", resp.StatusCode, string(respBody))
+		var payload struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal(respBody, &payload)
+		if payload.Reason == "" {
+			payload.Reason = truncateDiagnostic(string(respBody), 120)
+		}
+		return &APNSError{Status: resp.StatusCode, Reason: payload.Reason}
 	}
 	return nil
+}
+
+func (c *apnsClient) invalidateProviderToken() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.token = ""
+	c.issuedAt = time.Time{}
 }
 
 func (c *apnsClient) providerToken() (string, error) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -14,6 +15,7 @@ import (
 type CodexBarClient struct {
 	URL        string
 	Cmd        []string
+	Source     string
 	httpClient *http.Client
 }
 
@@ -21,7 +23,8 @@ type CodexBarClient struct {
 // honors in-app provider toggles — do not force ?provider=all.
 func NewCodexBarClient(url string) *CodexBarClient {
 	return &CodexBarClient{
-		URL: url,
+		URL:    url,
+		Source: "http",
 		// CodexBar can take a while when providers re-auth / scrape dashboards.
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
@@ -31,7 +34,26 @@ func NewCodexBarClient(url string) *CodexBarClient {
 // instead of hitting the serve endpoint. The CLI honors in-app provider
 // toggles, so only enabled providers appear in the output.
 func NewCodexBarCommandClient(command string) *CodexBarClient {
-	return &CodexBarClient{Cmd: strings.Fields(command)}
+	return &CodexBarClient{Cmd: strings.Fields(command), Source: "command"}
+}
+
+// NewCodexBarUnixClient reads fresh CodexBar CLI output from the isolated
+// collector sidecar. The socket is never exposed over TCP.
+func NewCodexBarUnixClient(socketPath string) *CodexBarClient {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "unix", socketPath)
+		},
+	}
+	return &CodexBarClient{
+		URL:    "http://collector/usage",
+		Source: "codexbar-cli-sidecar",
+		httpClient: &http.Client{
+			Transport: transport,
+			Timeout:   95 * time.Second,
+		},
+	}
 }
 
 func (c *CodexBarClient) Fetch(ctx context.Context) ([]byte, error) {

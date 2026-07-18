@@ -25,14 +25,26 @@ type API struct {
 	poller   ForcePoller
 	notifier Notifier
 
-	mu            sync.Mutex
-	polling       bool
-	lastPollAt    *time.Time
-	lastSuccessAt *time.Time
+	mu                  sync.Mutex
+	polling             bool
+	lastPollAt          *time.Time
+	lastSuccessAt       *time.Time
+	lastChangedAt       *time.Time
+	nextPollAt          *time.Time
+	lastPollDurationMS  int64
+	consecutiveFailures int
+	lastPollError       string
+	widgetDelivery      widgetDeliveryHealth
 }
 
 func NewAPI(cfg Config, store *Store, codexbar *CodexBarClient) *API {
-	return &API{cfg: cfg, store: store, codexbar: codexbar}
+	api := &API{cfg: cfg, store: store, codexbar: codexbar}
+	if results, err := store.RecentPollOutcomes(50); err == nil {
+		for _, result := range results {
+			api.RecordPollOutcome(result)
+		}
+	}
+	return api
 }
 
 func (a *API) SetPoller(p ForcePoller) {
@@ -49,6 +61,42 @@ func (a *API) RecordPollResult(at time.Time, success bool) {
 	a.lastPollAt = &at
 	if success {
 		a.lastSuccessAt = &at
+	}
+}
+
+func (a *API) RecordPollOutcome(result PollResult) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	at := result.PolledAt
+	a.lastPollAt = &at
+	a.lastPollDurationMS = result.DurationMS
+	if result.Success {
+		a.lastSuccessAt = &at
+		a.consecutiveFailures = 0
+		a.lastPollError = ""
+		if result.SnapshotChanged {
+			a.lastChangedAt = &at
+		}
+		return
+	}
+	a.consecutiveFailures++
+	a.lastPollError = truncateDiagnostic(result.Error, 240)
+}
+
+func (a *API) SetNextPollAt(at time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextPollAt = &at
+}
+
+func (a *API) RecordWidgetDelivery(delivery DeliveryCount, status DemoStageStatus, detail string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now().UTC()
+	a.widgetDelivery = widgetDeliveryHealth{
+		Status: string(status), LastAttemptAt: &now,
+		Attempted: delivery.Attempted, Succeeded: delivery.Succeeded, Failed: delivery.Failed,
+		LastError: truncateDiagnostic(detail, 180),
 	}
 }
 
@@ -100,13 +148,36 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 type healthResponse struct {
-	Service       string     `json:"service"`
-	CodexBar      bool       `json:"codexbar"`
-	Database      bool       `json:"database"`
-	Polling       bool       `json:"polling"`
-	APNs          bool       `json:"apns"`
-	LastPollAt    *time.Time `json:"lastPollAt"`
-	LastSuccessAt *time.Time `json:"lastSuccessAt"`
+	Service        string               `json:"service"`
+	CodexBar       bool                 `json:"codexbar"`
+	Database       bool                 `json:"database"`
+	Polling        bool                 `json:"polling"`
+	APNs           bool                 `json:"apns"`
+	LastPollAt     *time.Time           `json:"lastPollAt"`
+	LastSuccessAt  *time.Time           `json:"lastSuccessAt"`
+	Collector      collectorHealth      `json:"collector"`
+	WidgetDelivery widgetDeliveryHealth `json:"widgetDelivery"`
+}
+
+type collectorHealth struct {
+	Source              string     `json:"source"`
+	Status              string     `json:"status"`
+	LastAttemptAt       *time.Time `json:"lastAttemptAt"`
+	LastSuccessAt       *time.Time `json:"lastSuccessAt"`
+	LastChangedAt       *time.Time `json:"lastChangedAt"`
+	NextAttemptAt       *time.Time `json:"nextAttemptAt"`
+	DurationMS          int64      `json:"durationMs"`
+	ConsecutiveFailures int        `json:"consecutiveFailures"`
+	LastError           string     `json:"lastError,omitempty"`
+}
+
+type widgetDeliveryHealth struct {
+	Status        string     `json:"status"`
+	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
+	Attempted     int        `json:"attempted"`
+	Succeeded     int        `json:"succeeded"`
+	Failed        int        `json:"failed"`
+	LastError     string     `json:"lastError,omitempty"`
 }
 
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -114,27 +185,38 @@ func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 	a.mu.Lock()
 	polling, lastPollAt, lastSuccessAt := a.polling, a.lastPollAt, a.lastSuccessAt
-	a.mu.Unlock()
-
-	var codexbarOK bool
-	if len(a.codexbar.Cmd) > 0 {
-		// CLI invocations are too slow for a live health probe; trust the poller.
-		codexbarOK = lastSuccessAt != nil
-	} else {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		_, err := a.codexbar.Fetch(ctx)
-		codexbarOK = err == nil
+	collector := collectorHealth{
+		Source: a.codexbar.Source, LastAttemptAt: a.lastPollAt, LastSuccessAt: a.lastSuccessAt,
+		LastChangedAt: a.lastChangedAt, NextAttemptAt: a.nextPollAt, DurationMS: a.lastPollDurationMS,
+		ConsecutiveFailures: a.consecutiveFailures, LastError: a.lastPollError,
 	}
+	widgetDelivery := a.widgetDelivery
+	a.mu.Unlock()
+	if collector.Source == "" {
+		collector.Source = "http"
+	}
+	switch {
+	case collector.ConsecutiveFailures > 0 && collector.LastSuccessAt == nil:
+		collector.Status = "down"
+	case collector.ConsecutiveFailures > 0:
+		collector.Status = "degraded"
+	case collector.LastSuccessAt != nil:
+		collector.Status = "ok"
+	default:
+		collector.Status = "starting"
+	}
+	codexbarOK := collector.Status == "ok"
 
 	writeJSON(w, http.StatusOK, healthResponse{
-		Service:       "ok",
-		CodexBar:      codexbarOK,
-		Database:      dbErr == nil,
-		Polling:       polling,
-		APNs:          a.cfg.APNsEnabled(),
-		LastPollAt:    lastPollAt,
-		LastSuccessAt: lastSuccessAt,
+		Service:        "ok",
+		CodexBar:       codexbarOK,
+		Database:       dbErr == nil,
+		Polling:        polling,
+		APNs:           a.cfg.APNsEnabled(),
+		LastPollAt:     lastPollAt,
+		LastSuccessAt:  lastSuccessAt,
+		Collector:      collector,
+		WidgetDelivery: widgetDelivery,
 	})
 }
 

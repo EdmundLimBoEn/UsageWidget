@@ -10,13 +10,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"math/big"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+type apnsRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f apnsRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func testKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
@@ -97,6 +103,37 @@ func TestProviderTokenCached(t *testing.T) {
 	}
 	if third == second {
 		t.Fatalf("expected token to refresh after expiry")
+	}
+}
+
+func TestInvalidProviderTokenRefreshesAndRetriesOnce(t *testing.T) {
+	requests := 0
+	var authorizations []string
+	client := &apnsClient{
+		key: testKey(t), keyID: "K", teamID: "T", bundleID: "bundle", host: "apns.test",
+		http: &http.Client{Transport: apnsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requests++
+			authorizations = append(authorizations, req.Header.Get("authorization"))
+			if requests == 1 {
+				return &http.Response{StatusCode: 403, Body: io.NopCloser(strings.NewReader(`{"reason":"InvalidProviderToken"}`)), Header: make(http.Header)}, nil
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		})},
+	}
+	if err := client.SendWidgetRefresh(context.Background(), "widget-token"); err != nil {
+		t.Fatalf("expected refreshed retry to succeed: %v", err)
+	}
+	if requests != 2 || authorizations[0] == authorizations[1] {
+		t.Fatalf("expected two requests with distinct provider tokens: %v", authorizations)
+	}
+}
+
+func TestAPNSErrorTerminalDeviceTokenClassification(t *testing.T) {
+	if !(&APNSError{Reason: "Unregistered"}).TerminalDeviceToken() {
+		t.Fatal("Unregistered must clear a device token")
+	}
+	if (&APNSError{Reason: "TooManyRequests"}).TerminalDeviceToken() {
+		t.Fatal("transient APNs failures must retain device tokens")
 	}
 }
 

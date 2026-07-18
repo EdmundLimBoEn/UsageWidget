@@ -1,0 +1,24 @@
+[Unit]
+Description=UsageWidget CodexBar CLI collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=edmundlim
+Group=usagewidget
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/etc/usagewidget/collector.env
+RuntimeDirectory=usagewidget
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+UMask=0007
+ExecStart=/usr/local/bin/usagewidget-collector
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

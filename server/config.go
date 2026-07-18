@@ -8,11 +8,12 @@ import (
 )
 
 type Config struct {
-	Token       string
-	CodexBarURL string
-	CodexBarCmd string
-	DBPath      string
-	ListenAddr  string
+	Token           string
+	CodexBarURL     string
+	CodexBarCmd     string
+	CollectorSocket string
+	DBPath          string
+	ListenAddr      string
 
 	DemoEnabled          bool
 	DemoListenAddr       string
@@ -63,8 +64,9 @@ func LoadConfig() (Config, error) {
 
 	return Config{
 		Token:                token,
-		CodexBarURL:          envOr("CODEXBAR_URL", "http://127.0.0.1:8765/usage"),
+		CodexBarURL:          os.Getenv("CODEXBAR_URL"),
 		CodexBarCmd:          os.Getenv("CODEXBAR_CMD"),
+		CollectorSocket:      envOr("COLLECTOR_SOCKET", "/run/usagewidget/codexbar.sock"),
 		DBPath:               envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:           envOr("LISTEN_ADDR", ":8377"),
 		DemoEnabled:          demoEnabled,

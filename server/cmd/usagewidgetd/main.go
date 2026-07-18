@@ -29,8 +29,10 @@ func main() {
 	var codexbar *server.CodexBarClient
 	if cfg.CodexBarCmd != "" {
 		codexbar = server.NewCodexBarCommandClient(cfg.CodexBarCmd)
-	} else {
+	} else if cfg.CodexBarURL != "" {
 		codexbar = server.NewCodexBarClient(cfg.CodexBarURL)
+	} else {
+		codexbar = server.NewCodexBarUnixClient(cfg.CollectorSocket)
 	}
 
 	notifier, err := server.NewNotifier(cfg)

@@ -94,9 +94,11 @@ GOOS=linux GOARCH=amd64 go build -o usagewidgetd ./cmd/usagewidgetd
 sudo useradd --system --home /var/lib/usagewidget --shell /usr/sbin/nologin usagewidget
 sudo mkdir -p /var/lib/usagewidget /etc/usagewidget
 sudo cp usagewidgetd /usr/local/bin/usagewidgetd
+sudo cp usagewidget-collector /usr/local/bin/usagewidget-collector
 sudo chown root:root /usr/local/bin/usagewidgetd
 sudo chmod 755 /usr/local/bin/usagewidgetd
 sudo cp deploy/usagewidget.service /etc/systemd/system/usagewidget.service
+sudo cp deploy/usagewidget-collector.service /etc/systemd/system/usagewidget-collector.service
 sudo chown usagewidget:usagewidget /var/lib/usagewidget
 ```
 
@@ -106,10 +108,7 @@ Create `/etc/usagewidget/env` (mode `600`, owned by root):
 
 ```bash
 USAGEWIDGET_TOKEN=replace-with-long-random-token
-# Default source: CodexBar serve (honors in-app provider toggles; don't
-# append ?provider=all). Alternatively set CODEXBAR_CMD to shell out to the
-# CLI per poll (slower): CODEXBAR_CMD=codexbar usage --json
-CODEXBAR_URL=http://127.0.0.1:8765/usage
+COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock
 DB_PATH=/var/lib/usagewidget/usagewidget.db
 LISTEN_ADDR=127.0.0.1:8377
 
@@ -123,18 +122,31 @@ APNS_ENV=sandbox
 
 Never commit this file or the `.p8` key.
 
+The collector runs as the login account that owns the working CodexBar session.
+Create `/etc/usagewidget/collector.env` (mode `600`) when `codexbar` is not on
+the unit's configured PATH:
+
+```bash
+CODEXBAR_BIN=/home/linuxbrew/.linuxbrew/Cellar/codexbar/0.43.0/libexec/CodexBarCLI
+COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock
+```
+
+The sidecar exposes only `GET /usage` on that Unix socket. It accepts no command
+or provider arguments from `usagewidgetd`.
+
 ## Enable systemd
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now usagewidget
+sudo systemctl enable --now usagewidget-collector usagewidget
+sudo systemctl status usagewidget-collector
 sudo systemctl status usagewidget
 ```
 
 Logs:
 
 ```bash
-journalctl -u usagewidget -f
+journalctl -u usagewidget-collector -u usagewidget -f
 ```
 
 ## Tailscale Serve (HTTPS)
