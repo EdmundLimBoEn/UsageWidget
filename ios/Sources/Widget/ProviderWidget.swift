@@ -90,7 +90,7 @@ struct ProviderUsageWidget: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Usage")
-        .description("CodexBar providers — up to four rows with primary/secondary usage.")
+        .description("Remaining AI capacity, reset horizons, and update freshness.")
         .supportedFamilies([.systemLarge])
         .pushHandler(UsageWidgetPushHandler.self)
     }
@@ -110,9 +110,9 @@ struct ProviderWidgetView: View {
         let overflow = max(0, visible.count - maxRows)
         let shown = Array(visible.prefix(maxRows))
 
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Usage")
+                Text("Capacity")
                     .font(.headline)
                 Spacer()
                 ageLabel
@@ -126,7 +126,7 @@ struct ProviderWidgetView: View {
                 Spacer()
             } else {
                 ForEach(shown) { provider in
-                    ProviderWidgetRow(provider: provider)
+                    ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true)
                 }
                 if overflow > 0 {
                     OverflowRow(count: overflow)
@@ -134,7 +134,7 @@ struct ProviderWidgetView: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(4)
+        .padding(2)
     }
 
     @ViewBuilder
@@ -145,10 +145,14 @@ struct ProviderWidgetView: View {
             }
             return "—"
         }()
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if entry.snapshot?.stale == true {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: "clock.badge.exclamationmark")
                     .foregroundStyle(.orange)
+                    .font(.caption2)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
                     .font(.caption2)
             }
             Text(text)
@@ -161,42 +165,44 @@ struct ProviderWidgetView: View {
 
 struct ProviderWidgetRow: View {
     let provider: Provider
+    let isStale: Bool
 
     private var primary: UsageWindow? { provider.windows.first }
-    private var secondary: UsageWindow? {
-        provider.windows.first(where: { $0.key == "secondary" }) ?? provider.windows.dropFirst().first
-    }
-
-    private var nearestReset: Date? {
-        provider.windows.compactMap(\.resetsAt).min()
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(provider.name)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Spacer()
+                Text(String(provider.name.prefix(1)).uppercased())
+                    .font(.caption2.weight(.bold))
+                    .frame(width: 24, height: 24)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(provider.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    if let primary {
+                        Text(resetText(primary))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
                 if let primary {
-                    Text(String(format: "%.0f%% left", primary.remainingPercent))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(primary.remainingPercent <= 10 ? .red : .secondary)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(String(format: "%.0f%%", primary.remainingPercent))
+                            .font(.title3.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(widgetCapacityTint(primary.remainingPercent, stale: isStale))
+                        Text("left")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             if let primary {
                 ProgressView(value: min(max(primary.usedPercent / 100, 0), 1))
-                    .tint(.accentColor)
-            }
-            if let secondary {
-                ProgressView(value: min(max(secondary.usedPercent / 100, 0), 1))
-                    .tint(.secondary)
-            }
-            if let reset = nearestReset {
-                Text("Reset \(RelativeTime.string(for: reset))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .tint(widgetCapacityTint(primary.remainingPercent, stale: isStale))
             } else if let err = provider.error, !err.isEmpty {
                 Text(err)
                     .font(.caption2)
@@ -204,7 +210,10 @@ struct ProviderWidgetRow: View {
                     .lineLimit(1)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
@@ -214,14 +223,23 @@ struct ProviderWidgetRow: View {
         if let primary {
             parts.append(String(format: "primary %.0f percent used, %.0f remaining", primary.usedPercent, primary.remainingPercent))
         }
-        if let secondary {
-            parts.append(String(format: "secondary %.0f percent used", secondary.usedPercent))
-        }
-        if let reset = nearestReset {
-            parts.append("nearest reset \(RelativeTime.string(for: reset))")
+        if let reset = primary?.resetsAt {
+            parts.append("resets \(RelativeTime.string(for: reset))")
         }
         return parts.joined(separator: ", ")
     }
+
+    private func resetText(_ window: UsageWindow) -> String {
+        guard let reset = window.resetsAt else { return window.title }
+        return "\(window.title) · resets \(RelativeTime.string(for: reset))"
+    }
+}
+
+private func widgetCapacityTint(_ remaining: Double, stale: Bool) -> Color {
+    if stale { return .secondary }
+    if remaining <= 10 { return .red }
+    if remaining <= 25 { return .orange }
+    return .accentColor
 }
 
 struct OverflowRow: View {

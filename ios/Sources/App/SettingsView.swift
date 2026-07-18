@@ -127,9 +127,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Testing")
+                Text("Developer tools")
             } footer: {
-                Text("For demos and debugging. Poll runs the real CodexBar path; test alert is synthetic and does not change live usage data.")
+                Text("Poll collects through the real source. Test alert is synthetic and does not change usage data.")
             }
 
             Section("Server health") {
