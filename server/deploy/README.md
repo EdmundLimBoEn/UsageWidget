@@ -36,10 +36,9 @@ Create `/etc/usagewidget/env` (mode `600`, owned by root):
 
 ```bash
 USAGEWIDGET_TOKEN=replace-with-long-random-token
-# Preferred: run the CodexBar CLI directly (honors in-app provider toggles,
-# so only enabled providers are fetched). Overrides CODEXBAR_URL when set.
-CODEXBAR_CMD=codexbar usage --json
-# Fallback: poll a CodexBar serve endpoint instead
+# Default source: CodexBar serve (honors in-app provider toggles; don't
+# append ?provider=all). Alternatively set CODEXBAR_CMD to shell out to the
+# CLI per poll (slower): CODEXBAR_CMD=codexbar usage --json
 CODEXBAR_URL=http://127.0.0.1:8765/usage
 DB_PATH=/var/lib/usagewidget/usagewidget.db
 LISTEN_ADDR=127.0.0.1:8377
