@@ -17,11 +17,9 @@ type CodexBarClient struct {
 	httpClient *http.Client
 }
 
+// NewCodexBarClient polls a CodexBar serve endpoint. The bare /usage path
+// honors in-app provider toggles — do not force ?provider=all.
 func NewCodexBarClient(url string) *CodexBarClient {
-	// Prefer all enabled providers when the caller only passed the bare /usage path.
-	if !strings.Contains(url, "?") {
-		url = strings.TrimRight(url, "/") + "?provider=all"
-	}
 	return &CodexBarClient{
 		URL: url,
 		// CodexBar can take a while when providers re-auth / scrape dashboards.
