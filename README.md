@@ -44,6 +44,7 @@ Providers hidden in the app's Settings are also stripped from `/v1/snapshot`
 server-side, so the phone never receives them.
 
 Deploy docs: [`server/deploy/README.md`](server/deploy/README.md).
+Day-to-day redeploy: `./server/deploy/redeploy.sh` (or agent skill `/usagewidget-deploy`).
 
 ### API
 

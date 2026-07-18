@@ -3,6 +3,61 @@
 Companion service that polls CodexBar on localhost, stores snapshots, evaluates
 usage events, and pushes APNs alerts + WidgetKit refreshes to the iPhone app.
 
+| | |
+|--|--|
+| Host | `edserve` · Tailscale `100.83.252.53` · `edserve.tail125275.ts.net` |
+| SSH | `root@100.83.252.53` (BatchMode pubkey) |
+| Binary | `/usr/local/bin/usagewidgetd` |
+| Unit | `usagewidget.service` |
+| Env | `/etc/usagewidget/env` (mode 600, never commit) |
+| Data | `/var/lib/usagewidget/usagewidget.db` |
+| Listen | `127.0.0.1:8377` (Tailscale Serve path `/usagewidget`) |
+| Agent skill | `.grok/skills/usagewidget-deploy/SKILL.md` (`/usagewidget-deploy`) |
+
+## Redeploy (day-to-day)
+
+edServe has **no Go toolchain**. Always cross-compile on the Mac, then install
+and restart. Prefer this path over a full reinstall.
+
+```bash
+# from repo root
+./server/deploy/redeploy.sh
+```
+
+Manual equivalent:
+
+```bash
+cd server
+GOOS=linux GOARCH=amd64 go build -o /tmp/usagewidgetd ./cmd/usagewidgetd
+scp /tmp/usagewidgetd root@100.83.252.53:/tmp/usagewidgetd.new
+ssh root@100.83.252.53 '
+  install -o root -g root -m 755 /tmp/usagewidgetd.new /usr/local/bin/usagewidgetd
+  rm -f /tmp/usagewidgetd.new
+  systemctl restart usagewidget
+  systemctl is-active usagewidget
+'
+```
+
+Verify:
+
+```bash
+ssh root@100.83.252.53 '
+  set -a; source /etc/usagewidget/env; set +a
+  curl -sS -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/health
+  echo
+  curl -sS -X POST -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/poll
+  echo
+'
+```
+
+Public (tailnet) URL:
+
+```text
+https://edserve.tail125275.ts.net/usagewidget/v1/health
+```
+
+Override deploy host: `USAGEWIDGET_DEPLOY_HOST=root@… ./server/deploy/redeploy.sh`.
+
 ## Build
 
 From the repo root (or `server/`):
@@ -12,13 +67,7 @@ cd server
 GOOS=linux GOARCH=amd64 go build -o usagewidgetd ./cmd/usagewidgetd
 ```
 
-On the host (if building natively):
-
-```bash
-go build -o /usr/local/bin/usagewidgetd ./cmd/usagewidgetd
-```
-
-## Install
+## Install (first time only)
 
 ```bash
 sudo useradd --system --home /var/lib/usagewidget --shell /usr/sbin/nologin usagewidget

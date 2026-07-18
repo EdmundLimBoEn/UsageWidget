@@ -31,12 +31,11 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 
 ## edServe / Linux
 
+- [x] `usagewidgetd` installed + systemd enabled (`usagewidget.service`); redeploy with `./server/deploy/redeploy.sh` or `/usagewidget-deploy`.
+- [x] `/etc/usagewidget/env` exists (token + CodexBar URL); mode 600 on host only.
+- [x] Tailscale Serve: `https://edserve.tail125275.ts.net/usagewidget` → `127.0.0.1:8377`.
 - [ ] Ensure CodexBar `serve` is running on localhost and `/usage` returns live provider data.
-- [ ] Build and install `usagewidgetd` per `server/deploy/README.md`.
-- [ ] Create `/etc/usagewidget/env` with a strong `USAGEWIDGET_TOKEN` and APNs vars.
-- [ ] Install the `.p8` at `APNS_KEY_PATH`; never commit it.
-- [ ] `systemctl enable --now usagewidget` and confirm `journalctl -u usagewidget` is healthy.
-- [ ] Enable Tailscale Serve HTTPS for the service (MagicDNS hostname).
+- [ ] Install APNs `.p8` + set `APNS_*` in env (currently log-only noop pushes until configured).
 - [ ] From the phone (or any tailnet device), hit `GET /v1/health` with the bearer token.
 
 ## Demo validation
