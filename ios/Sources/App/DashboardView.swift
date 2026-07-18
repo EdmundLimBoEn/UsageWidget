@@ -177,12 +177,7 @@ struct ProviderCapacityCard: View {
     }
 
     private var providerMark: some View {
-        Text(String(provider.name.prefix(1)).uppercased())
-            .font(.subheadline.weight(.bold))
-            .frame(width: 34, height: 34)
-            .foregroundStyle(.primary)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .accessibilityHidden(true)
+        ProviderMark(providerID: provider.id, providerName: provider.name, size: 34, cornerRadius: 9)
     }
 }
 

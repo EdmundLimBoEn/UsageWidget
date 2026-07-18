@@ -2,6 +2,13 @@ import XCTest
 @testable import UsageWidget
 
 final class ModelsAndStoreTests: XCTestCase {
+    func testProviderLogoAssetNamesUseModelMarks() {
+        XCTAssertEqual(ProviderLogoAsset.name(for: "codex"), "ProviderCodex")
+        XCTAssertEqual(ProviderLogoAsset.name(for: " Claude "), "ProviderClaude")
+        XCTAssertEqual(ProviderLogoAsset.name(for: "GROK"), "ProviderGrok")
+        XCTAssertNil(ProviderLogoAsset.name(for: "demo"))
+    }
+
     func testDecodeFullSnapshot() throws {
         let json = """
         {

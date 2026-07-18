@@ -32,6 +32,15 @@ func TestCollectorReturnsValidCLIJSON(t *testing.T) {
 	}
 }
 
+func TestCollectorReturnsPartialJSONWhenCLIExitsNonZero(t *testing.T) {
+	binary := collectorScript(t, `printf '[{"provider":"codex","usage":{}},{"provider":"claude","error":{"message":"No available fetch strategy for claude."}}]'; exit 1`)
+	rec := httptest.NewRecorder()
+	NewCollector(binary).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"No available fetch strategy for claude."`) {
+		t.Fatalf("unexpected partial response %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCollectorClassifiesRateLimitAndRejectsOtherRoutes(t *testing.T) {
 	binary := collectorScript(t, `echo 'usage CLI overloaded / rate limited' >&2; exit 1`)
 	handler := NewCollector(binary).Handler()

@@ -172,11 +172,7 @@ struct ProviderWidgetRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(String(provider.name.prefix(1)).uppercased())
-                    .font(.caption2.weight(.bold))
-                    .frame(width: 24, height: 24)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .accessibilityHidden(true)
+                ProviderMark(providerID: provider.id, providerName: provider.name, size: 24, cornerRadius: 7)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(provider.name)
                         .font(.subheadline.weight(.semibold))

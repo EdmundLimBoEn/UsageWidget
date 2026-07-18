@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		2CCF22BD11B2247F766BB013 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */; };
+		30457299B15782A42898D343 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C9413AB842939E4D04BCF4CC /* Assets.xcassets */; };
 		40200372AB308C2FF15A607F /* ProviderWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C97EFEE957482B45488865 /* ProviderWidget.swift */; };
 		40CBAB71472205F39864DC27 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4387E300CF78B6B0A031E35A /* Models.swift */; };
 		4BFE63AD2E85F9CA71F49737 /* UsageWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A086B4D6BBA4C638C83902 /* UsageWidgetBundle.swift */; };
@@ -19,6 +21,7 @@
 		8795CC5966C7DCE47B59CE50 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4387E300CF78B6B0A031E35A /* Models.swift */; };
 		88B7F4CE9AE671F868E779D3 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201D218A913911D9205F095E /* Keychain.swift */; };
 		89DF76463446CAA1FDEC71D5 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 519B226524C63CB78E07EBF4 /* SetupView.swift */; };
+		90634D6C43F09CE6424C6B14 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */; };
 		B31A232A74FED44035964455 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9186B24417284724FA53937F /* DashboardView.swift */; };
 		BE72EEC9B3E42A42CCA6D0C5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09DE6FA3341C5D78CD3B77A1 /* SettingsView.swift */; };
 		CD84AF333C28C61C0D338D20 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAEA3D5DA9CD700832B6C7 /* APIClient.swift */; };
@@ -72,6 +75,7 @@
 		4E21CB00A7FBD8EC856A0948 /* SnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotStore.swift; sourceTree = "<group>"; };
 		519B226524C63CB78E07EBF4 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		52F6619A23EEDB57CF191D0D /* UsageWidgetApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageWidgetApp.swift; sourceTree = "<group>"; };
+		8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
 		9186B24417284724FA53937F /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		C9413AB842939E4D04BCF4CC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E35713D140F89FB01716BC28 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -96,6 +100,7 @@
 				13FAEA3D5DA9CD700832B6C7 /* APIClient.swift */,
 				201D218A913911D9205F095E /* Keychain.swift */,
 				4387E300CF78B6B0A031E35A /* Models.swift */,
+				8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */,
 				4E21CB00A7FBD8EC856A0948 /* SnapshotStore.swift */,
 			);
 			path = Core;
@@ -210,6 +215,7 @@
 			buildConfigurationList = BC28D341A361FE8CB880461B /* Build configuration list for PBXNativeTarget "UsageWidgetWidget" */;
 			buildPhases = (
 				33E725C97C7FC28B6EF36D69 /* Sources */,
+				472F44A3D44C1773D19D5005 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -267,6 +273,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		472F44A3D44C1773D19D5005 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				30457299B15782A42898D343 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		487AB3DCB1A0AEBB29B02B2B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -285,6 +299,7 @@
 				CD84AF333C28C61C0D338D20 /* APIClient.swift in Sources */,
 				EDAEBD72B70675B084C66F4F /* Keychain.swift in Sources */,
 				40CBAB71472205F39864DC27 /* Models.swift in Sources */,
+				2CCF22BD11B2247F766BB013 /* ProviderMark.swift in Sources */,
 				40200372AB308C2FF15A607F /* ProviderWidget.swift in Sources */,
 				4D28281CB32FC0EDC9BDCBC1 /* SnapshotStore.swift in Sources */,
 				4BFE63AD2E85F9CA71F49737 /* UsageWidgetBundle.swift in Sources */,
@@ -300,6 +315,7 @@
 				B31A232A74FED44035964455 /* DashboardView.swift in Sources */,
 				88B7F4CE9AE671F868E779D3 /* Keychain.swift in Sources */,
 				8795CC5966C7DCE47B59CE50 /* Models.swift in Sources */,
+				90634D6C43F09CE6424C6B14 /* ProviderMark.swift in Sources */,
 				BE72EEC9B3E42A42CCA6D0C5 /* SettingsView.swift in Sources */,
 				89DF76463446CAA1FDEC71D5 /* SetupView.swift in Sources */,
 				5E541468D89B61C33E829179 /* SnapshotStore.swift in Sources */,

@@ -65,6 +65,8 @@ targets:
         excludes:
           - Info.plist
       - path: Sources/Core
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     info:
       path: Sources/Widget/Info.plist
       properties:

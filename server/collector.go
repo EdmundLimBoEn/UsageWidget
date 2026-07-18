@@ -58,20 +58,23 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	if runErr != nil {
 		if ctx.Err() != nil {
 			http.Error(w, "collector timeout", http.StatusGatewayTimeout)
 			return
 		}
-		detail := classifyCollectorFailure(stderr.String())
-		http.Error(w, detail, http.StatusServiceUnavailable)
-		return
 	}
 	if stdout.Len() > collectorMaxResponseBytes {
 		http.Error(w, "collector response too large", http.StatusBadGateway)
 		return
 	}
 	if !json.Valid(stdout.Bytes()) {
+		if runErr != nil {
+			detail := classifyCollectorFailure(stderr.String())
+			http.Error(w, detail, http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "collector returned invalid JSON", http.StatusBadGateway)
 		return
 	}

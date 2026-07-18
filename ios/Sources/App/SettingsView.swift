@@ -77,6 +77,7 @@ struct SettingsView: View {
                 if let providers = model.snapshot?.providers {
                     ForEach(providerRows(providers), id: \.id) { row in
                         HStack {
+                            ProviderMark(providerID: row.id, providerName: row.name, size: 28, cornerRadius: 8)
                             VStack(alignment: .leading) {
                                 Text(row.name)
                                 Text(row.id)
