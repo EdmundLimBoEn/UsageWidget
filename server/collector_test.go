@@ -48,13 +48,17 @@ func TestCollectorClassifiesRateLimitAndRejectsOtherRoutes(t *testing.T) {
 }
 
 func TestCollectorTimesOutAndRejectsInvalidJSON(t *testing.T) {
-	timeoutBinary := collectorScript(t, `sleep 2`)
+	timeoutBinary := collectorScript(t, `sleep 2 & wait`)
 	collector := NewCollector(timeoutBinary)
 	collector.Timeout = 10 * time.Millisecond
+	started := time.Now()
 	rec := httptest.NewRecorder()
 	collector.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
 	if rec.Code != http.StatusGatewayTimeout {
 		t.Fatalf("expected timeout, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if time.Since(started) > time.Second {
+		t.Fatalf("collector did not terminate the command process group promptly")
 	}
 
 	invalidBinary := collectorScript(t, `printf 'not-json'`)
