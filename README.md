@@ -23,6 +23,10 @@ over Tailscale HTTPS, with APNs alerts for thresholds, scheduled resets, surpris
 Provider lists are **data-driven** from whatever CodexBar returns. No provider
 credentials ever leave the Linux host.
 
+The app and widget share the server bearer token through a Keychain access
+group. App Group defaults contain cached normalized snapshots and preferences,
+never the active token. Raw CodexBar payloads are not returned by the phone API.
+
 ## Server quick start
 
 ```bash

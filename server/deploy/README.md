@@ -86,6 +86,7 @@ From the repo root (or `server/`):
 ```bash
 cd server
 GOOS=linux GOARCH=amd64 go build -o usagewidgetd ./cmd/usagewidgetd
+GOOS=linux GOARCH=amd64 go build -o usagewidget-collector ./cmd/usagewidget-collector
 ```
 
 ## Install (first time only)

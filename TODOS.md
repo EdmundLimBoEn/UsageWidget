@@ -2,18 +2,6 @@
 
 ## Release
 
-### Secure credentials and minimize phone API data
-
-**What:** Move app/widget bearer-token access to a shared Keychain group and remove raw provider payloads from phone API responses.
-
-**Why:** Enforce secure credential storage and data minimization before any external user receives the app.
-
-**Context:** The hackathon build accepts App Group `UserDefaults` token sharing and raw payload transport only because the endpoint is tailnet-restricted and the device is trusted. This work is a release gate for TestFlight, shared source builds, or public hosting. Start in `ios/Sources/Core/SnapshotStore.swift` and `server/normalize.go`/API response shaping.
-
-**Effort:** M
-**Priority:** P1
-**Depends on:** Portfolio completion
-
 ### Package a generic self-hosted installation
 
 **What:** Create a configurable install, diagnostics, update, and uninstall path for supported server hosts.
@@ -24,7 +12,7 @@
 
 **Effort:** L
 **Priority:** P2
-**Depends on:** Secure credentials and minimize phone API data
+**Depends on:** Portfolio completion
 
 ### Distribute the iOS client
 
@@ -36,4 +24,10 @@
 
 **Effort:** L
 **Priority:** P2
-**Depends on:** Package a generic self-hosted installation; secure credentials and minimize phone API data
+**Depends on:** Package a generic self-hosted installation
+
+## Completed
+
+- Shared app/widget Keychain access group with one-time migration from App Group defaults.
+- Raw upstream provider payloads removed from phone-facing snapshot responses.
+- CLI collector sidecar, passive collection health, bounded poll history, and widget delivery diagnostics.
