@@ -245,6 +245,9 @@ func (a *API) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	snap.PollIntervalMinutes = settings.PollIntervalMinutes
 	snap.Providers = filterHidden(snap.Providers, settings.HiddenProviders)
+	for i := range snap.Providers {
+		snap.Providers[i].Raw = nil
+	}
 
 	writeJSON(w, http.StatusOK, snap)
 }

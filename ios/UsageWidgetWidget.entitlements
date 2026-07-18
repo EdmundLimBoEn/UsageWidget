@@ -8,5 +8,9 @@
 	<array>
 		<string>group.systems.edmundlim.usagewidget</string>
 	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared</string>
+	</array>
 </dict>
 </plist>

@@ -35,7 +35,7 @@ struct UsageTimelineProvider: TimelineProvider {
         let prefs = store.loadPreferences()
         let cached = store.loadSnapshot()
 
-        guard let creds = store.mirroredCredentials() ?? (try? KeychainStore.shared.load()) else {
+        guard let creds = try? KeychainStore.shared.load() else {
             return ProviderEntry(date: Date(), snapshot: cached, preferences: prefs, fetchError: "Not configured")
         }
 

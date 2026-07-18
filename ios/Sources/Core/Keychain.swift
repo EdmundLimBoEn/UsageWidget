@@ -17,15 +17,13 @@ public struct ConnectionCredentials: Equatable, Sendable {
 }
 
 public final class KeychainStore: @unchecked Sendable {
-    public static let shared = KeychainStore()
+    public static let shared = KeychainStore(accessGroup: AppConstants.keychainAccessGroup)
 
     private let service: String
     private let accessGroup: String?
 
-    public init(service: String = AppConstants.keychainService, accessGroup: String? = nil) {
+    public init(service: String = AppConstants.keychainService, accessGroup: String? = AppConstants.keychainAccessGroup) {
         self.service = service
-        // Access group requires a real App ID prefix at runtime; omit for simulator/unsigned builds
-        // and rely on app-group defaults mirroring for the widget when keychain group is unavailable.
         self.accessGroup = accessGroup
     }
 

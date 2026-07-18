@@ -83,7 +83,7 @@ func TestSnapshotReturnsStoredData(t *testing.T) {
 	snap := Snapshot{
 		FetchedAt: fetchedAt,
 		Stale:     true,
-		Providers: []Provider{{ID: "codex", Name: "Codex"}},
+		Providers: []Provider{{ID: "codex", Name: "Codex", Raw: json.RawMessage(`{"private":"upstream"}`)}},
 	}
 	payload, err := json.Marshal(snap)
 	if err != nil {
@@ -110,6 +110,9 @@ func TestSnapshotReturnsStoredData(t *testing.T) {
 	}
 	if len(got.Providers) != 1 || got.Providers[0].ID != "codex" {
 		t.Fatalf("unexpected providers: %+v", got.Providers)
+	}
+	if got.Providers[0].Raw != nil || strings.Contains(rec.Body.String(), `"private"`) {
+		t.Fatalf("phone snapshot leaked raw upstream payload: %s", rec.Body.String())
 	}
 	if got.PollIntervalMinutes != 5 {
 		t.Fatalf("expected pollIntervalMinutes from settings default 5, got %d", got.PollIntervalMinutes)

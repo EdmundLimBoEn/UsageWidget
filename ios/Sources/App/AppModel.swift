@@ -28,10 +28,12 @@ final class AppModel {
         if let creds = try? keychain.load() {
             self.credentials = creds
             self.isConfigured = true
-            store.mirrorCredentials(creds)
         } else if let mirrored = store.mirroredCredentials() {
             self.credentials = mirrored
             self.isConfigured = true
+            if (try? keychain.save(mirrored)) != nil {
+                store.mirrorCredentials(nil)
+            }
         }
     }
 
@@ -72,7 +74,7 @@ final class AppModel {
         let client = try APIClient.make(credentials: creds)
         let health = try await client.fetchHealth()
         try keychain.save(creds)
-        store.mirrorCredentials(creds)
+        store.mirrorCredentials(nil)
         self.credentials = creds
         self.isConfigured = true
         self.health = health

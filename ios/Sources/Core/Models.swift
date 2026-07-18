@@ -234,7 +234,11 @@ public struct DemoAlertResult: Codable, Equatable, Sendable {
 public enum AppConstants {
     public static let appGroupID = "group.systems.edmundlim.usagewidget"
     public static let keychainService = "systems.edmundlim.UsageWidget"
-    public static let keychainAccessGroup = "systems.edmundlim.UsageWidget"
+    public static var keychainAccessGroup: String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "UsageWidgetKeychainAccessGroup") as? String,
+              !value.isEmpty, !value.contains("$(") else { return nil }
+        return value
+    }
     public static let validPollIntervals = [1, 5, 15, 30, 60]
 }
 
