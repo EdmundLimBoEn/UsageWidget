@@ -33,6 +33,7 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 - [x] Tailscale Serve: `https://edserve.tail125275.ts.net/usagewidget` → `127.0.0.1:8377`.
 - [ ] Ensure CodexBar `serve` is running on localhost and `/usage` returns live provider data.
 - [x] APNs `.p8` + `APNS_*` env on edServe (health shows `"apns":true`; live send succeeds).
+- [x] Cloudflare CLI authenticated; `usagewidget-demo` Tunnel, operator-only Access policy, and `demo-usagewidget.edmundlim.systems` DNS are live.
 - [ ] From the phone (or any tailnet device), hit `GET /v1/health` with the bearer token (or `usagewidget health`).
 
 ## Demo validation
