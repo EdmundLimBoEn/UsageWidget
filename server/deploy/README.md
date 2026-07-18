@@ -107,5 +107,7 @@ CodexBar's `serve` must already be listening on localhost (default
 | GET/PUT | `/v1/settings` | Poll interval, order, thresholds |
 | POST | `/v1/devices` | Register/rotate APNs + widget tokens |
 | DELETE | `/v1/devices/{deviceID}` | Invalidate device |
+| POST | `/v1/poll` | Force one poll cycle now |
+| POST | `/v1/demo/alert` | Synthetic test APNs + widget refresh |
 
 All `/v1/*` routes require `Authorization: Bearer <USAGEWIDGET_TOKEN>`.

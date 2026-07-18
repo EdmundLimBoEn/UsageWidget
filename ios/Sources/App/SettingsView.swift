@@ -94,6 +94,35 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                Button {
+                    Task { await model.forcePoll() }
+                } label: {
+                    Label("Poll server now", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(model.isTestingAction || !model.isConfigured)
+
+                Button {
+                    Task { await model.sendDemoAlert() }
+                } label: {
+                    Label("Send test alert", systemImage: "bell.badge")
+                }
+                .disabled(model.isTestingAction || !model.isConfigured)
+
+                if model.isTestingAction {
+                    ProgressView()
+                }
+                if let status = model.statusMessage {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Testing")
+            } footer: {
+                Text("For demos and debugging. Poll runs the real CodexBar path; test alert is synthetic and does not change live usage data.")
+            }
+
             Section("Server health") {
                 if let h = model.health {
                     LabeledContent("Service", value: h.service)

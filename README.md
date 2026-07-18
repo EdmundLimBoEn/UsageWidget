@@ -56,6 +56,8 @@ All routes require `Authorization: Bearer <USAGEWIDGET_TOKEN>`.
 | `GET`/`PUT` | `/v1/settings` | Poll interval, order/visibility, thresholds |
 | `POST` | `/v1/devices` | Register/rotate APNs + WidgetKit push tokens |
 | `DELETE` | `/v1/devices/{deviceID}` | Invalidate a device |
+| `POST` | `/v1/poll` | Force one poll cycle now (real CodexBar path) |
+| `POST` | `/v1/demo/alert` | Send a synthetic test APNs + widget refresh |
 
 ### Demo flow
 
@@ -64,7 +66,10 @@ All routes require `Authorization: Bearer <USAGEWIDGET_TOKEN>`.
    APNs alerts + widget refreshes when data changes.
 3. iPhone (Tailscale on) connects with HTTPS URL + bearer token.
 4. Dashboard + large widget show live providers; hide/reorder in Settings.
-5. Force real CodexBar usage changes for the demo — no simulated events.
+5. For on-stage demos: Settings → **Poll server now** (or `POST /v1/poll`) to
+   sample CodexBar immediately; **Send test alert** (or `POST /v1/demo/alert`) to
+   fire a synthetic notification without waiting for a real threshold. Usage data
+   itself is never faked — only the demo alert payload is synthetic.
 
 ## iOS quick start
 

@@ -68,10 +68,40 @@ public struct APIClient: Sendable {
         }
     }
 
+    public func forcePoll() async throws -> PollResult {
+        let request = try makeRequest(path: "/v1/poll", method: "POST")
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIError.transport(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        // 502 still returns a structured PollResult body when CodexBar/normalize fails.
+        guard (200..<300).contains(http.statusCode) || http.statusCode == 502 else {
+            throw APIError.httpStatus(http.statusCode, String(data: data, encoding: .utf8))
+        }
+        do {
+            return try JSONCoding.decoder.decode(PollResult.self, from: data)
+        } catch {
+            throw APIError.decoding(String(describing: error))
+        }
+    }
+
+    public func sendDemoAlert() async throws -> DemoAlertResult {
+        try await sendEmpty(path: "/v1/demo/alert", method: "POST")
+    }
+
     // MARK: - Internals
 
     private func get<T: Decodable>(path: String) async throws -> T {
         let request = try makeRequest(path: path, method: "GET")
+        return try await perform(request)
+    }
+
+    private func sendEmpty<T: Decodable>(path: String, method: String) async throws -> T {
+        let request = try makeRequest(path: path, method: method)
         return try await perform(request)
     }
 

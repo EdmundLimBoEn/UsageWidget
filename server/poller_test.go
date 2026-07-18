@@ -91,18 +91,30 @@ func TestPollerNoRepeatEventsOnDuplicate(t *testing.T) {
 	// Seed a baseline below early so the first real poll crosses it.
 	seedWindow(t, store, "codex.primary", 5, nil)
 
-	poller.pollOnce(context.Background())
-	first, err := store.EventNotified("early:codex.primary:2026-07-17T20:00:00Z")
+	result := poller.PollNow(context.Background())
+	if !result.Success || result.Events < 1 {
+		t.Fatalf("expected successful poll with events, got %+v", result)
+	}
+	snap := latestSnap(t, store)
+	w := snap.Providers[0].Windows[0]
+	earlyKey := eventKey("early", w.ID, w.ResetsAt)
+	first, err := store.EventNotified(earlyKey)
 	if err != nil {
 		t.Fatalf("EventNotified: %v", err)
 	}
 	if !first {
-		t.Fatalf("expected early event recorded after first poll")
+		t.Fatalf("expected early event recorded after first poll (key %q)", earlyKey)
 	}
 
 	// A second identical poll must not produce a fresh crossing.
-	poller.pollOnce(context.Background())
-	snap := latestSnap(t, store)
+	result2 := poller.PollNow(context.Background())
+	if !result2.Success {
+		t.Fatalf("second poll failed: %+v", result2)
+	}
+	if result2.Events != 0 {
+		t.Fatalf("expected no new events on duplicate poll, got %d", result2.Events)
+	}
+	snap = latestSnap(t, store)
 	if snap.Providers[0].Windows[0].UsedPercent != 42 {
 		t.Fatalf("unexpected snapshot state: %+v", snap.Providers[0].Windows[0])
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,10 +12,17 @@ import (
 	"time"
 )
 
+// ForcePoller is implemented by *Poller; tests may inject stubs.
+type ForcePoller interface {
+	PollNow(ctx context.Context) PollResult
+}
+
 type API struct {
 	cfg      Config
 	store    *Store
 	codexbar *CodexBarClient
+	poller   ForcePoller
+	notifier Notifier
 
 	mu            sync.Mutex
 	polling       bool
@@ -24,6 +32,14 @@ type API struct {
 
 func NewAPI(cfg Config, store *Store, codexbar *CodexBarClient) *API {
 	return &API{cfg: cfg, store: store, codexbar: codexbar}
+}
+
+func (a *API) SetPoller(p ForcePoller) {
+	a.poller = p
+}
+
+func (a *API) SetNotifier(n Notifier) {
+	a.notifier = n
 }
 
 func (a *API) RecordPollResult(at time.Time, success bool) {
@@ -49,6 +65,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/settings", a.handlePutSettings)
 	mux.HandleFunc("POST /v1/devices", a.handlePostDevice)
 	mux.HandleFunc("DELETE /v1/devices/{deviceID}", a.handleDeleteDevice)
+	mux.HandleFunc("POST /v1/poll", a.handleForcePoll)
+	mux.HandleFunc("POST /v1/demo/alert", a.handleDemoAlert)
 	return a.withAuth(mux)
 }
 
@@ -322,4 +340,90 @@ func (a *API) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type pollResponse struct {
+	OK              bool      `json:"ok"`
+	PolledAt        time.Time `json:"polledAt"`
+	Success         bool      `json:"success"`
+	Events          int       `json:"events"`
+	SnapshotChanged bool      `json:"snapshotChanged"`
+	Error           string    `json:"error,omitempty"`
+}
+
+func (a *API) handleForcePoll(w http.ResponseWriter, r *http.Request) {
+	if a.poller == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "poller not available"})
+		return
+	}
+	result := a.poller.PollNow(r.Context())
+	resp := pollResponse{
+		OK:              result.Success,
+		PolledAt:        result.PolledAt,
+		Success:         result.Success,
+		Events:          result.Events,
+		SnapshotChanged: result.SnapshotChanged,
+		Error:           result.Error,
+	}
+	if !result.Success {
+		writeJSON(w, http.StatusBadGateway, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type demoAlertResponse struct {
+	OK                bool `json:"ok"`
+	DevicesAlerted    int  `json:"devicesAlerted"`
+	WidgetsRefreshed  int  `json:"widgetsRefreshed"`
+}
+
+func demoEvent() Event {
+	return Event{
+		Key:              "demo",
+		Type:             "demo",
+		Title:            "UsageWidget demo",
+		ProviderID:       "demo",
+		ProviderName:     "Demo",
+		WindowID:         "demo.primary",
+		WindowTitle:      "Primary",
+		UsedPercent:      72,
+		RemainingPercent: 28,
+	}
+}
+
+func (a *API) handleDemoAlert(w http.ResponseWriter, r *http.Request) {
+	if a.notifier == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifier not available"})
+		return
+	}
+	devices, err := a.store.ListDevices()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ev := demoEvent()
+	var alerted, refreshed int
+	for _, d := range devices {
+		if d.APNsToken != "" {
+			if err := a.notifier.SendAlert(r.Context(), d.APNsToken, ev); err != nil {
+				log.Printf("demo alert: send to %s: %v", d.DeviceID, err)
+			} else {
+				alerted++
+			}
+		}
+		if d.WidgetToken != "" {
+			if err := a.notifier.SendWidgetRefresh(r.Context(), d.WidgetToken); err != nil {
+				log.Printf("demo alert: widget refresh %s: %v", d.DeviceID, err)
+			} else {
+				refreshed++
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, demoAlertResponse{
+		OK:               true,
+		DevicesAlerted:   alerted,
+		WidgetsRefreshed: refreshed,
+	})
 }

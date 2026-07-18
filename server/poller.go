@@ -4,8 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 )
+
+type PollResult struct {
+	PolledAt        time.Time `json:"polledAt"`
+	Success         bool      `json:"success"`
+	Events          int       `json:"events"`
+	SnapshotChanged bool      `json:"snapshotChanged"`
+	Error           string    `json:"error,omitempty"`
+}
 
 type Poller struct {
 	store    *Store
@@ -13,6 +22,8 @@ type Poller struct {
 	engine   *EventEngine
 	notifier Notifier
 	api      *API
+
+	mu sync.Mutex
 }
 
 func NewPoller(store *Store, codexbar *CodexBarClient, notifier Notifier, api *API) *Poller {
@@ -26,13 +37,13 @@ func NewPoller(store *Store, codexbar *CodexBarClient, notifier Notifier, api *A
 }
 
 func (p *Poller) Run(ctx context.Context) {
-	p.pollOnce(ctx)
+	p.PollNow(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(p.interval()):
-			p.pollOnce(ctx)
+			p.PollNow(ctx)
 		}
 	}
 }
@@ -45,14 +56,23 @@ func (p *Poller) interval() time.Duration {
 	return time.Duration(s.PollIntervalMinutes) * time.Minute
 }
 
-func (p *Poller) pollOnce(ctx context.Context) {
+// PollNow runs one poll cycle. Concurrent callers serialize on p.mu.
+func (p *Poller) PollNow(ctx context.Context) PollResult {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pollOnce(ctx)
+}
+
+func (p *Poller) pollOnce(ctx context.Context) PollResult {
 	now := time.Now().UTC()
+	result := PollResult{PolledAt: now}
 
 	settings, err := loadSettings(p.store)
 	if err != nil {
 		log.Printf("poller: load settings: %v", err)
 		p.api.RecordPollResult(now, false)
-		return
+		result.Error = err.Error()
+		return result
 	}
 
 	body, err := p.codexbar.Fetch(ctx)
@@ -60,14 +80,16 @@ func (p *Poller) pollOnce(ctx context.Context) {
 		log.Printf("poller: fetch failed, keeping last snapshot: %v", err)
 		p.markStale()
 		p.api.RecordPollResult(now, false)
-		return
+		result.Error = err.Error()
+		return result
 	}
 
 	snap, err := Normalize(body, settings.PollIntervalMinutes, now)
 	if err != nil {
 		log.Printf("poller: normalize failed: %v", err)
 		p.api.RecordPollResult(now, false)
-		return
+		result.Error = err.Error()
+		return result
 	}
 
 	changed := p.snapshotChanged(snap)
@@ -75,23 +97,32 @@ func (p *Poller) pollOnce(ctx context.Context) {
 	if err != nil {
 		log.Printf("poller: marshal snapshot: %v", err)
 		p.api.RecordPollResult(now, false)
-		return
+		result.Error = err.Error()
+		return result
 	}
 	if err := p.store.SaveSnapshot(now, payload); err != nil {
 		log.Printf("poller: save snapshot: %v", err)
 		p.api.RecordPollResult(now, false)
-		return
+		result.Error = err.Error()
+		return result
 	}
 
 	events, err := p.engine.Process(snap, settings, now)
 	if err != nil {
 		log.Printf("poller: process events: %v", err)
 		p.api.RecordPollResult(now, true)
-		return
+		result.Success = true
+		result.SnapshotChanged = changed
+		result.Error = err.Error()
+		return result
 	}
 
 	p.dispatch(ctx, events, changed)
 	p.api.RecordPollResult(now, true)
+	result.Success = true
+	result.Events = len(events)
+	result.SnapshotChanged = changed
+	return result
 }
 
 func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool) {

@@ -157,6 +157,43 @@ public struct DeviceRegistration: Codable, Equatable, Sendable {
     }
 }
 
+public struct PollResult: Codable, Equatable, Sendable {
+    public var ok: Bool
+    public var polledAt: Date
+    public var success: Bool
+    public var events: Int
+    public var snapshotChanged: Bool
+    public var error: String?
+
+    public init(
+        ok: Bool,
+        polledAt: Date,
+        success: Bool,
+        events: Int,
+        snapshotChanged: Bool,
+        error: String? = nil
+    ) {
+        self.ok = ok
+        self.polledAt = polledAt
+        self.success = success
+        self.events = events
+        self.snapshotChanged = snapshotChanged
+        self.error = error
+    }
+}
+
+public struct DemoAlertResult: Codable, Equatable, Sendable {
+    public var ok: Bool
+    public var devicesAlerted: Int
+    public var widgetsRefreshed: Int
+
+    public init(ok: Bool, devicesAlerted: Int, widgetsRefreshed: Int) {
+        self.ok = ok
+        self.devicesAlerted = devicesAlerted
+        self.widgetsRefreshed = widgetsRefreshed
+    }
+}
+
 public enum AppConstants {
     public static let appGroupID = "group.systems.edmundlim.usagewidget"
     public static let keychainService = "systems.edmundlim.UsageWidget"

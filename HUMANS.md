@@ -43,6 +43,8 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 
 - [ ] Dashboard shows live Codex / Claude / Grok (or whatever CodexBar returns).
 - [ ] Widget renders up to four provider rows with data age.
-- [ ] Trigger a real usage threshold / reset on CodexBar and confirm APNs + widget refresh (no simulated demo mode).
-- [ ] Restart usagewidgetd; confirm no duplicate alerts and baseline is not re-fired.
+- [ ] Settings → **Poll server now** forces an immediate CodexBar sample (health lastPoll updates).
+- [ ] Settings → **Send test alert** delivers a synthetic APNs notification + widget refresh (plumbing check; does not mutate usage).
+- [ ] Trigger a real usage threshold / reset on CodexBar and confirm real event APNs + widget refresh.
+- [ ] Restart usagewidgetd; confirm no duplicate real alerts and baseline is not re-fired.
 - [ ] Briefly lose Tailscale; app/widget still show last cached snapshot as stale.

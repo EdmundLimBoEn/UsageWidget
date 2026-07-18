@@ -11,7 +11,9 @@ final class AppModel {
     var preferences: DisplayPreferences = DisplayPreferences()
     var isConfigured: Bool = false
     var isLoading: Bool = false
+    var isTestingAction: Bool = false
     var errorMessage: String?
+    var statusMessage: String?
     var notificationStatus: String = "unknown"
 
     private let keychain: KeychainStore
@@ -151,6 +153,41 @@ final class AppModel {
             if isConfigured {
                 errorMessage = "Device registration failed: \(error)"
             }
+        }
+    }
+
+    func forcePoll() async {
+        isTestingAction = true
+        defer { isTestingAction = false }
+        do {
+            let client = try client()
+            let result = try await client.forcePoll()
+            if result.success {
+                statusMessage = "Polled — \(result.events) event(s)" +
+                    (result.snapshotChanged ? ", snapshot changed" : "")
+                errorMessage = nil
+            } else {
+                errorMessage = result.error ?? "Poll failed"
+                statusMessage = nil
+            }
+            await refresh()
+        } catch {
+            errorMessage = String(describing: error)
+            statusMessage = nil
+        }
+    }
+
+    func sendDemoAlert() async {
+        isTestingAction = true
+        defer { isTestingAction = false }
+        do {
+            let client = try client()
+            let result = try await client.sendDemoAlert()
+            statusMessage = "Test alert → \(result.devicesAlerted) device(s), \(result.widgetsRefreshed) widget(s)"
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+            statusMessage = nil
         }
     }
 }

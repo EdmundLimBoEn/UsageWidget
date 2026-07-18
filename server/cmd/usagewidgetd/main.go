@@ -39,6 +39,8 @@ func main() {
 
 	api := server.NewAPI(cfg, store, codexbar)
 	poller := server.NewPoller(store, codexbar, notifier, api)
+	api.SetPoller(poller)
+	api.SetNotifier(notifier)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

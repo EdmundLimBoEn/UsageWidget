@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -327,5 +328,165 @@ func TestFilterHidden(t *testing.T) {
 	}
 	if len(filterHidden(providers, nil)) != 3 {
 		t.Fatalf("nil hidden list should keep all providers")
+	}
+}
+
+type stubPoller struct {
+	calls  int
+	result PollResult
+}
+
+func (s *stubPoller) PollNow(context.Context) PollResult {
+	s.calls++
+	return s.result
+}
+
+type recordingNotifier struct {
+	alerts  []Event
+	widgets int
+}
+
+func (r *recordingNotifier) SendAlert(_ context.Context, _ string, ev Event) error {
+	r.alerts = append(r.alerts, ev)
+	return nil
+}
+
+func (r *recordingNotifier) SendWidgetRefresh(_ context.Context, _ string) error {
+	r.widgets++
+	return nil
+}
+
+func TestForcePollRequiresAuth(t *testing.T) {
+	api, _ := newTestAPI(t)
+	api.SetPoller(&stubPoller{result: PollResult{Success: true, PolledAt: time.Now().UTC()}})
+	rec := doRequest(t, api, http.MethodPost, "/v1/poll", "", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestForcePollUnavailableWithoutPoller(t *testing.T) {
+	api, _ := newTestAPI(t)
+	rec := doRequest(t, api, http.MethodPost, "/v1/poll", "secret-token", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestForcePollSuccess(t *testing.T) {
+	api, _ := newTestAPI(t)
+	polledAt := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	stub := &stubPoller{result: PollResult{
+		PolledAt:        polledAt,
+		Success:         true,
+		Events:          2,
+		SnapshotChanged: true,
+	}}
+	api.SetPoller(stub)
+
+	rec := doRequest(t, api, http.MethodPost, "/v1/poll", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected 1 poll call, got %d", stub.calls)
+	}
+	var got pollResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.OK || !got.Success || got.Events != 2 || !got.SnapshotChanged {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+	if !got.PolledAt.Equal(polledAt) {
+		t.Fatalf("polledAt: got %v want %v", got.PolledAt, polledAt)
+	}
+}
+
+func TestForcePollFailureBadGateway(t *testing.T) {
+	api, _ := newTestAPI(t)
+	api.SetPoller(&stubPoller{result: PollResult{
+		PolledAt: time.Now().UTC(),
+		Success:  false,
+		Error:    "codexbar down",
+	}})
+	rec := doRequest(t, api, http.MethodPost, "/v1/poll", "secret-token", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got pollResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.OK || got.Success || got.Error != "codexbar down" {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+}
+
+func TestDemoAlertRequiresAuth(t *testing.T) {
+	api, _ := newTestAPI(t)
+	api.SetNotifier(&recordingNotifier{})
+	rec := doRequest(t, api, http.MethodPost, "/v1/demo/alert", "", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestDemoAlertUnavailableWithoutNotifier(t *testing.T) {
+	api, _ := newTestAPI(t)
+	rec := doRequest(t, api, http.MethodPost, "/v1/demo/alert", "secret-token", nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDemoAlertNoDevices(t *testing.T) {
+	api, _ := newTestAPI(t)
+	api.SetNotifier(&recordingNotifier{})
+	rec := doRequest(t, api, http.MethodPost, "/v1/demo/alert", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got demoAlertResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.OK || got.DevicesAlerted != 0 || got.WidgetsRefreshed != 0 {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+}
+
+func TestDemoAlertSendsWithoutRecordingEvents(t *testing.T) {
+	api, store := newTestAPI(t)
+	recN := &recordingNotifier{}
+	api.SetNotifier(recN)
+
+	if err := store.UpsertDevice("dev-1", "apns-1", "widget-1"); err != nil {
+		t.Fatalf("UpsertDevice: %v", err)
+	}
+
+	rec := doRequest(t, api, http.MethodPost, "/v1/demo/alert", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got demoAlertResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !got.OK || got.DevicesAlerted != 1 || got.WidgetsRefreshed != 1 {
+		t.Fatalf("unexpected response: %+v", got)
+	}
+	if len(recN.alerts) != 1 || recN.alerts[0].Type != "demo" {
+		t.Fatalf("expected one demo alert, got %+v", recN.alerts)
+	}
+	if recN.widgets != 1 {
+		t.Fatalf("expected one widget refresh, got %d", recN.widgets)
+	}
+	notified, err := store.EventNotified("demo")
+	if err != nil {
+		t.Fatalf("EventNotified: %v", err)
+	}
+	if notified {
+		t.Fatalf("demo alert must not record event keys for dedup")
 	}
 }
