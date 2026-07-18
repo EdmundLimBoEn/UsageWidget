@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# usagewidget — Mac-side CLI for the UsageWidget companion API + edServe deploy.
+set -euo pipefail
+
+CONFIG_DIR="${USAGEWIDGET_CONFIG_DIR:-$HOME/.config/usagewidget}"
+CONFIG_FILE="${USAGEWIDGET_CONFIG:-$CONFIG_DIR/env}"
+DEFAULT_URL="https://edserve.tail125275.ts.net/usagewidget"
+DEFAULT_HOST="root@100.83.252.53"
+DEFAULT_REPO="${USAGEWIDGET_REPO:-$HOME/Documents/apps/claude/UsageWidget}"
+
+die() { echo "usagewidget: $*" >&2; exit 1; }
+
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck disable=SC1090
+    set -a
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+    set +a
+  fi
+  USAGEWIDGET_URL="${USAGEWIDGET_URL:-$DEFAULT_URL}"
+  USAGEWIDGET_DEPLOY_HOST="${USAGEWIDGET_DEPLOY_HOST:-$DEFAULT_HOST}"
+  USAGEWIDGET_REPO="${USAGEWIDGET_REPO:-$DEFAULT_REPO}"
+  # strip trailing slash
+  USAGEWIDGET_URL="${USAGEWIDGET_URL%/}"
+}
+
+require_token() {
+  load_config
+  [[ -n "${USAGEWIDGET_TOKEN:-}" ]] || die "USAGEWIDGET_TOKEN not set. Run: usagewidget env sync"
+}
+
+api() {
+  require_token
+  local method="$1" path="$2"
+  shift 2
+  # Optional: allow extra success codes via USAGEWIDGET_OK_CODES (space-separated)
+  local ok_codes="${USAGEWIDGET_OK_CODES:-200 204}"
+  local url="${USAGEWIDGET_URL}${path}"
+  local tmp
+  tmp="$(mktemp)"
+  local code
+  code="$(curl -sS -o "$tmp" -w "%{http_code}" -X "$method" \
+    -H "Authorization: Bearer ${USAGEWIDGET_TOKEN}" \
+    -H "Accept: application/json" \
+    "$@" \
+    "$url")" || { rm -f "$tmp"; die "request failed: $method $url"; }
+  cat "$tmp"
+  echo
+  rm -f "$tmp"
+  local c
+  for c in $ok_codes; do
+    [[ "$code" == "$c" ]] && return 0
+  done
+  die "HTTP $code for $method $path"
+}
+
+cmd_help() {
+  cat <<'EOF'
+usagewidget — talk to usagewidgetd / deploy to edServe
+
+Config:  ~/.config/usagewidget/env  (mode 600, never commit)
+  USAGEWIDGET_URL            default https://edserve.tail125275.ts.net/usagewidget
+  USAGEWIDGET_TOKEN          bearer token (synced from edServe)
+  USAGEWIDGET_DEPLOY_HOST    default root@100.83.252.53
+  USAGEWIDGET_REPO           local repo path
+
+Commands:
+  env [show]       Show config (token redacted)
+  env sync         Pull token + write Mac env from edServe
+  env path         Print config file path
+  health           GET /v1/health
+  snapshot         GET /v1/snapshot
+  settings         GET /v1/settings
+  poll             POST /v1/poll  (force CodexBar sample)
+  demo | test      POST /v1/demo/alert  (synthetic APNs + widget push)
+  deploy           Cross-compile + install + restart on edServe
+  logs [-f]        journalctl -u usagewidget on edServe
+  status           systemd status on edServe
+  ssh [cmd...]     ssh to deploy host (default: interactive shell)
+  help             This help
+
+Examples:
+  usagewidget env sync
+  usagewidget health
+  usagewidget poll
+  usagewidget demo
+  usagewidget deploy
+  usagewidget logs -f
+EOF
+}
+
+cmd_env_show() {
+  load_config
+  echo "config:  $CONFIG_FILE"
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "(missing — run: usagewidget env sync)"
+    return
+  fi
+  echo "url:     ${USAGEWIDGET_URL}"
+  echo "host:    ${USAGEWIDGET_DEPLOY_HOST}"
+  echo "repo:    ${USAGEWIDGET_REPO}"
+  if [[ -n "${USAGEWIDGET_TOKEN:-}" ]]; then
+    local n="${#USAGEWIDGET_TOKEN}"
+    echo "token:   ${USAGEWIDGET_TOKEN:0:4}…${USAGEWIDGET_TOKEN: -4} ($n chars)"
+  else
+    echo "token:   (unset)"
+  fi
+  # optional APNS_* if present locally (for running usagewidgetd on Mac)
+  if [[ -n "${APNS_KEY_ID:-}" || -n "${APNS_KEY_PATH:-}" ]]; then
+    echo "apns:    key_id=${APNS_KEY_ID:-?} path=${APNS_KEY_PATH:-?} env=${APNS_ENV:-?} team=${APNS_TEAM_ID:-?}"
+  fi
+}
+
+cmd_env_sync() {
+  local host="${USAGEWIDGET_DEPLOY_HOST:-$DEFAULT_HOST}"
+  # allow override from existing config
+  if [[ -f "$CONFIG_FILE" ]]; then
+    # shellcheck disable=SC1090
+    set -a; source "$CONFIG_FILE"; set +a
+    host="${USAGEWIDGET_DEPLOY_HOST:-$host}"
+  fi
+  echo "Syncing token from ${host}…"
+  local token
+  token="$(ssh -o BatchMode=yes "$host" 'grep ^USAGEWIDGET_TOKEN= /etc/usagewidget/env | cut -d= -f2-')" \
+    || die "ssh failed — is Tailscale up and deploy host reachable?"
+  token="$(printf '%s' "$token" | tr -d '\r\n')"
+  [[ ${#token} -ge 32 ]] || die "unexpected token from remote"
+
+  mkdir -p "$CONFIG_DIR"
+  umask 077
+  cat >"$CONFIG_FILE" <<EOF
+# UsageWidget Mac client config — do not commit
+# Managed by: usagewidget env sync
+USAGEWIDGET_URL=${USAGEWIDGET_URL:-$DEFAULT_URL}
+USAGEWIDGET_TOKEN=${token}
+USAGEWIDGET_DEPLOY_HOST=${host}
+USAGEWIDGET_REPO=${USAGEWIDGET_REPO:-$DEFAULT_REPO}
+EOF
+  chmod 600 "$CONFIG_FILE"
+  echo "Wrote $CONFIG_FILE (mode 600)"
+  cmd_env_show
+}
+
+cmd_deploy() {
+  load_config
+  local repo="${USAGEWIDGET_REPO}"
+  local script="$repo/server/deploy/redeploy.sh"
+  [[ -x "$script" || -f "$script" ]] || die "redeploy script missing: $script"
+  USAGEWIDGET_DEPLOY_HOST="${USAGEWIDGET_DEPLOY_HOST}" "$script"
+}
+
+cmd_logs() {
+  load_config
+  local extra=(-n 50 --no-pager)
+  if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then
+    extra=(-f)
+  fi
+  ssh -o BatchMode=yes "${USAGEWIDGET_DEPLOY_HOST}" "journalctl -u usagewidget ${extra[*]}"
+}
+
+cmd_status() {
+  load_config
+  ssh -o BatchMode=yes "${USAGEWIDGET_DEPLOY_HOST}" "systemctl status usagewidget --no-pager | head -30"
+}
+
+cmd_ssh() {
+  load_config
+  if [[ $# -eq 0 ]]; then
+    ssh "${USAGEWIDGET_DEPLOY_HOST}"
+  else
+    ssh -o BatchMode=yes "${USAGEWIDGET_DEPLOY_HOST}" "$@"
+  fi
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+  case "$cmd" in
+    help|-h|--help) cmd_help ;;
+    env)
+      case "${1:-show}" in
+        show|"") cmd_env_show ;;
+        sync) cmd_env_sync ;;
+        path) echo "$CONFIG_FILE" ;;
+        *) die "unknown env subcommand: $1 (show|sync|path)" ;;
+      esac
+      ;;
+    health) api GET /v1/health ;;
+    snapshot) api GET /v1/snapshot ;;
+    settings) api GET /v1/settings ;;
+    poll) USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll ;;
+    demo|test|demo-alert|alert) api POST /v1/demo/alert ;;
+    deploy|redeploy) cmd_deploy "$@" ;;
+    logs) cmd_logs "$@" ;;
+    status) cmd_status ;;
+    ssh) cmd_ssh "$@" ;;
+    *) die "unknown command: $cmd (try: usagewidget help)" ;;
+  esac
+}
+
+main "$@"

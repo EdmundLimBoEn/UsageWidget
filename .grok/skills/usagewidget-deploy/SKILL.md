@@ -37,12 +37,18 @@ ssh root@100.83.252.53 '
 '
 ```
 
-Or run the helper:
+Or run the helper / Mac CLI:
 
 ```bash
 ./server/deploy/redeploy.sh
+# preferred on Mac (after: ln -sfn $PWD/cli/usagewidget ~/.local/bin/usagewidget)
+usagewidget deploy
+usagewidget health
+usagewidget poll
+usagewidget demo
 ```
 
+Mac config: `~/.config/usagewidget/env` (from `usagewidget env sync`).
 ## Verify
 
 ```bash

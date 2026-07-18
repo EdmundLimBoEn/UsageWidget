@@ -13,6 +13,20 @@ usage events, and pushes APNs alerts + WidgetKit refreshes to the iPhone app.
 | Data | `/var/lib/usagewidget/usagewidget.db` |
 | Listen | `127.0.0.1:8377` (Tailscale Serve path `/usagewidget`) |
 | Agent skill | `.grok/skills/usagewidget-deploy/SKILL.md` (`/usagewidget-deploy`) |
+| Mac CLI | `cli/usagewidget` → `~/.local/bin/usagewidget` |
+| Mac config | `~/.config/usagewidget/env` (token + URL; mode 600) |
+
+## Mac CLI
+
+```bash
+usagewidget env sync    # write ~/.config/usagewidget/env from edServe token
+usagewidget health
+usagewidget poll
+usagewidget demo        # POST /v1/demo/alert
+usagewidget deploy      # same as redeploy.sh
+usagewidget logs -f
+usagewidget help
+```
 
 ## Redeploy (day-to-day)
 

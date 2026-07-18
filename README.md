@@ -46,6 +46,20 @@ server-side, so the phone never receives them.
 Deploy docs: [`server/deploy/README.md`](server/deploy/README.md).
 Day-to-day redeploy: `./server/deploy/redeploy.sh` (or agent skill `/usagewidget-deploy`).
 
+### Mac CLI
+
+```bash
+# installed to ~/.local/bin/usagewidget (repo: cli/usagewidget)
+usagewidget env sync    # pull bearer token from edServe → ~/.config/usagewidget/env
+usagewidget health
+usagewidget poll        # force server poll
+usagewidget demo        # synthetic test alert
+usagewidget deploy      # rebuild + restart on edServe
+usagewidget logs -f
+```
+
+Config lives at `~/.config/usagewidget/env` (mode 600, not in git).
+
 ### API
 
 All routes require `Authorization: Bearer <USAGEWIDGET_TOKEN>`.
