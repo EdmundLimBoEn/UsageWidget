@@ -33,6 +33,7 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 - [x] Tailscale Serve: `https://edserve.tail125275.ts.net/usagewidget` → `127.0.0.1:8377`.
 - [ ] Ensure CodexBar `serve` is running on localhost and `/usage` returns live provider data.
 - [x] APNs `.p8` + `APNS_*` env on edServe (health shows `"apns":true`; live send succeeds).
+- [x] Cloudflare CLI authenticated; `usagewidget-demo` Tunnel, operator-only Access policy, and `demo-usagewidget.edmundlim.systems` DNS are live.
 - [ ] From the phone (or any tailnet device), hit `GET /v1/health` with the bearer token (or `usagewidget health`).
 
 ## Demo validation
@@ -44,3 +45,9 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 - [ ] Trigger a real usage threshold / reset on CodexBar and confirm real event APNs + widget refresh.
 - [ ] Restart usagewidgetd; confirm no duplicate real alerts and baseline is not re-fired.
 - [ ] Briefly lose Tailscale; app/widget still show last cached snapshot as stale.
+
+## Hackathon portfolio closeout
+
+- [ ] After automated gates pass, run the named physical-device matrix and retain redacted screenshots/logs under `docs/evidence/`.
+- [ ] Capture and publish the required demo video only after dashboard browser QA and physical-device QA pass.
+- [ ] After the hackathon, set `USAGEWIDGET_DEMO_ENABLED=false`, disable the Cloudflare demo hostname/Tunnel/Access policy, and remove temporary demo-only surfaces as planned.

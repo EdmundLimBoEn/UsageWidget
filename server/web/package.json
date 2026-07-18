@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "build": "bun build app.ts --outfile app.js --target browser"
+  }
+}

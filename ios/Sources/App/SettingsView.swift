@@ -65,6 +65,15 @@ struct SettingsView: View {
             }
 
             Section("Providers") {
+                Toggle(
+                    "Demo provider",
+                    isOn: Binding(
+                        get: { model.settings.demoProviderEnabled },
+                        set: { model.setDemoProviderEnabled($0) }
+                    )
+                )
+                .disabled(model.isTestingAction || !model.isConfigured)
+
                 if let providers = model.snapshot?.providers {
                     ForEach(providerRows(providers), id: \.id) { row in
                         HStack {
@@ -183,14 +192,14 @@ struct SettingsView: View {
             order: model.preferences.providerOrder,
             hidden: []
         )
-        var rows = ordered.map { Row(id: $0.id, name: $0.name) }
+        var rows = ordered.filter { $0.id != "demo" }.map { Row(id: $0.id, name: $0.name) }
         let seen = Set(rows.map(\.id))
-        for p in providers where !seen.contains(p.id) {
+        for p in providers where p.id != "demo" && !seen.contains(p.id) {
             rows.append(Row(id: p.id, name: p.name))
         }
         // Include hidden/order-only entries without live data (server omits hidden providers)
         for id in model.preferences.providerOrder + model.preferences.hiddenProviders
-        where !rows.contains(where: { $0.id == id }) {
+        where id != "demo" && !rows.contains(where: { $0.id == id }) {
             rows.append(Row(id: id, name: id))
         }
         return rows

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo Provider — Lab Console</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="hwrap">
+      <h1>Demo Lab</h1>
+      <div class="kpis" aria-label="Demo status summary">
+        <span>Pipeline <b id="kpi-pipeline">not run</b></span>
+        <span>Last poll <b id="kpi-poll">—</b></span>
+        <span>Demo state <b id="kpi-state">loading</b></span>
+        <span>Recent events <b id="kpi-events">0</b></span>
+      </div>
+    </div>
+  </header>
+
+  <main id="console" aria-busy="true">
+    <aside class="banner" id="error-banner" aria-live="polite" hidden>
+      <p id="error-message"></p>
+      <button class="btn" id="retry" type="button">Retry</button>
+    </aside>
+
+    <section aria-label="Demo state controls">
+      <div class="card">
+        <h2>Windows</h2>
+        <div class="ctl">
+          <label for="primary-usage">Primary (5h)</label>
+          <output id="primary-output" for="primary-usage">—</output>
+          <input type="range" id="primary-usage" min="0" max="100" step="1" value="62">
+          <small id="primary-help">resets — · early 75 · danger 90</small>
+        </div>
+        <div class="ctl">
+          <label for="secondary-usage">Secondary (weekly)</label>
+          <output id="secondary-output" for="secondary-usage">—</output>
+          <input type="range" id="secondary-usage" min="0" max="100" step="1" value="34">
+          <small id="secondary-help">resets —</small>
+        </div>
+        <div class="ctl">
+          <label for="credits">Credits</label>
+          <input type="number" id="credits" value="2" min="0" max="99" step="1" inputmode="numeric">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Condition</h2>
+        <div class="ctl">
+          <span id="stale-label" class="control-label">Stale</span>
+          <label class="switch">
+            <input type="checkbox" id="stale" aria-labelledby="stale-label">
+            <span class="tr" aria-hidden="true"></span>
+            <span class="kn" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="ctl">
+          <span id="error-label" class="control-label">Error</span>
+          <label class="switch">
+            <input type="checkbox" id="provider-error" aria-labelledby="error-label">
+            <span class="tr" aria-hidden="true"></span>
+            <span class="kn" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div class="ctl">
+          <label for="reset-preset">Reset in</label>
+          <select id="reset-preset">
+            <option value="two-hours-eight">2h 08m</option>
+            <option value="thirty-minutes">30m</option>
+            <option value="five-minutes">5m</option>
+            <option value="one-minute-ago">past (1m ago)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Run</h2>
+        <div class="btnrow">
+          <button class="btn primary action" id="apply-poll" type="button" disabled>Apply + poll</button>
+          <button class="btn action" id="surprise-reset" type="button" aria-describedby="surprise-help" disabled>Surprise reset</button>
+          <button class="btn action" id="test-alert" type="button" disabled>Test alert</button>
+        </div>
+        <p class="sr-only" id="surprise-help">Surprise reset automatically establishes a valid baseline when needed.</p>
+      </div>
+    </section>
+
+    <section aria-label="Pipeline flow">
+      <h2>Pipeline (latest demo poll)</h2>
+      <div class="flow" id="pipeline-flow">
+        <div class="node skipped" data-stage="demo_state">
+          <span class="dot" aria-hidden="true"></span>
+          <b>Demo state</b>
+          <span class="stage-detail">Waiting for first poll</span>
+        </div>
+        <div class="link" aria-hidden="true"></div>
+        <div class="node skipped" data-stage="normalize">
+          <span class="dot" aria-hidden="true"></span>
+          <b>Normalize</b>
+          <span class="stage-detail">Waiting for first poll</span>
+        </div>
+        <div class="link" aria-hidden="true"></div>
+        <div class="node skipped" data-stage="snapshot_persisted">
+          <span class="dot" aria-hidden="true"></span>
+          <b>Snapshot persisted</b>
+          <span class="stage-detail">Waiting for first poll</span>
+        </div>
+        <div class="link" aria-hidden="true"></div>
+        <div class="node skipped" data-stage="event_engine">
+          <span class="dot" aria-hidden="true"></span>
+          <b>Event engine</b>
+          <span class="stage-detail">Waiting for first poll</span>
+        </div>
+        <div class="link" aria-hidden="true"></div>
+        <div class="node skipped" data-stage="apns">
+          <span class="dot" aria-hidden="true"></span>
+          <b>APNs delivery</b>
+          <span class="stage-detail">Waiting for first poll</span>
+        </div>
+      </div>
+
+      <div class="snapshot">
+        <h2>Current normalized snapshot</h2>
+        <pre id="snapshot-json" tabindex="0" aria-label="Current normalized demo provider JSON">Waiting for the demo snapshot…</pre>
+      </div>
+    </section>
+
+    <section aria-label="Event feed">
+      <div class="card">
+        <h2>Events &amp; results</h2>
+        <div class="filter" role="group" aria-label="Filter events">
+          <button type="button" data-filter="all" aria-pressed="true" aria-controls="event-list">All</button>
+          <button type="button" data-filter="thresholds" aria-pressed="false" aria-controls="event-list">Thresholds</button>
+          <button type="button" data-filter="resets" aria-pressed="false" aria-controls="event-list">Resets</button>
+          <button type="button" data-filter="delivery" aria-pressed="false" aria-controls="event-list">Delivery</button>
+        </div>
+        <div id="event-list" aria-label="Recent demo events">
+          <p class="empty">Loading recent events…</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <p class="sr-only" id="announcement" role="status" aria-live="polite" aria-atomic="true"></p>
+</body>
+</html>

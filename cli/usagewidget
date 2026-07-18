@@ -4,21 +4,31 @@ set -euo pipefail
 
 CONFIG_DIR="${USAGEWIDGET_CONFIG_DIR:-$HOME/.config/usagewidget}"
 CONFIG_FILE="${USAGEWIDGET_CONFIG:-$CONFIG_DIR/env}"
+SERVER_ENV="${USAGEWIDGET_SERVER_ENV:-/etc/usagewidget/env}"
 DEFAULT_URL="https://edserve.tail125275.ts.net/usagewidget"
+DEFAULT_LOCAL_URL="http://127.0.0.1:8377"
 DEFAULT_HOST="root@100.83.252.53"
 DEFAULT_REPO="${USAGEWIDGET_REPO:-$HOME/Documents/apps/claude/UsageWidget}"
 
 die() { echo "usagewidget: $*" >&2; exit 1; }
 
 load_config() {
+  local default_url="$DEFAULT_URL"
   if [[ -f "$CONFIG_FILE" ]]; then
     # shellcheck disable=SC1090
     set -a
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
     set +a
+  elif [[ -r "$SERVER_ENV" ]]; then
+    # On edServe, talk directly to the local daemon and reuse its service env.
+    set -a
+    # shellcheck disable=SC1090
+    source "$SERVER_ENV"
+    set +a
+    default_url="$DEFAULT_LOCAL_URL"
   fi
-  USAGEWIDGET_URL="${USAGEWIDGET_URL:-$DEFAULT_URL}"
+  USAGEWIDGET_URL="${USAGEWIDGET_URL:-$default_url}"
   USAGEWIDGET_DEPLOY_HOST="${USAGEWIDGET_DEPLOY_HOST:-$DEFAULT_HOST}"
   USAGEWIDGET_REPO="${USAGEWIDGET_REPO:-$DEFAULT_REPO}"
   # strip trailing slash
@@ -60,6 +70,7 @@ cmd_help() {
 usagewidget — talk to usagewidgetd / deploy to edServe
 
 Config:  ~/.config/usagewidget/env  (mode 600, never commit)
+         /etc/usagewidget/env on edServe
   USAGEWIDGET_URL            default https://edserve.tail125275.ts.net/usagewidget
   USAGEWIDGET_TOKEN          bearer token (synced from edServe)
   USAGEWIDGET_DEPLOY_HOST    default root@100.83.252.53
@@ -74,6 +85,10 @@ Commands:
   settings         GET /v1/settings
   poll             POST /v1/poll  (force CodexBar sample)
   demo | test      POST /v1/demo/alert  (synthetic APNs + widget push)
+  demo-provider    Show demo-provider status
+  demo-provider on Enable it and poll immediately
+  demo-provider off Disable it and poll immediately
+  demo-provider poll  Poll with the current setting
   deploy           Cross-compile + install + restart on edServe
   logs [-f]        journalctl -u usagewidget on edServe
   status           systemd status on edServe
@@ -92,8 +107,12 @@ EOF
 
 cmd_env_show() {
   load_config
-  echo "config:  $CONFIG_FILE"
-  if [[ ! -f "$CONFIG_FILE" ]]; then
+  local active_config="$CONFIG_FILE"
+  if [[ ! -f "$CONFIG_FILE" && -r "$SERVER_ENV" ]]; then
+    active_config="$SERVER_ENV"
+  fi
+  echo "config:  $active_config"
+  if [[ ! -f "$CONFIG_FILE" && ! -r "$SERVER_ENV" ]]; then
     echo "(missing — run: usagewidget env sync)"
     return
   fi
@@ -164,6 +183,23 @@ cmd_status() {
   ssh -o BatchMode=yes "${USAGEWIDGET_DEPLOY_HOST}" "systemctl status usagewidget --no-pager | head -30"
 }
 
+cmd_demo_provider() {
+  local action="${1:-status}"
+  case "$action" in
+    status) api GET /v1/settings ;;
+    on)
+      api PUT /v1/settings -H "Content-Type: application/json" -d '{"demoProviderEnabled":true}'
+      USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll
+      ;;
+    off)
+      api PUT /v1/settings -H "Content-Type: application/json" -d '{"demoProviderEnabled":false}'
+      USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll
+      ;;
+    poll) USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll ;;
+    *) die "unknown demo-provider action: $action (status|on|off|poll)" ;;
+  esac
+}
+
 cmd_ssh() {
   load_config
   if [[ $# -eq 0 ]]; then
@@ -191,6 +227,7 @@ main() {
     settings) api GET /v1/settings ;;
     poll) USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll ;;
     demo|test|demo-alert|alert) api POST /v1/demo/alert ;;
+    demo-provider) cmd_demo_provider "$@" ;;
     deploy|redeploy) cmd_deploy "$@" ;;
     logs) cmd_logs "$@" ;;
     status) cmd_status ;;

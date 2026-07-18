@@ -143,11 +143,14 @@ func TestGetSettingsDefaults(t *testing.T) {
 	if !got.NotificationsEnabled {
 		t.Fatalf("expected notifications enabled by default")
 	}
+	if got.DemoProviderEnabled {
+		t.Fatalf("expected demo provider disabled by default")
+	}
 }
 
 func TestPutSettingsUpdatesFields(t *testing.T) {
 	api, _ := newTestAPI(t)
-	body := []byte(`{"pollIntervalMinutes":15,"providerOrder":["claude","codex"],"earlyThresholdPct":20,"notificationsEnabled":false}`)
+	body := []byte(`{"pollIntervalMinutes":15,"providerOrder":["claude","codex"],"demoProviderEnabled":true,"earlyThresholdPct":20,"notificationsEnabled":false}`)
 	rec := doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -160,7 +163,7 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	if got.PollIntervalMinutes != 15 {
 		t.Fatalf("expected updated poll interval 15, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 2 || got.ProviderOrder[0] != "claude" {
+	if len(got.ProviderOrder) != 3 || got.ProviderOrder[0] != "claude" {
 		t.Fatalf("unexpected provider order: %+v", got.ProviderOrder)
 	}
 	if got.EarlyThresholdPct != 20 {
@@ -168,6 +171,12 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	}
 	if got.NotificationsEnabled {
 		t.Fatalf("expected notifications disabled")
+	}
+	if !got.DemoProviderEnabled {
+		t.Fatalf("expected demo provider enabled")
+	}
+	if got.ProviderOrder[len(got.ProviderOrder)-1] != "demo" {
+		t.Fatalf("expected enabled demo provider appended to order: %+v", got.ProviderOrder)
 	}
 	if got.DangerThresholdPct != 10 {
 		t.Fatalf("expected untouched danger threshold to stay at default 10, got %v", got.DangerThresholdPct)
@@ -456,13 +465,17 @@ func TestDemoAlertNoDevices(t *testing.T) {
 	}
 }
 
-func TestDemoAlertSendsWithoutRecordingEvents(t *testing.T) {
+func TestBearerDemoAlertAllowlistsDemoDevices(t *testing.T) {
 	api, store := newTestAPI(t)
+	api.cfg.DemoDeviceIDs = []string{"dev-1"}
 	recN := &recordingNotifier{}
 	api.SetNotifier(recN)
 
 	if err := store.UpsertDevice("dev-1", "apns-1", "widget-1"); err != nil {
 		t.Fatalf("UpsertDevice: %v", err)
+	}
+	if err := store.UpsertDevice("real-device", "apns-real", "widget-real"); err != nil {
+		t.Fatal(err)
 	}
 
 	rec := doRequest(t, api, http.MethodPost, "/v1/demo/alert", "secret-token", nil)
@@ -476,13 +489,13 @@ func TestDemoAlertSendsWithoutRecordingEvents(t *testing.T) {
 	if !got.OK || got.DevicesAlerted != 1 || got.WidgetsRefreshed != 1 {
 		t.Fatalf("unexpected response: %+v", got)
 	}
-	if len(recN.alerts) != 1 || recN.alerts[0].Type != "demo" {
-		t.Fatalf("expected one demo alert, got %+v", recN.alerts)
+	if len(recN.alerts) != 1 || recN.alerts[0].Type != "test_alert" || !strings.HasPrefix(recN.alerts[0].Key, "demo.test_alert.") {
+		t.Fatalf("expected one namespaced test alert, got %+v", recN.alerts)
 	}
 	if recN.widgets != 1 {
 		t.Fatalf("expected one widget refresh, got %d", recN.widgets)
 	}
-	notified, err := store.EventNotified("demo")
+	notified, err := store.EventNotified(recN.alerts[0].Key)
 	if err != nil {
 		t.Fatalf("EventNotified: %v", err)
 	}

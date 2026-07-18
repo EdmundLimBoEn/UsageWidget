@@ -45,6 +45,7 @@ var defaultSettings = map[string]string{
 	"poll_interval_minutes": "5",
 	"provider_order":        `["codex","claude","grok"]`,
 	"hidden_providers":      `[]`,
+	"demo_provider_enabled": "false",
 	"notifications_enabled": "true",
 	"early_threshold_pct":   "10",
 	"danger_threshold_pct":  "10",
@@ -59,8 +60,16 @@ func OpenStore(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: apply schema: %w", err)
 	}
+	if _, err := db.Exec(demoSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: apply demo schema: %w", err)
+	}
 	s := &Store{db: db}
 	if err := s.seedDefaultSettings(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.seedDefaultDemoState(time.Now().UTC()); err != nil {
 		db.Close()
 		return nil, err
 	}

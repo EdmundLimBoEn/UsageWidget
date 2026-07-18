@@ -13,7 +13,7 @@ usage events, and pushes APNs alerts + WidgetKit refreshes to the iPhone app.
 | Data | `/var/lib/usagewidget/usagewidget.db` |
 | Listen | `127.0.0.1:8377` (Tailscale Serve path `/usagewidget`) |
 | Agent skill | `.grok/skills/usagewidget-deploy/SKILL.md` (`/usagewidget-deploy`) |
-| Mac CLI | `cli/usagewidget` → `~/.local/bin/usagewidget` |
+| CLI | `cli/usagewidget` → `~/.local/bin/usagewidget` locally and `/usr/local/bin/usagewidget` on edServe |
 | Mac config | `~/.config/usagewidget/env` (token + URL; mode 600) |
 
 ## Mac CLI
@@ -23,10 +23,17 @@ usagewidget env sync    # write ~/.config/usagewidget/env from edServe token
 usagewidget health
 usagewidget poll
 usagewidget demo        # POST /v1/demo/alert
+usagewidget demo-provider on   # enable synthetic provider + poll on edServe
+usagewidget demo-provider off  # disable synthetic provider + poll on edServe
 usagewidget deploy      # same as redeploy.sh
 usagewidget logs -f
 usagewidget help
 ```
+
+The redeploy script also installs the same command on edServe. There it reads
+`/etc/usagewidget/env` automatically and connects directly to
+`http://127.0.0.1:8377`, so `usagewidget demo-provider on` works without a
+per-user config file.
 
 ## Redeploy (day-to-day)
 

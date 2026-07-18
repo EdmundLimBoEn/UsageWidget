@@ -18,6 +18,7 @@ type Provider struct {
 	ID      string          `json:"id"`
 	Name    string          `json:"name"`
 	Error   string          `json:"error,omitempty"`
+	Stale   bool            `json:"stale,omitempty"`
 	Windows []Window        `json:"windows"`
 	Credits *Credits        `json:"credits,omitempty"`
 	Raw     json.RawMessage `json:"raw,omitempty"`
@@ -102,8 +103,9 @@ func extractProviderRaw(body []byte) ([]json.RawMessage, error) {
 type codexBarPayload struct {
 	Provider string `json:"provider"`
 	// Alternate id field used by plan-shaped fixtures.
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Stale bool   `json:"stale"`
 
 	// Nested usage windows (real CodexBar shape).
 	Usage *struct {
@@ -165,9 +167,10 @@ func normalizeOne(raw json.RawMessage) (Provider, error) {
 	}
 
 	p := Provider{
-		ID:   id,
-		Name: name,
-		Raw:  raw,
+		ID:    id,
+		Name:  name,
+		Stale: up.Stale,
+		Raw:   raw,
 	}
 	if msg := decodeErrorMessage(up.Error); msg != "" {
 		p.Error = msg

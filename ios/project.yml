@@ -25,6 +25,8 @@ targets:
     sources:
       - path: Sources/App
       - path: Sources/Core
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: systems.edmundlim.UsageWidget
@@ -33,6 +35,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: UsageWidget.entitlements
         CODE_SIGN_STYLE: Manual
         DEVELOPMENT_TEAM: DUU8J39BA7
