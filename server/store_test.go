@@ -106,6 +106,32 @@ func TestStoreEventDedup(t *testing.T) {
 	}
 }
 
+func TestDemoEventPruningDoesNotTouchDedupEvents(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.RecordEvent("codex.primary.early"); err != nil {
+		t.Fatal(err)
+	}
+	events := make([]DemoEvent, 501)
+	for i := range events {
+		events[i] = DemoEvent{
+			EventKey:  "demo.primary.early",
+			EventType: "early",
+			CreatedAt: time.Date(2026, 7, 18, 12, 0, i, 0, time.UTC),
+			Payload:   []byte(`{}`),
+		}
+	}
+	if err := s.AppendDemoEvents(events); err != nil {
+		t.Fatal(err)
+	}
+	notified, err := s.EventNotified("codex.primary.early")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !notified {
+		t.Fatal("demo pruning removed an existing dedup event")
+	}
+}
+
 func TestStoreDeviceUpsertAndDelete(t *testing.T) {
 	s := openTestStore(t)
 

@@ -59,8 +59,16 @@ func OpenStore(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: apply schema: %w", err)
 	}
+	if _, err := db.Exec(demoSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: apply demo schema: %w", err)
+	}
 	s := &Store{db: db}
 	if err := s.seedDefaultSettings(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.seedDefaultDemoState(time.Now().UTC()); err != nil {
 		db.Close()
 		return nil, err
 	}

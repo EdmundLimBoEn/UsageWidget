@@ -285,3 +285,17 @@ func TestNormalize(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeDemoProviderScopedStale(t *testing.T) {
+	fetchedAt := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	snapshot, err := Normalize([]byte(`{"provider":"demo","name":"Demo","stale":true,"usage":{}}`), 5, fetchedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Providers) != 1 || !snapshot.Providers[0].Stale {
+		t.Fatalf("expected provider stale flag, got %#v", snapshot.Providers)
+	}
+	if snapshot.Stale {
+		t.Fatal("provider stale must not change snapshot stale semantics")
+	}
+}
