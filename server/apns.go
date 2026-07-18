@@ -24,6 +24,10 @@ type Notifier interface {
 	SendWidgetRefresh(ctx context.Context, widgetToken string) error
 }
 
+type notifierStatus interface {
+	Enabled() bool
+}
+
 func NewNotifier(cfg Config) (Notifier, error) {
 	if !cfg.APNsEnabled() {
 		log.Printf("apns: disabled (env not set); pushes will be logged only")
@@ -49,6 +53,8 @@ func NewNotifier(cfg Config) (Notifier, error) {
 
 type noopNotifier struct{}
 
+func (noopNotifier) Enabled() bool { return false }
+
 func (noopNotifier) SendAlert(_ context.Context, _ string, ev Event) error {
 	log.Printf("apns(noop): alert type=%s window=%s used=%.1f%%", ev.Type, ev.WindowID, ev.UsedPercent)
 	return nil
@@ -71,6 +77,8 @@ type apnsClient struct {
 	token    string
 	issuedAt time.Time
 }
+
+func (*apnsClient) Enabled() bool { return true }
 
 func (c *apnsClient) SendAlert(ctx context.Context, deviceToken string, ev Event) error {
 	body, err := json.Marshal(alertPayload(ev))

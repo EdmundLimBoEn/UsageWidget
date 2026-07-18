@@ -108,6 +108,9 @@ func TestNoopNotifierMode(t *testing.T) {
 	if _, ok := n.(noopNotifier); !ok {
 		t.Fatalf("expected noopNotifier when APNs env unset, got %T", n)
 	}
+	if status, ok := n.(notifierStatus); !ok || status.Enabled() {
+		t.Fatalf("noop notifier must report disabled, got %T", n)
+	}
 	if err := n.SendAlert(context.Background(), "token", Event{Type: "reset", WindowID: "codex.primary"}); err != nil {
 		t.Fatalf("noop SendAlert: %v", err)
 	}
@@ -145,6 +148,9 @@ func TestNewNotifierLoadsP8(t *testing.T) {
 	}
 	if client.host != "api.push.apple.com" {
 		t.Fatalf("host=%s, want production host", client.host)
+	}
+	if !client.Enabled() {
+		t.Fatal("real APNs client must report enabled")
 	}
 	if _, err := client.providerToken(); err != nil {
 		t.Fatalf("providerToken from loaded key: %v", err)

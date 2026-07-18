@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,7 +93,7 @@ func TestDemoRunStoreRetainsLatestTwenty(t *testing.T) {
 			StartedAt:   base.Add(time.Duration(i) * time.Minute),
 			CompletedAt: base.Add(time.Duration(i)*time.Minute + time.Second),
 			Success:     i%2 == 0,
-			Payload:     json.RawMessage(`{"sequence":` + string(rune('0'+i%10)) + `}`),
+			Stages:      []DemoPipelineStage{{ID: "normalize", Status: DemoStageOK}},
 		}
 		id, err := store.SaveDemoRun(run)
 		if err != nil {
@@ -119,24 +118,25 @@ func TestDemoRunStoreRetainsLatestTwenty(t *testing.T) {
 	}
 }
 
-func TestDemoRunStoreRejectsMalformedPayload(t *testing.T) {
+func TestDemoRunStorePersistsPipelineContract(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	for _, payload := range []json.RawMessage{nil, json.RawMessage(`{"broken":`)} {
-		_, err := store.SaveDemoRun(DemoRun{
-			StartedAt: now, CompletedAt: now.Add(time.Second), Payload: payload,
-		})
-		if err == nil {
-			t.Fatalf("expected invalid payload %q to be rejected", payload)
-		}
+	want := DemoRun{
+		StartedAt: now, CompletedAt: now.Add(time.Second), Success: true,
+		SnapshotChanged: true, EventsEmitted: 2, EventsDeduplicated: 1,
+		Stages:   []DemoPipelineStage{{ID: "apns", Status: DemoStageWarning, Detail: "one failure", DurationMS: 3}},
+		Delivery: DemoDeliveryResult{Alerts: DeliveryCount{Attempted: 2, Succeeded: 1, Failed: 1}},
 	}
-
-	var count int
-	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_runs`).Scan(&count); err != nil {
+	id, err := store.SaveDemoRun(want)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 {
-		t.Fatalf("expected no durable runs, got %d", count)
+	got, ok, err := store.LatestDemoRun()
+	if err != nil || !ok {
+		t.Fatalf("LatestDemoRun: ok=%v err=%v", ok, err)
+	}
+	if got.ID != id || got.EventsEmitted != want.EventsEmitted || got.Delivery != want.Delivery || len(got.Stages) != 1 || got.Stages[0] != want.Stages[0] {
+		t.Fatalf("pipeline result did not round trip:\n got %+v\nwant %+v", got, want)
 	}
 }
 
@@ -146,10 +146,11 @@ func TestDemoEventStoreDefaultsCapsAndRetains(t *testing.T) {
 	events := make([]DemoEvent, 0, 510)
 	for i := 0; i < 510; i++ {
 		events = append(events, DemoEvent{
-			EventKey:  "demo.window.threshold",
-			EventType: "threshold",
+			Key:       "demo.window.threshold",
+			Type:      "early_threshold",
 			CreatedAt: base.Add(time.Duration(i) * time.Second),
-			Payload:   json.RawMessage(`{"ok":true}`),
+			Before:    &EventValue{},
+			After:     &EventValue{},
 		})
 	}
 	if err := store.AppendDemoEvents(events); err != nil {
@@ -182,15 +183,17 @@ func TestDemoEventStoreDefaultsCapsAndRetains(t *testing.T) {
 	}
 }
 
-func TestDemoEventStoreRejectsMalformedPayload(t *testing.T) {
+func TestDemoEventStoreRejectsInvalidContract(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	for _, payload := range []json.RawMessage{nil, json.RawMessage(`{"broken":`)} {
-		err := store.AppendDemoEvents([]DemoEvent{{
-			EventKey: "demo.test", EventType: "test", CreatedAt: now, Payload: payload,
-		}})
+	for _, event := range []DemoEvent{
+		{Key: "real.test", Type: "test_alert", CreatedAt: now},
+		{Key: "demo.test", Type: "unknown", CreatedAt: now},
+		{Key: "demo.test", Type: "test_alert"},
+	} {
+		err := store.AppendDemoEvents([]DemoEvent{event})
 		if err == nil {
-			t.Fatalf("expected invalid payload %q to be rejected", payload)
+			t.Fatalf("expected invalid event %+v to be rejected", event)
 		}
 	}
 
@@ -207,9 +210,9 @@ func TestDemoEventStoreRejectsMixedBatchAtomically(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	events := []DemoEvent{
-		{EventKey: "demo.first", EventType: "test", CreatedAt: now, Payload: json.RawMessage(`{"ok":true}`)},
-		{EventKey: "demo.invalid", EventType: "test", CreatedAt: now, Payload: json.RawMessage(`{"broken":`)},
-		{EventKey: "demo.last", EventType: "test", CreatedAt: now, Payload: json.RawMessage(`{"ok":true}`)},
+		{Key: "demo.first", Type: "test_alert", CreatedAt: now},
+		{Key: "not-demo.invalid", Type: "test_alert", CreatedAt: now},
+		{Key: "demo.last", Type: "test_alert", CreatedAt: now},
 	}
 	if err := store.AppendDemoEvents(events); err == nil {
 		t.Fatal("expected mixed batch to be rejected")

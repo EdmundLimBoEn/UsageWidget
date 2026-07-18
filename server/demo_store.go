@@ -32,21 +32,38 @@ CREATE INDEX IF NOT EXISTS idx_demo_event_log_recent ON demo_event_log(id DESC);
 CREATE INDEX IF NOT EXISTS idx_demo_event_log_type_recent ON demo_event_log(event_type, id DESC);
 `
 
-type DemoRun struct {
-	ID          int64           `json:"id"`
-	StartedAt   time.Time       `json:"startedAt"`
-	CompletedAt time.Time       `json:"completedAt"`
-	Success     bool            `json:"success"`
-	Payload     json.RawMessage `json:"payload"`
+type DemoRun = DemoPipelineResult
+
+type DemoEventRecord struct {
+	ID           int64              `json:"id"`
+	RunID        *int64             `json:"runID,omitempty"`
+	Key          string             `json:"key"`
+	Type         string             `json:"type"`
+	CreatedAt    time.Time          `json:"createdAt"`
+	WindowID     string             `json:"windowID,omitempty"`
+	Before       *EventValue        `json:"before,omitempty"`
+	After        *EventValue        `json:"after,omitempty"`
+	Deduplicated bool               `json:"deduplicated"`
+	Delivery     DemoDeliveryResult `json:"delivery"`
+
+	// Compatibility fields for the preliminary Task 1 store contract. New code
+	// uses Key and Type; these fields are never included in persisted JSON.
+	EventKey  string          `json:"-"`
+	EventType string          `json:"-"`
+	Payload   json.RawMessage `json:"-"`
 }
 
-type DemoEvent struct {
-	ID        int64           `json:"id"`
-	RunID     *int64          `json:"runId,omitempty"`
-	EventKey  string          `json:"eventKey"`
-	EventType string          `json:"eventType"`
-	CreatedAt time.Time       `json:"createdAt"`
-	Payload   json.RawMessage `json:"payload"`
+type DemoEvent = DemoEventRecord
+
+var allowedDemoEventTypes = map[string]bool{
+	"early_threshold":  true,
+	"danger_threshold": true,
+	"reset":            true,
+	"tibo_reset":       true,
+	"credits_increase": true,
+	"manual_poll":      true,
+	"test_alert":       true,
+	"pipeline_error":   true,
 }
 
 func (s *Store) seedDefaultDemoState(now time.Time) error {
@@ -97,8 +114,15 @@ func (s *Store) SaveDemoState(state DemoState) error {
 }
 
 func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
-	if !json.Valid(run.Payload) {
-		return 0, fmt.Errorf("store: demo run payload must be valid JSON")
+	if run.StartedAt.IsZero() || run.CompletedAt.IsZero() {
+		return 0, fmt.Errorf("store: demo run timestamps must not be zero")
+	}
+	if run.CompletedAt.Before(run.StartedAt) {
+		return 0, fmt.Errorf("store: demo run completed_at precedes started_at")
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		return 0, fmt.Errorf("store: encode demo run: %w", err)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -108,7 +132,7 @@ func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
 
 	result, err := tx.Exec(
 		`INSERT INTO demo_runs (started_at, completed_at, success, payload) VALUES (?, ?, ?, ?)`,
-		run.StartedAt.Format(time.RFC3339Nano), run.CompletedAt.Format(time.RFC3339Nano), run.Success, string(run.Payload),
+		run.StartedAt.Format(time.RFC3339Nano), run.CompletedAt.Format(time.RFC3339Nano), run.Success, string(payload),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("store: save demo run: %w", err)
@@ -116,6 +140,14 @@ func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
 	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, fmt.Errorf("store: get demo run id: %w", err)
+	}
+	run.ID = id
+	payload, err = json.Marshal(run)
+	if err != nil {
+		return 0, fmt.Errorf("store: encode identified demo run: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE demo_runs SET payload = ? WHERE id = ?`, string(payload), id); err != nil {
+		return 0, fmt.Errorf("store: update demo run payload: %w", err)
 	}
 	if _, err := tx.Exec(`DELETE FROM demo_runs WHERE id NOT IN (SELECT id FROM demo_runs ORDER BY id DESC LIMIT 20)`); err != nil {
 		return 0, fmt.Errorf("store: prune demo runs: %w", err)
@@ -128,33 +160,42 @@ func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
 
 func (s *Store) LatestDemoRun() (DemoRun, bool, error) {
 	var run DemoRun
+	var id int64
 	var startedAt, completedAt, payload string
 	var success int
 	err := s.db.QueryRow(
 		`SELECT id, started_at, completed_at, success, payload FROM demo_runs ORDER BY id DESC LIMIT 1`,
-	).Scan(&run.ID, &startedAt, &completedAt, &success, &payload)
+	).Scan(&id, &startedAt, &completedAt, &success, &payload)
 	if err == sql.ErrNoRows {
 		return DemoRun{}, false, nil
 	}
 	if err != nil {
 		return DemoRun{}, false, fmt.Errorf("store: latest demo run: %w", err)
 	}
-	if run.StartedAt, err = time.Parse(time.RFC3339Nano, startedAt); err != nil {
+	if err := json.Unmarshal([]byte(payload), &run); err != nil {
+		return DemoRun{}, false, fmt.Errorf("store: decode demo run: %w", err)
+	}
+	run.ID = id
+	run.StartedAt, err = time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
 		return DemoRun{}, false, fmt.Errorf("store: parse demo run started_at: %w", err)
 	}
-	if run.CompletedAt, err = time.Parse(time.RFC3339Nano, completedAt); err != nil {
+	run.CompletedAt, err = time.Parse(time.RFC3339Nano, completedAt)
+	if err != nil {
 		return DemoRun{}, false, fmt.Errorf("store: parse demo run completed_at: %w", err)
 	}
 	run.Success = success != 0
-	run.Payload = json.RawMessage(payload)
 	return run, true, nil
 }
 
 func (s *Store) AppendDemoEvents(events []DemoEvent) error {
+	canonical := make([]DemoEventRecord, len(events))
 	for i, event := range events {
-		if !json.Valid(event.Payload) {
-			return fmt.Errorf("store: demo event %d payload must be valid JSON", i)
+		normalized, err := normalizeDemoEventRecord(event)
+		if err != nil {
+			return fmt.Errorf("store: demo event %d: %w", i, err)
 		}
+		canonical[i] = normalized
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -162,14 +203,18 @@ func (s *Store) AppendDemoEvents(events []DemoEvent) error {
 	}
 	defer tx.Rollback()
 
-	for _, event := range events {
+	for _, event := range canonical {
 		var runID any
 		if event.RunID != nil {
 			runID = *event.RunID
 		}
+		payload, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("store: encode demo event: %w", err)
+		}
 		if _, err := tx.Exec(
 			`INSERT INTO demo_event_log (run_id, event_key, event_type, created_at, payload) VALUES (?, ?, ?, ?, ?)`,
-			runID, event.EventKey, event.EventType, event.CreatedAt.Format(time.RFC3339Nano), string(event.Payload),
+			runID, event.Key, event.Type, event.CreatedAt.Format(time.RFC3339Nano), string(payload),
 		); err != nil {
 			return fmt.Errorf("store: append demo event: %w", err)
 		}
@@ -203,9 +248,17 @@ func (s *Store) ListDemoEvents(limit int) ([]DemoEvent, error) {
 		var event DemoEvent
 		var runID sql.NullInt64
 		var createdAt, payload string
-		if err := rows.Scan(&event.ID, &runID, &event.EventKey, &event.EventType, &createdAt, &payload); err != nil {
+		var id int64
+		var key, eventType string
+		if err := rows.Scan(&id, &runID, &key, &eventType, &createdAt, &payload); err != nil {
 			return nil, fmt.Errorf("store: scan demo event: %w", err)
 		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			return nil, fmt.Errorf("store: decode demo event: %w", err)
+		}
+		event.ID = id
+		event.Key = key
+		event.Type = eventType
 		if runID.Valid {
 			value := runID.Int64
 			event.RunID = &value
@@ -213,11 +266,44 @@ func (s *Store) ListDemoEvents(limit int) ([]DemoEvent, error) {
 		if event.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
 			return nil, fmt.Errorf("store: parse demo event created_at: %w", err)
 		}
-		event.Payload = json.RawMessage(payload)
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: iterate demo events: %w", err)
 	}
 	return events, nil
+}
+
+func normalizeDemoEventRecord(event DemoEventRecord) (DemoEventRecord, error) {
+	legacy := event.Key == "" && event.Type == ""
+	if event.Key == "" {
+		event.Key = event.EventKey
+	}
+	if event.Type == "" {
+		event.Type = event.EventType
+		if legacy {
+			switch event.Type {
+			case "early", "threshold":
+				event.Type = "early_threshold"
+			case "test":
+				event.Type = "test_alert"
+			}
+		}
+	}
+	if len(event.Payload) > 0 && !json.Valid(event.Payload) {
+		return DemoEventRecord{}, fmt.Errorf("payload must be valid JSON")
+	}
+	if len(event.Key) < len("demo.") || event.Key[:len("demo.")] != "demo." {
+		return DemoEventRecord{}, fmt.Errorf("key %q must start with demo.", event.Key)
+	}
+	if !allowedDemoEventTypes[event.Type] {
+		return DemoEventRecord{}, fmt.Errorf("unsupported type %q", event.Type)
+	}
+	if event.CreatedAt.IsZero() {
+		return DemoEventRecord{}, fmt.Errorf("created_at must not be zero")
+	}
+	event.EventKey = ""
+	event.EventType = ""
+	event.Payload = nil
+	return event, nil
 }
