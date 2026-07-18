@@ -35,3 +35,21 @@ func TestCodexBarClientFetchNonOKStatus(t *testing.T) {
 		t.Fatalf("expected error for non-200 status")
 	}
 }
+
+func TestCodexBarCommandClientFetch(t *testing.T) {
+	c := NewCodexBarCommandClient(`echo [{"provider":"codex"}]`)
+	body, err := c.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(body) != "[{\"provider\":\"codex\"}]\n" {
+		t.Fatalf("unexpected body: %q", body)
+	}
+}
+
+func TestCodexBarCommandClientFetchError(t *testing.T) {
+	c := NewCodexBarCommandClient("false")
+	if _, err := c.Fetch(context.Background()); err == nil {
+		t.Fatalf("expected error for failing command")
+	}
+}

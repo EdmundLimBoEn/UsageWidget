@@ -28,9 +28,16 @@ credentials ever leave the Linux host.
 ```bash
 cd server
 export USAGEWIDGET_TOKEN="$(openssl rand -hex 32)"
+export CODEXBAR_CMD="codexbar usage --json"   # preferred: CLI honors in-app provider toggles
 go run ./cmd/usagewidgetd
 # listens on :8377 by default
 ```
+
+Set `CODEXBAR_CMD` to fetch via the CodexBar CLI (only enabled providers are
+returned — no error rows for disabled ones). Leave it unset to fall back to
+polling `CODEXBAR_URL` (`http://127.0.0.1:8765/usage`). Providers hidden in
+the app's Settings are also stripped from `/v1/snapshot` server-side, so the
+phone never receives them.
 
 Deploy docs: [`server/deploy/README.md`](server/deploy/README.md).
 

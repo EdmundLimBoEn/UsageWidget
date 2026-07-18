@@ -159,8 +159,9 @@ struct SettingsView: View {
         for p in providers where !seen.contains(p.id) {
             rows.append(Row(id: p.id, name: p.name))
         }
-        // Include hidden-only order entries without live data
-        for id in model.preferences.providerOrder where !rows.contains(where: { $0.id == id }) {
+        // Include hidden/order-only entries without live data (server omits hidden providers)
+        for id in model.preferences.providerOrder + model.preferences.hiddenProviders
+        where !rows.contains(where: { $0.id == id }) {
             rows.append(Row(id: id, name: id))
         }
         return rows

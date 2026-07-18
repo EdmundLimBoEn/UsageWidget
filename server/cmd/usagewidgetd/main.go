@@ -24,7 +24,12 @@ func main() {
 	}
 	defer store.Close()
 
-	codexbar := server.NewCodexBarClient(cfg.CodexBarURL)
+	var codexbar *server.CodexBarClient
+	if cfg.CodexBarCmd != "" {
+		codexbar = server.NewCodexBarCommandClient(cfg.CodexBarCmd)
+	} else {
+		codexbar = server.NewCodexBarClient(cfg.CodexBarURL)
+	}
 
 	notifier, err := server.NewNotifier(cfg)
 	if err != nil {

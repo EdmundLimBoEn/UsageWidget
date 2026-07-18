@@ -91,19 +91,26 @@ type healthResponse struct {
 }
 
 func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-	_, codexbarErr := a.codexbar.Fetch(ctx)
-
 	_, dbErr := a.store.AllSettings()
 
 	a.mu.Lock()
 	polling, lastPollAt, lastSuccessAt := a.polling, a.lastPollAt, a.lastSuccessAt
 	a.mu.Unlock()
 
+	var codexbarOK bool
+	if len(a.codexbar.Cmd) > 0 {
+		// CLI invocations are too slow for a live health probe; trust the poller.
+		codexbarOK = lastSuccessAt != nil
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_, err := a.codexbar.Fetch(ctx)
+		codexbarOK = err == nil
+	}
+
 	writeJSON(w, http.StatusOK, healthResponse{
 		Service:       "ok",
-		CodexBar:      codexbarErr == nil,
+		CodexBar:      codexbarOK,
 		Database:      dbErr == nil,
 		Polling:       polling,
 		APNs:          a.cfg.APNsEnabled(),
@@ -136,8 +143,26 @@ func (a *API) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap.PollIntervalMinutes = settings.PollIntervalMinutes
+	snap.Providers = filterHidden(snap.Providers, settings.HiddenProviders)
 
 	writeJSON(w, http.StatusOK, snap)
+}
+
+func filterHidden(providers []Provider, hiddenIDs []string) []Provider {
+	if len(hiddenIDs) == 0 {
+		return providers
+	}
+	hidden := make(map[string]bool, len(hiddenIDs))
+	for _, id := range hiddenIDs {
+		hidden[id] = true
+	}
+	out := make([]Provider, 0, len(providers))
+	for _, p := range providers {
+		if !hidden[p.ID] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 type Settings struct {

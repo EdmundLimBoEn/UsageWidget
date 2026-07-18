@@ -318,3 +318,14 @@ func TestContentTypeJSON(t *testing.T) {
 		t.Fatalf("expected application/json content type, got %q", ct)
 	}
 }
+
+func TestFilterHidden(t *testing.T) {
+	providers := []Provider{{ID: "codex"}, {ID: "kimi"}, {ID: "claude"}}
+	got := filterHidden(providers, []string{"kimi"})
+	if len(got) != 2 || got[0].ID != "codex" || got[1].ID != "claude" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if len(filterHidden(providers, nil)) != 3 {
+		t.Fatalf("nil hidden list should keep all providers")
+	}
+}

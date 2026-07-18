@@ -8,6 +8,7 @@ import (
 type Config struct {
 	Token       string
 	CodexBarURL string
+	CodexBarCmd string
 	DBPath      string
 	ListenAddr  string
 
@@ -31,6 +32,7 @@ func LoadConfig() (Config, error) {
 	return Config{
 		Token:       token,
 		CodexBarURL: envOr("CODEXBAR_URL", "http://127.0.0.1:8765/usage"),
+		CodexBarCmd: os.Getenv("CODEXBAR_CMD"),
 		DBPath:      envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:  envOr("LISTEN_ADDR", ":8377"),
 
