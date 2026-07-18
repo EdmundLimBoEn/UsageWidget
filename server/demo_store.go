@@ -158,6 +158,79 @@ func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
 	return id, nil
 }
 
+// SaveDemoExecution stores one run and all of its feed events in a single
+// transaction, including both retention prunes. Every event is associated with
+// the newly assigned run ID.
+func (s *Store) SaveDemoExecution(run DemoRun, events []DemoEvent) (int64, error) {
+	if run.StartedAt.IsZero() || run.CompletedAt.IsZero() {
+		return 0, fmt.Errorf("store: demo run timestamps must not be zero")
+	}
+	if run.CompletedAt.Before(run.StartedAt) {
+		return 0, fmt.Errorf("store: demo run completed_at precedes started_at")
+	}
+	canonical := make([]DemoEventRecord, len(events))
+	for i, event := range events {
+		normalized, err := normalizeDemoEventRecord(event)
+		if err != nil {
+			return 0, fmt.Errorf("store: demo event %d: %w", i, err)
+		}
+		canonical[i] = normalized
+	}
+	payload, err := json.Marshal(run)
+	if err != nil {
+		return 0, fmt.Errorf("store: encode demo run: %w", err)
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("store: begin demo execution tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.Exec(
+		`INSERT INTO demo_runs (started_at, completed_at, success, payload) VALUES (?, ?, ?, ?)`,
+		run.StartedAt.Format(time.RFC3339Nano), run.CompletedAt.Format(time.RFC3339Nano), run.Success, string(payload),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("store: save demo execution run: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("store: get demo execution run id: %w", err)
+	}
+	run.ID = id
+	payload, err = json.Marshal(run)
+	if err != nil {
+		return 0, fmt.Errorf("store: encode identified demo execution run: %w", err)
+	}
+	if _, err := tx.Exec(`UPDATE demo_runs SET payload = ? WHERE id = ?`, string(payload), id); err != nil {
+		return 0, fmt.Errorf("store: update demo execution run payload: %w", err)
+	}
+
+	for i := range canonical {
+		canonical[i].RunID = &id
+		payload, err := json.Marshal(canonical[i])
+		if err != nil {
+			return 0, fmt.Errorf("store: encode demo execution event: %w", err)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO demo_event_log (run_id, event_key, event_type, created_at, payload) VALUES (?, ?, ?, ?, ?)`,
+			id, canonical[i].Key, canonical[i].Type, canonical[i].CreatedAt.Format(time.RFC3339Nano), string(payload),
+		); err != nil {
+			return 0, fmt.Errorf("store: append demo execution event: %w", err)
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM demo_event_log WHERE id NOT IN (SELECT id FROM demo_event_log ORDER BY id DESC LIMIT 500)`); err != nil {
+		return 0, fmt.Errorf("store: prune demo execution events: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM demo_runs WHERE id NOT IN (SELECT id FROM demo_runs ORDER BY id DESC LIMIT 20)`); err != nil {
+		return 0, fmt.Errorf("store: prune demo execution runs: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("store: commit demo execution: %w", err)
+	}
+	return id, nil
+}
+
 func (s *Store) LatestDemoRun() (DemoRun, bool, error) {
 	var run DemoRun
 	var id int64

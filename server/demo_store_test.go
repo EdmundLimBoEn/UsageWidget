@@ -2,6 +2,7 @@ package server
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -224,5 +225,76 @@ func TestDemoEventStoreRejectsMixedBatchAtomically(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected mixed batch to write nothing, got %d events", count)
+	}
+}
+
+func TestDemoExecutionStoreRollsBackRunEventsAndPruning(t *testing.T) {
+	store := openTestStore(t)
+	base := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	var previousRunID int64
+	for i := 0; i < 20; i++ {
+		run := DemoRun{
+			StartedAt:   base.Add(time.Duration(i) * time.Minute),
+			CompletedAt: base.Add(time.Duration(i)*time.Minute + time.Second),
+			Success:     true,
+		}
+		id, err := store.SaveDemoRun(run)
+		if err != nil {
+			t.Fatalf("seed run %d: %v", i, err)
+		}
+		previousRunID = id
+	}
+	events := make([]DemoEvent, 500)
+	for i := range events {
+		events[i] = DemoEvent{
+			Key:       "demo.seed",
+			Type:      "test_alert",
+			CreatedAt: base.Add(time.Duration(i) * time.Second),
+		}
+	}
+	if err := store.AppendDemoEvents(events); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+	if _, err := store.db.Exec(`
+		CREATE TRIGGER fail_manual_poll
+		BEFORE INSERT ON demo_event_log
+		WHEN NEW.event_type = 'manual_poll'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected event persistence failure');
+		END
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	run := DemoRun{
+		StartedAt:   base.Add(21 * time.Minute),
+		CompletedAt: base.Add(21*time.Minute + time.Second),
+		Success:     true,
+	}
+	_, err := store.SaveDemoExecution(run, []DemoEvent{{
+		Key:       "demo.manual_poll",
+		Type:      "manual_poll",
+		CreatedAt: run.CompletedAt,
+	}})
+	if err == nil || !strings.Contains(err.Error(), "injected event persistence failure") {
+		t.Fatalf("SaveDemoExecution error=%v, want injected event failure", err)
+	}
+
+	latest, ok, err := store.LatestDemoRun()
+	if err != nil || !ok {
+		t.Fatalf("LatestDemoRun: ok=%v err=%v", ok, err)
+	}
+	if latest.ID != previousRunID {
+		t.Fatalf("failed transaction stored run %d; previous latest was %d", latest.ID, previousRunID)
+	}
+	var runCount, eventCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_runs`).Scan(&runCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_event_log`).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if runCount != 20 || eventCount != 500 {
+		t.Fatalf("failed transaction changed retained rows: runs=%d events=%d", runCount, eventCount)
 	}
 }

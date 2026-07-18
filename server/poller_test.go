@@ -411,44 +411,138 @@ func TestPollerDemoFailuresKeepLastSnapshot(t *testing.T) {
 	}
 }
 
-func TestPollerPollNowAndPollDemoNowShareMutex(t *testing.T) {
-	store := openTestStore(t)
-	firstEntered := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	var requests atomic.Int32
-	client := NewCodexBarClient("http://codexbar.test")
-	client.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		if requests.Add(1) == 1 {
-			close(firstEntered)
-			<-releaseFirst
-		}
-		return testHTTPResponse(http.StatusOK, codexBarBody), nil
-	})}
-	api := NewAPI(Config{Token: "x"}, store, client)
-	poller := NewPoller(store, client, noopNotifier{}, api)
+func TestPollerDemoPersistenceFailureReturnsAndStoresFailure(t *testing.T) {
+	poller, store, _ := newPollerHarness(t)
+	if _, err := store.db.Exec(`
+		CREATE TRIGGER fail_manual_poll
+		BEFORE INSERT ON demo_event_log
+		WHEN NEW.event_type = 'manual_poll'
+		BEGIN
+			SELECT RAISE(ABORT, 'injected event persistence failure');
+		END
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
 
-	demoDone := make(chan DemoPipelineResult, 1)
-	go func() { demoDone <- poller.PollDemoNow(context.Background()) }()
-	<-firstEntered
-	realDone := make(chan PollResult, 1)
-	go func() { realDone <- poller.PollNow(context.Background()) }()
+	result := poller.PollDemoNow(context.Background())
+	if result.Success {
+		t.Fatalf("persistence failure returned success: %+v", result)
+	}
+	if result.FailedStage != "snapshot_persisted" {
+		t.Fatalf("FailedStage=%q, want snapshot_persisted: %+v", result.FailedStage, result)
+	}
+	persistedStage := stageByID(t, result, "snapshot_persisted")
+	if persistedStage.Status != DemoStageFailed || !strings.Contains(persistedStage.Detail, "injected event persistence failure") {
+		t.Fatalf("persistence stage does not report injected failure: %+v", persistedStage)
+	}
+	if result.ID == 0 {
+		t.Fatalf("failed pipeline result was not durably recorded: %+v", result)
+	}
 
-	select {
-	case <-time.After(75 * time.Millisecond):
-		if requests.Load() != 1 {
-			t.Fatalf("second poll entered upstream while first held mutex; requests=%d", requests.Load())
-		}
-	case <-realDone:
-		t.Fatal("PollNow completed while PollDemoNow still held the shared mutex")
+	stored, ok, err := store.LatestDemoRun()
+	if err != nil || !ok {
+		t.Fatalf("LatestDemoRun: ok=%v err=%v", ok, err)
 	}
-	close(releaseFirst)
-	if result := <-demoDone; !result.Success {
-		t.Fatalf("demo poll failed: %+v", result)
+	if stored.ID != result.ID || stored.Success || stored.FailedStage != result.FailedStage || stored.Error != result.Error {
+		t.Fatalf("returned and stored failures differ:\nresult=%+v\nstored=%+v", result, stored)
 	}
-	if result := <-realDone; !result.Success {
-		t.Fatalf("real poll failed: %+v", result)
+	storedStage := stageByID(t, stored, "snapshot_persisted")
+	if storedStage.Status != DemoStageFailed || storedStage.Detail != persistedStage.Detail {
+		t.Fatalf("returned and stored persistence stages differ: result=%+v stored=%+v", persistedStage, storedStage)
 	}
-	if requests.Load() != 2 {
-		t.Fatalf("requests=%d, want 2 serialized requests", requests.Load())
+
+	feed, err := store.ListDemoEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feed) != 1 || feed[0].RunID == nil || *feed[0].RunID != result.ID || feed[0].Type != "pipeline_error" {
+		t.Fatalf("failed run was not stored atomically with its pipeline error: %+v", feed)
+	}
+	var runCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_runs`).Scan(&runCount); err != nil {
+		t.Fatal(err)
+	}
+	if runCount != 1 {
+		t.Fatalf("expected only the failed retry run after rollback, got %d runs", runCount)
+	}
+}
+
+func TestPollerAllPollEntriesShareDemoMutex(t *testing.T) {
+	entries := []struct {
+		name string
+		run  func(context.Context, *Poller) <-chan PollResult
+	}{
+		{
+			name: "PollNow",
+			run: func(ctx context.Context, poller *Poller) <-chan PollResult {
+				done := make(chan PollResult, 1)
+				go func() { done <- poller.PollNow(ctx) }()
+				return done
+			},
+		},
+		{
+			name: "scheduled Run",
+			run: func(ctx context.Context, poller *Poller) <-chan PollResult {
+				done := make(chan PollResult, 1)
+				go func() {
+					poller.Run(ctx)
+					done <- PollResult{Success: true}
+				}()
+				return done
+			},
+		},
+		{
+			name: "internal pollOnce",
+			run: func(ctx context.Context, poller *Poller) <-chan PollResult {
+				done := make(chan PollResult, 1)
+				go func() { done <- poller.pollOnce(ctx) }()
+				return done
+			},
+		},
+	}
+
+	for _, entry := range entries {
+		t.Run(entry.name, func(t *testing.T) {
+			store := openTestStore(t)
+			firstEntered := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var requests atomic.Int32
+			client := NewCodexBarClient("http://codexbar.test")
+			client.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				if requests.Add(1) == 1 {
+					close(firstEntered)
+					<-releaseFirst
+				}
+				return testHTTPResponse(http.StatusOK, codexBarBody), nil
+			})}
+			api := NewAPI(Config{Token: "x"}, store, client)
+			poller := NewPoller(store, client, noopNotifier{}, api)
+
+			demoDone := make(chan DemoPipelineResult, 1)
+			go func() { demoDone <- poller.PollDemoNow(context.Background()) }()
+			<-firstEntered
+			ctx, cancel := context.WithCancel(context.Background())
+			entryDone := entry.run(ctx, poller)
+
+			select {
+			case <-time.After(75 * time.Millisecond):
+				if requests.Load() != 1 {
+					t.Fatalf("%s entered upstream while PollDemoNow held mutex; requests=%d", entry.name, requests.Load())
+				}
+			case <-entryDone:
+				t.Fatalf("%s completed while PollDemoNow still held the shared mutex", entry.name)
+			}
+			close(releaseFirst)
+			if result := <-demoDone; !result.Success {
+				t.Fatalf("demo poll failed: %+v", result)
+			}
+			cancel()
+			if result := <-entryDone; !result.Success {
+				t.Fatalf("%s failed: %+v", entry.name, result)
+			}
+			if requests.Load() != 2 {
+				t.Fatalf("requests=%d, want 2 serialized requests", requests.Load())
+			}
+		})
 	}
 }

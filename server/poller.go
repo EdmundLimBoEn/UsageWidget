@@ -116,9 +116,11 @@ func (p *Poller) PollDemoNow(ctx context.Context) DemoPipelineResult {
 	return p.poll(ctx, true).demo
 }
 
-// pollOnce is retained for package-internal compatibility. Callers that need
-// serialization use PollNow or PollDemoNow.
+// pollOnce is retained for package-internal compatibility and participates in
+// the same serialization as every other poll entry point.
 func (p *Poller) pollOnce(ctx context.Context) PollResult {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.poll(ctx, false).poll
 }
 
@@ -362,56 +364,71 @@ func (p *Poller) failPoll(execution pollExecution, stage string, started time.Ti
 }
 
 func (p *Poller) persistDemoExecution(execution *pollExecution) {
-	id, err := p.store.SaveDemoRun(execution.demo)
-	if err != nil {
-		log.Printf("poller: save demo run: %v", err)
-		execution.demo.Success = false
-		execution.demo.Error = joinErrors(execution.demo.Error, err.Error())
+	persistStarted := time.Now()
+	records := demoEventRecords(execution, true)
+	id, err := p.store.SaveDemoExecution(execution.demo, records)
+	if err == nil {
+		execution.demo.ID = id
 		return
 	}
-	execution.demo.ID = id
-	runID := id
+
+	log.Printf("poller: save demo execution: %v", err)
+	persistErr := fmt.Errorf("persist demo execution: %w", err)
+	if execution.demo.Success {
+		execution.demo.Success = false
+		execution.demo.FailedStage = "snapshot_persisted"
+		setDemoStage(&execution.demo, "snapshot_persisted", DemoStageFailed, persistErr.Error(), persistStarted)
+	}
+	execution.demo.Error = joinErrors(execution.demo.Error, persistErr.Error())
+
+	// The successful run and its feed rolled back together. Make one atomic
+	// best-effort attempt to durably record the persistence failure itself.
+	id, retryErr := p.store.SaveDemoExecution(execution.demo, demoEventRecords(execution, false))
+	if retryErr == nil {
+		execution.demo.ID = id
+		return
+	}
+	log.Printf("poller: save demo persistence failure: %v", retryErr)
+	execution.demo.Error = joinErrors(execution.demo.Error, fmt.Sprintf("persist demo failure record: %v", retryErr))
+}
+
+func demoEventRecords(execution *pollExecution, includeOutcomes bool) []DemoEvent {
 	records := make([]DemoEvent, 0, len(execution.outcomes)+1)
-	for _, outcome := range execution.outcomes {
-		if outcome.Event.ProviderID != "demo" && !strings.HasPrefix(outcome.Event.Key, "demo.") {
-			continue
+	if includeOutcomes {
+		for _, outcome := range execution.outcomes {
+			if outcome.Event.ProviderID != "demo" && !strings.HasPrefix(outcome.Event.Key, "demo.") {
+				continue
+			}
+			before, after := outcome.Before, outcome.After
+			records = append(records, DemoEventRecord{
+				Key:          outcome.Event.Key,
+				Type:         outcome.Event.Type,
+				CreatedAt:    execution.demo.CompletedAt,
+				WindowID:     outcome.Event.WindowID,
+				Before:       &before,
+				After:        &after,
+				Deduplicated: outcome.Deduplicated,
+				Delivery: DemoDeliveryResult{
+					Alerts: execution.dispatched.AlertsByEvent[outcome.Event.Key],
+				},
+			})
 		}
-		before, after := outcome.Before, outcome.After
-		records = append(records, DemoEventRecord{
-			RunID:        &runID,
-			Key:          outcome.Event.Key,
-			Type:         outcome.Event.Type,
-			CreatedAt:    execution.demo.CompletedAt,
-			WindowID:     outcome.Event.WindowID,
-			Before:       &before,
-			After:        &after,
-			Deduplicated: outcome.Deduplicated,
-			Delivery: DemoDeliveryResult{
-				Alerts: execution.dispatched.AlertsByEvent[outcome.Event.Key],
-			},
-		})
 	}
 	if execution.demo.Success {
 		records = append(records, DemoEventRecord{
-			RunID:     &runID,
-			Key:       fmt.Sprintf("demo.manual_poll:%d", id),
+			Key:       fmt.Sprintf("demo.manual_poll:%d", execution.demo.StartedAt.UnixNano()),
 			Type:      "manual_poll",
 			CreatedAt: execution.demo.CompletedAt,
 			Delivery:  execution.demo.Delivery,
 		})
 	} else {
 		records = append(records, DemoEventRecord{
-			RunID:     &runID,
-			Key:       fmt.Sprintf("demo.pipeline_error:%d", id),
+			Key:       fmt.Sprintf("demo.pipeline_error:%d", execution.demo.StartedAt.UnixNano()),
 			Type:      "pipeline_error",
 			CreatedAt: execution.demo.CompletedAt,
 		})
 	}
-	if err := p.store.AppendDemoEvents(records); err != nil {
-		log.Printf("poller: save demo events: %v", err)
-		execution.demo.Success = false
-		execution.demo.Error = joinErrors(execution.demo.Error, err.Error())
-	}
+	return records
 }
 
 func joinErrors(current, next string) string {
