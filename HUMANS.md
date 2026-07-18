@@ -20,14 +20,11 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 
 ## Apple Developer / device
 
-- [ ] Create an APNs Auth Key (.p8) in Apple Developer → Keys (Apple Push Notifications service).
-- [ ] Note Key ID, Team ID; download the `.p8` once and store it only on edServe under `/etc/usagewidget/` (mode 600).
-- [ ] Register App ID `systems.edmundlim.UsageWidget` with Push Notifications + App Groups capability.
-- [ ] Register App ID `systems.edmundlim.UsageWidget.widget` with App Groups (+ Push if using WidgetKit push).
-- [ ] Register App Group `group.systems.edmundlim.usagewidget` and enable it for the app + widget extension.
-- [ ] Automatic signing should pick team `DUU8J39BA7`; rebuild after keychain unlock.
-- [ ] Install the app on a physical iPhone with Tailscale connected to the same tailnet as edServe.
-- [ ] Grant notification permission when prompted; confirm APNs device token registers via server logs / devices table.
+- [x] APNs Auth Key created (Key ID `YK47N2PQ54`); installed on edServe as `/etc/usagewidget/AuthKey_YK47N2PQ54.p8` (mode 640, group usagewidget). ASC API key is separate — do not reuse for push.
+- [x] Team ID `DUU8J39BA7`; `APNS_ENV=sandbox` for Debug builds.
+- [x] App IDs + App Group registered; device has registered APNs + widget tokens.
+- [ ] Automatic signing / keychain unlock if device CodeSign fails.
+- [ ] On phone: grant notification permission; confirm demo alert appears (Settings → Testing → Send test alert, or `usagewidget demo`).
 
 ## edServe / Linux
 
@@ -35,8 +32,8 @@ Device `CodeSign` fails with `errSecInternalComponent` when the login keychain i
 - [x] `/etc/usagewidget/env` exists (token + CodexBar URL); mode 600 on host only.
 - [x] Tailscale Serve: `https://edserve.tail125275.ts.net/usagewidget` → `127.0.0.1:8377`.
 - [ ] Ensure CodexBar `serve` is running on localhost and `/usage` returns live provider data.
-- [ ] Install APNs `.p8` + set `APNS_*` in env (currently log-only noop pushes until configured).
-- [ ] From the phone (or any tailnet device), hit `GET /v1/health` with the bearer token.
+- [x] APNs `.p8` + `APNS_*` env on edServe (health shows `"apns":true`; live send succeeds).
+- [ ] From the phone (or any tailnet device), hit `GET /v1/health` with the bearer token (or `usagewidget health`).
 
 ## Demo validation
 
