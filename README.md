@@ -54,11 +54,15 @@ usagewidget env sync    # pull bearer token from edServe → ~/.config/usagewidg
 usagewidget health
 usagewidget poll        # force server poll
 usagewidget demo        # synthetic test alert
+usagewidget demo-provider on  # enable synthetic provider and poll
+usagewidget demo-provider off # disable it and poll
 usagewidget deploy      # rebuild + restart on edServe
 usagewidget logs -f
 ```
 
 Config lives at `~/.config/usagewidget/env` (mode 600, not in git).
+Deploys also install the CLI at `/usr/local/bin/usagewidget` on edServe, where
+it automatically reads `/etc/usagewidget/env` and uses the local daemon.
 
 ### API
 
@@ -73,6 +77,10 @@ All routes require `Authorization: Bearer <USAGEWIDGET_TOKEN>`.
 | `DELETE` | `/v1/devices/{deviceID}` | Invalidate a device |
 | `POST` | `/v1/poll` | Force one poll cycle now (real CodexBar path) |
 | `POST` | `/v1/demo/alert` | Send a synthetic test APNs + widget refresh |
+
+The server-backed **Demo provider** toggle in iOS controls whether normal and
+scheduled edServe polls inject the persisted synthetic provider. The same switch
+is available through `usagewidget demo-provider on|off|poll`.
 
 ### Demo flow
 

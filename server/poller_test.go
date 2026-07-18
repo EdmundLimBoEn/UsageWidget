@@ -96,6 +96,35 @@ func TestPollerSavesSnapshot(t *testing.T) {
 	}
 }
 
+func TestPollerIncludesDemoProviderWhenEnabled(t *testing.T) {
+	poller, store, _ := newPollerHarness(t)
+	if err := store.SetSetting("demo_provider_enabled", "true"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := poller.PollNow(context.Background())
+	if !result.Success {
+		t.Fatalf("PollNow failed: %+v", result)
+	}
+	snap := latestSnap(t, store)
+	if len(snap.Providers) != 2 || snap.Providers[0].ID != "codex" {
+		t.Fatalf("providers=%+v, want real provider plus demo", snap.Providers)
+	}
+	demoProvider(t, snap)
+
+	if err := store.SetSetting("demo_provider_enabled", "false"); err != nil {
+		t.Fatal(err)
+	}
+	result = poller.PollNow(context.Background())
+	if !result.Success {
+		t.Fatalf("PollNow after disabling demo failed: %+v", result)
+	}
+	snap = latestSnap(t, store)
+	if len(snap.Providers) != 1 || snap.Providers[0].ID != "codex" {
+		t.Fatalf("providers=%+v, want demo removed after disabling", snap.Providers)
+	}
+}
+
 func TestPollerStaleFallback(t *testing.T) {
 	poller, store, healthy := newPollerHarness(t)
 

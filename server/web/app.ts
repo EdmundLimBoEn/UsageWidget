@@ -1,6 +1,6 @@
 import {
-  canSurpriseReset,
   filterEvents,
+  findPipelineStage,
   formatBeforeAfter,
   formatDelivery,
 	makePatch,
@@ -9,6 +9,7 @@ import {
   mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
+  surpriseResetNeedsArming,
   type DemoDeliveryResult,
 	type DemoAlertResponse,
   type DemoEventRecord,
@@ -243,8 +244,12 @@ function providerPrimaryUsed(provider?: DemoProvider): number {
   return primary?.usedPercent ?? Number.NaN;
 }
 
+function providerPrimaryReset(provider?: DemoProvider): string | undefined {
+  return provider?.windows.find((window) => window.id === "demo.primary" || window.key === "primary")?.resetsAt;
+}
+
 function updateSurpriseEligibility(): void {
-  surpriseResetButton.disabled = busy || !canSurpriseReset(providerPrimaryUsed(latestView?.snapshot?.provider));
+  surpriseResetButton.disabled = busy || !Number.isFinite(providerPrimaryUsed(latestView?.snapshot?.provider));
 }
 
 function contextualStageDetail(stageID: string, pipeline: DemoPipelineResult, view: DemoViewResponse): string {
@@ -275,7 +280,7 @@ function renderPipeline(view: DemoViewResponse): void {
       continue;
     }
     const stageID = node.dataset.stage ?? "";
-    const stage = view.pipeline?.stages.find(({ id }) => id === stageID);
+    const stage = findPipelineStage(view.pipeline, stageID);
     node.classList.remove("ok", "warning", "failed", "skipped");
     if (!view.pipeline || !stage) {
       node.classList.add("skipped");
@@ -530,8 +535,17 @@ applyPollButton.addEventListener("click", () => {
 surpriseResetButton.addEventListener("click", () => {
   void perform("Running surprise reset.", async () => {
     const baseline = providerPrimaryUsed(latestView?.snapshot?.provider);
-    if (!canSurpriseReset(baseline)) {
-      throw new Error("Surprise reset requires a normalized primary baseline of at least 20%.");
+    if (!Number.isFinite(baseline)) {
+      throw new Error("Surprise reset requires a normalized primary window.");
+    }
+    if (surpriseResetNeedsArming(baseline, providerPrimaryReset(latestView?.snapshot?.provider))) {
+      const armed = await patchDemo({
+        primary: {
+          usedPercent: 20,
+          resetsAt: resetAtForPreset("two-hours-eight"),
+        },
+      });
+      await pollDemo(armed.state, armed);
     }
     const patched = await patchDemo({ primary: { usedPercent: 5 } });
     await pollDemo(patched.state, patched);

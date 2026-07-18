@@ -143,11 +143,14 @@ func TestGetSettingsDefaults(t *testing.T) {
 	if !got.NotificationsEnabled {
 		t.Fatalf("expected notifications enabled by default")
 	}
+	if got.DemoProviderEnabled {
+		t.Fatalf("expected demo provider disabled by default")
+	}
 }
 
 func TestPutSettingsUpdatesFields(t *testing.T) {
 	api, _ := newTestAPI(t)
-	body := []byte(`{"pollIntervalMinutes":15,"providerOrder":["claude","codex"],"earlyThresholdPct":20,"notificationsEnabled":false}`)
+	body := []byte(`{"pollIntervalMinutes":15,"providerOrder":["claude","codex"],"demoProviderEnabled":true,"earlyThresholdPct":20,"notificationsEnabled":false}`)
 	rec := doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -160,7 +163,7 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	if got.PollIntervalMinutes != 15 {
 		t.Fatalf("expected updated poll interval 15, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 2 || got.ProviderOrder[0] != "claude" {
+	if len(got.ProviderOrder) != 3 || got.ProviderOrder[0] != "claude" {
 		t.Fatalf("unexpected provider order: %+v", got.ProviderOrder)
 	}
 	if got.EarlyThresholdPct != 20 {
@@ -168,6 +171,12 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	}
 	if got.NotificationsEnabled {
 		t.Fatalf("expected notifications disabled")
+	}
+	if !got.DemoProviderEnabled {
+		t.Fatalf("expected demo provider enabled")
+	}
+	if got.ProviderOrder[len(got.ProviderOrder)-1] != "demo" {
+		t.Fatalf("expected enabled demo provider appended to order: %+v", got.ProviderOrder)
 	}
 	if got.DangerThresholdPct != 10 {
 		t.Fatalf("expected untouched danger threshold to stay at default 10, got %v", got.DangerThresholdPct)

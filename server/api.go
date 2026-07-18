@@ -188,6 +188,7 @@ type Settings struct {
 	PollIntervalMinutes  int      `json:"pollIntervalMinutes"`
 	ProviderOrder        []string `json:"providerOrder"`
 	HiddenProviders      []string `json:"hiddenProviders"`
+	DemoProviderEnabled  bool     `json:"demoProviderEnabled"`
 	NotificationsEnabled bool     `json:"notificationsEnabled"`
 	EarlyThresholdPct    float64  `json:"earlyThresholdPct"`
 	DangerThresholdPct   float64  `json:"dangerThresholdPct"`
@@ -209,10 +210,36 @@ func loadSettings(store *Store) (Settings, error) {
 	s.PollIntervalMinutes, _ = strconv.Atoi(raw["poll_interval_minutes"])
 	json.Unmarshal([]byte(raw["provider_order"]), &s.ProviderOrder)
 	json.Unmarshal([]byte(raw["hidden_providers"]), &s.HiddenProviders)
+	s.DemoProviderEnabled = raw["demo_provider_enabled"] == "true"
+	if s.DemoProviderEnabled {
+		s.HiddenProviders = removeString(s.HiddenProviders, "demo")
+		if !containsString(s.ProviderOrder, "demo") {
+			s.ProviderOrder = append(s.ProviderOrder, "demo")
+		}
+	}
 	s.NotificationsEnabled = raw["notifications_enabled"] == "true"
 	s.EarlyThresholdPct, _ = strconv.ParseFloat(raw["early_threshold_pct"], 64)
 	s.DangerThresholdPct, _ = strconv.ParseFloat(raw["danger_threshold_pct"], 64)
 	return s, nil
+}
+
+func removeString(values []string, target string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != target {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +255,7 @@ type updateSettingsRequest struct {
 	PollIntervalMinutes  *int      `json:"pollIntervalMinutes"`
 	ProviderOrder        *[]string `json:"providerOrder"`
 	HiddenProviders      *[]string `json:"hiddenProviders"`
+	DemoProviderEnabled  *bool     `json:"demoProviderEnabled"`
 	NotificationsEnabled *bool     `json:"notificationsEnabled"`
 	EarlyThresholdPct    *float64  `json:"earlyThresholdPct"`
 	DangerThresholdPct   *float64  `json:"dangerThresholdPct"`
@@ -269,6 +297,9 @@ func (a *API) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if req.HiddenProviders != nil {
 		b, _ := json.Marshal(*req.HiddenProviders)
 		set("hidden_providers", string(b))
+	}
+	if req.DemoProviderEnabled != nil {
+		set("demo_provider_enabled", strconv.FormatBool(*req.DemoProviderEnabled))
 	}
 	if req.NotificationsEnabled != nil {
 		set("notifications_enabled", strconv.FormatBool(*req.NotificationsEnabled))

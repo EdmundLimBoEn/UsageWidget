@@ -124,6 +124,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public var pollIntervalMinutes: Int
     public var providerOrder: [String]
     public var hiddenProviders: [String]
+    public var demoProviderEnabled: Bool
     public var notificationsEnabled: Bool
     public var earlyThresholdPct: Double
     public var dangerThresholdPct: Double
@@ -132,6 +133,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         pollIntervalMinutes: Int = 5,
         providerOrder: [String] = ["codex", "claude", "grok"],
         hiddenProviders: [String] = [],
+        demoProviderEnabled: Bool = false,
         notificationsEnabled: Bool = true,
         earlyThresholdPct: Double = 10,
         dangerThresholdPct: Double = 10
@@ -139,6 +141,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         self.pollIntervalMinutes = pollIntervalMinutes
         self.providerOrder = providerOrder
         self.hiddenProviders = hiddenProviders
+        self.demoProviderEnabled = demoProviderEnabled
         self.notificationsEnabled = notificationsEnabled
         self.earlyThresholdPct = earlyThresholdPct
         self.dangerThresholdPct = dangerThresholdPct

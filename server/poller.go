@@ -188,6 +188,17 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		execution.poll.Error = err.Error()
 		return execution
 	}
+	injectedDemoState := demoState
+	if !recordDemo && settings.DemoProviderEnabled {
+		state, loadErr := p.store.LoadDemoState()
+		if loadErr != nil {
+			log.Printf("poller: load enabled demo provider: %v", loadErr)
+			p.recordPollResult(now, false)
+			execution.poll.Error = loadErr.Error()
+			return execution
+		}
+		injectedDemoState = &state
+	}
 
 	normalizeStarted := time.Now()
 	body, err := p.codexbar.Fetch(ctx)
@@ -201,11 +212,16 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		execution.poll.Error = err.Error()
 		return execution
 	}
-	if recordDemo {
-		body, err = InjectDemoProvider(body, *demoState)
+	if injectedDemoState != nil {
+		body, err = InjectDemoProvider(body, *injectedDemoState)
 		if err != nil {
 			log.Printf("poller: inject demo provider: %v", err)
-			return p.failPoll(execution, "normalize", normalizeStarted, err, false, action, demoState)
+			if recordDemo {
+				return p.failPoll(execution, "normalize", normalizeStarted, err, false, action, demoState)
+			}
+			p.recordPollResult(now, false)
+			execution.poll.Error = err.Error()
+			return execution
 		}
 	}
 

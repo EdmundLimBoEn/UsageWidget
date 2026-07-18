@@ -45,6 +45,7 @@ var defaultSettings = map[string]string{
 	"poll_interval_minutes": "5",
 	"provider_order":        `["codex","claude","grok"]`,
 	"hidden_providers":      `[]`,
+	"demo_provider_enabled": "false",
 	"notifications_enabled": "true",
 	"early_threshold_pct":   "10",
 	"danger_threshold_pct":  "10",

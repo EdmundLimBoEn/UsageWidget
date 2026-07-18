@@ -30,3 +30,5 @@ ios/signing/
 *.p12
 *.cer
 *.csr
+.gstack/
+.superpowers/

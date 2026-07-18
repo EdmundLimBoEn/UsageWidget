@@ -221,8 +221,10 @@ func TestTiboTitleByProvider(t *testing.T) {
 		providerID string
 		wantTitle  string
 	}{
-		{"codex", "Tibo blessed"},
-		{"claude", "Surprise reset"},
+		{"claude", "Tibo has struck again! Claude limits reset"},
+		{"codex", "Saint Tibo has blessed you with tokens, Codex limits reset"},
+		{"demo", "mini-tibo (me) has blessed you with pretend tokens"},
+		{"grok", "Surprise reset"},
 	} {
 		t.Run(tc.providerID, func(t *testing.T) {
 			s := openTestStore(t)

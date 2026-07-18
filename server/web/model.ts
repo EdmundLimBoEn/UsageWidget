@@ -51,7 +51,7 @@ export interface DemoPipelineResult {
   snapshotChanged: boolean;
   eventsEmitted: number;
   eventsDeduplicated: number;
-  stages: DemoPipelineStage[];
+  stages?: DemoPipelineStage[] | null;
   delivery: DemoDeliveryResult;
   error?: string;
 }
@@ -108,6 +108,13 @@ export interface DemoViewResponse {
   pipeline: DemoPipelineResult | null;
   csrfToken: string;
   deliveryHealth: "ok" | "degraded";
+}
+
+export function findPipelineStage(
+  pipeline: DemoPipelineResult | null | undefined,
+  stageID: string,
+): DemoPipelineStage | undefined {
+  return pipeline?.stages?.find(({ id }) => id === stageID);
 }
 
 export interface DemoPollResponse {
@@ -184,6 +191,18 @@ export function makePatch(values: DemoControlValues): DemoStatePatch {
 
 export function canSurpriseReset(primaryUsedPercent: number): boolean {
   return Number.isFinite(primaryUsedPercent) && primaryUsedPercent >= 20;
+}
+
+export function surpriseResetNeedsArming(
+  primaryUsedPercent: number,
+  resetsAt: string | undefined,
+  now = new Date(),
+): boolean {
+  if (!canSurpriseReset(primaryUsedPercent) || !resetsAt) {
+    return true;
+  }
+  const reset = new Date(resetsAt);
+  return Number.isNaN(reset.getTime()) || reset <= now;
 }
 
 const resetOffsets: Record<ResetPreset, number> = {

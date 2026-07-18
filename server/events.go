@@ -185,15 +185,24 @@ func detectWindowEvents(prev WindowState, w Window, p Provider, s Settings, now 
 				evs = append(evs, mkEvent("reset", "Limit reset", providerEventKey("reset", p.ID, w.ID, prev.ResetsAt), p, w))
 			}
 		} else if isSurpriseReset(prev.UsedPercent, w.UsedPercent) {
-			title := "Surprise reset"
-			if p.ID == "codex" {
-				title = "Tibo blessed"
-			}
-			evs = append(evs, mkEvent("tibo_reset", title, providerEventKey("tibo", p.ID, w.ID, prev.ResetsAt), p, w))
+			evs = append(evs, mkEvent("tibo_reset", surpriseResetTitle(p.ID), providerEventKey("tibo", p.ID, w.ID, prev.ResetsAt), p, w))
 		}
 	}
 
 	return evs
+}
+
+func surpriseResetTitle(providerID string) string {
+	switch providerID {
+	case "claude":
+		return "Tibo has struck again! Claude limits reset"
+	case "codex":
+		return "Saint Tibo has blessed you with tokens, Codex limits reset"
+	case "demo":
+		return "mini-tibo (me) has blessed you with pretend tokens"
+	default:
+		return "Surprise reset"
+	}
 }
 
 func isSurpriseReset(prevUsed, curUsed float64) bool {

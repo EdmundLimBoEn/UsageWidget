@@ -1,4 +1,7 @@
 // model.ts
+function findPipelineStage(pipeline, stageID) {
+  return pipeline?.stages?.find(({ id }) => id === stageID);
+}
 function mutationHeaders(csrfToken, idempotencyKey) {
   return { "Content-Type": "application/json", "X-Demo-CSRF": csrfToken, "Idempotency-Key": idempotencyKey };
 }
@@ -26,6 +29,13 @@ function makePatch(values) {
 }
 function canSurpriseReset(primaryUsedPercent) {
   return Number.isFinite(primaryUsedPercent) && primaryUsedPercent >= 20;
+}
+function surpriseResetNeedsArming(primaryUsedPercent, resetsAt, now = new Date) {
+  if (!canSurpriseReset(primaryUsedPercent) || !resetsAt) {
+    return true;
+  }
+  const reset = new Date(resetsAt);
+  return Number.isNaN(reset.getTime()) || reset <= now;
 }
 var resetOffsets = {
   "five-minutes": 5,
@@ -286,8 +296,11 @@ function providerPrimaryUsed(provider) {
   const primary = provider.windows.find((window2) => window2.id === "demo.primary" || window2.key === "primary");
   return primary?.usedPercent ?? Number.NaN;
 }
+function providerPrimaryReset(provider) {
+  return provider?.windows.find((window2) => window2.id === "demo.primary" || window2.key === "primary")?.resetsAt;
+}
 function updateSurpriseEligibility() {
-  surpriseResetButton.disabled = busy || !canSurpriseReset(providerPrimaryUsed(latestView?.snapshot?.provider));
+  surpriseResetButton.disabled = busy || !Number.isFinite(providerPrimaryUsed(latestView?.snapshot?.provider));
 }
 function contextualStageDetail(stageID, pipeline, view) {
   const provider = view.snapshot?.provider;
@@ -316,7 +329,7 @@ function renderPipeline(view) {
       continue;
     }
     const stageID = node.dataset.stage ?? "";
-    const stage = view.pipeline?.stages.find(({ id }) => id === stageID);
+    const stage = findPipelineStage(view.pipeline, stageID);
     node.classList.remove("ok", "warning", "failed", "skipped");
     if (!view.pipeline || !stage) {
       node.classList.add("skipped");
@@ -555,8 +568,17 @@ applyPollButton.addEventListener("click", () => {
 surpriseResetButton.addEventListener("click", () => {
   perform("Running surprise reset.", async () => {
     const baseline = providerPrimaryUsed(latestView?.snapshot?.provider);
-    if (!canSurpriseReset(baseline)) {
-      throw new Error("Surprise reset requires a normalized primary baseline of at least 20%.");
+    if (!Number.isFinite(baseline)) {
+      throw new Error("Surprise reset requires a normalized primary window.");
+    }
+    if (surpriseResetNeedsArming(baseline, providerPrimaryReset(latestView?.snapshot?.provider))) {
+      const armed = await patchDemo({
+        primary: {
+          usedPercent: 20,
+          resetsAt: resetAtForPreset("two-hours-eight")
+        }
+      });
+      await pollDemo(armed.state, armed);
     }
     const patched = await patchDemo({ primary: { usedPercent: 5 } });
     await pollDemo(patched.state, patched);

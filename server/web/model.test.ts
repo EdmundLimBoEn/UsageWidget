@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   canSurpriseReset,
   filterEvents,
+  findPipelineStage,
   formatBeforeAfter,
   formatDelivery,
   makePatch,
@@ -11,7 +12,9 @@ import {
 	mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
+  surpriseResetNeedsArming,
   type DemoEventRecord,
+  type DemoPipelineResult,
 } from "./model";
 
 const event = (overrides: Partial<DemoEventRecord>): DemoEventRecord => ({
@@ -39,6 +42,14 @@ describe("demo controls", () => {
   test("surprise reset requires an established primary baseline", () => {
     expect(canSurpriseReset(19)).toBe(false);
     expect(canSurpriseReset(20)).toBe(true);
+  });
+
+  test("surprise reset arms low, expired, and invalid baselines", () => {
+    const now = new Date("2026-07-18T10:00:00Z");
+    expect(surpriseResetNeedsArming(5, "2026-07-18T12:00:00Z", now)).toBe(true);
+    expect(surpriseResetNeedsArming(20, "2026-07-18T09:00:00Z", now)).toBe(true);
+    expect(surpriseResetNeedsArming(20, "invalid", now)).toBe(true);
+    expect(surpriseResetNeedsArming(20, "2026-07-18T12:00:00Z", now)).toBe(false);
   });
 
   test("builds a demo-only patch", () => {
@@ -124,6 +135,10 @@ describe("event presentation", () => {
 });
 
 describe("pipeline presentation", () => {
+  test("tolerates legacy pipeline records with null stages", () => {
+    expect(findPipelineStage({ stages: null } as DemoPipelineResult, "normalize")).toBeUndefined();
+  });
+
   test("provides readable status labels", () => {
     expect(stageStatusLabel("ok")).toBe("Complete");
     expect(stageStatusLabel("warning")).toBe("Warning");
