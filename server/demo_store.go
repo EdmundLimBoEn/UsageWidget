@@ -78,6 +78,9 @@ func (s *Store) LoadDemoState() (DemoState, error) {
 }
 
 func (s *Store) SaveDemoState(state DemoState) error {
+	if err := validateDemoState(state, state.UpdatedAt); err != nil {
+		return fmt.Errorf("store: validate demo state: %w", err)
+	}
 	payload, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("store: encode demo state: %w", err)
@@ -94,6 +97,9 @@ func (s *Store) SaveDemoState(state DemoState) error {
 }
 
 func (s *Store) SaveDemoRun(run DemoRun) (int64, error) {
+	if !json.Valid(run.Payload) {
+		return 0, fmt.Errorf("store: demo run payload must be valid JSON")
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, fmt.Errorf("store: begin demo run tx: %w", err)
@@ -145,6 +151,11 @@ func (s *Store) LatestDemoRun() (DemoRun, bool, error) {
 }
 
 func (s *Store) AppendDemoEvents(events []DemoEvent) error {
+	for i, event := range events {
+		if !json.Valid(event.Payload) {
+			return fmt.Errorf("store: demo event %d payload must be valid JSON", i)
+		}
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("store: begin demo events tx: %w", err)

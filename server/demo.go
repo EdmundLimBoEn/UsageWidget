@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"time"
 )
@@ -59,6 +60,12 @@ func decodeDemoPatch(data []byte, dst any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
+		return fmt.Errorf("demo patch: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("demo patch: unexpected trailing JSON value")
+		}
 		return fmt.Errorf("demo patch: %w", err)
 	}
 	return nil
@@ -119,6 +126,9 @@ func applyDemoWindowPatch(state *DemoWindowState, patch DemoWindowPatch) {
 }
 
 func validateDemoState(state DemoState, now time.Time) error {
+	if state.UpdatedAt.IsZero() {
+		return fmt.Errorf("demo: updatedAt must not be zero")
+	}
 	if err := validateDemoWindow("primary", state.Primary, now); err != nil {
 		return err
 	}

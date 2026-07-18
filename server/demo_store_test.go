@@ -45,6 +45,46 @@ func TestDemoStateSeedAndPersistence(t *testing.T) {
 	}
 }
 
+func TestDemoStateSaveRejectsInvalidState(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	valid := DefaultDemoState(now)
+	if err := store.SaveDemoState(valid); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*DemoState)
+	}{
+		{name: "zero updated timestamp", mutate: func(state *DemoState) { state.UpdatedAt = time.Time{} }},
+		{name: "zero primary reset timestamp", mutate: func(state *DemoState) { state.Primary.ResetsAt = time.Time{} }},
+		{name: "zero secondary reset timestamp", mutate: func(state *DemoState) { state.Secondary.ResetsAt = time.Time{} }},
+		{name: "primary percentage above one hundred", mutate: func(state *DemoState) { state.Primary.UsedPercent = 100.1 }},
+		{name: "secondary percentage below zero", mutate: func(state *DemoState) { state.Secondary.UsedPercent = -0.1 }},
+		{name: "negative credits", mutate: func(state *DemoState) { state.CreditsAvailable = -1 }},
+		{name: "primary reset too old", mutate: func(state *DemoState) { state.Primary.ResetsAt = now.Add(-24*time.Hour - time.Second) }},
+		{name: "secondary reset too new", mutate: func(state *DemoState) { state.Secondary.ResetsAt = now.Add(31*24*time.Hour + time.Second) }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			invalid := valid
+			tt.mutate(&invalid)
+			if err := store.SaveDemoState(invalid); err == nil {
+				t.Fatal("expected invalid state to be rejected")
+			}
+			got, err := store.LoadDemoState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != valid {
+				t.Fatalf("invalid save changed durable state:\n got %#v\nwant %#v", got, valid)
+			}
+		})
+	}
+}
+
 func TestDemoRunStoreRetainsLatestTwenty(t *testing.T) {
 	store := openTestStore(t)
 	base := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
@@ -76,6 +116,27 @@ func TestDemoRunStoreRetainsLatestTwenty(t *testing.T) {
 	}
 	if count != 20 {
 		t.Fatalf("expected 20 retained runs, got %d", count)
+	}
+}
+
+func TestDemoRunStoreRejectsMalformedPayload(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	for _, payload := range []json.RawMessage{nil, json.RawMessage(`{"broken":`)} {
+		_, err := store.SaveDemoRun(DemoRun{
+			StartedAt: now, CompletedAt: now.Add(time.Second), Payload: payload,
+		})
+		if err == nil {
+			t.Fatalf("expected invalid payload %q to be rejected", payload)
+		}
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_runs`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no durable runs, got %d", count)
 	}
 }
 
@@ -118,5 +179,47 @@ func TestDemoEventStoreDefaultsCapsAndRetains(t *testing.T) {
 	}
 	if count != 500 {
 		t.Fatalf("expected 500 retained demo events, got %d", count)
+	}
+}
+
+func TestDemoEventStoreRejectsMalformedPayload(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	for _, payload := range []json.RawMessage{nil, json.RawMessage(`{"broken":`)} {
+		err := store.AppendDemoEvents([]DemoEvent{{
+			EventKey: "demo.test", EventType: "test", CreatedAt: now, Payload: payload,
+		}})
+		if err == nil {
+			t.Fatalf("expected invalid payload %q to be rejected", payload)
+		}
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_event_log`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no durable events, got %d", count)
+	}
+}
+
+func TestDemoEventStoreRejectsMixedBatchAtomically(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	events := []DemoEvent{
+		{EventKey: "demo.first", EventType: "test", CreatedAt: now, Payload: json.RawMessage(`{"ok":true}`)},
+		{EventKey: "demo.invalid", EventType: "test", CreatedAt: now, Payload: json.RawMessage(`{"broken":`)},
+		{EventKey: "demo.last", EventType: "test", CreatedAt: now, Payload: json.RawMessage(`{"ok":true}`)},
+	}
+	if err := store.AppendDemoEvents(events); err == nil {
+		t.Fatal("expected mixed batch to be rejected")
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_event_log`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected mixed batch to write nothing, got %d events", count)
 	}
 }

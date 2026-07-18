@@ -83,6 +83,13 @@ func TestDemoStatePatchRejectsUnknownJSONFields(t *testing.T) {
 	}
 }
 
+func TestDemoStatePatchRejectsTrailingJSON(t *testing.T) {
+	var patch DemoStatePatch
+	if err := patch.UnmarshalJSON([]byte(`{"stale":true} {"providerError":true}`)); err == nil {
+		t.Fatal("expected trailing JSON value to fail")
+	}
+}
+
 func TestBuildDemoRaw(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	raw, err := BuildDemoRaw(DefaultDemoState(now))
