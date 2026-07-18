@@ -4,8 +4,8 @@ Checklist items that cannot be fully automated from this repo.
 
 ## Repo / git
 
-- [ ] Re-auth GitHub CLI (`gh auth login`) — push failed with invalid token for `EdmundLimBoEn`.
-- [ ] Create remote and push: `gh repo create EdmundLimBoEn/UsageWidget --private --source=. --remote=origin --push` (or add an existing remote).
+- [x] Re-auth GitHub CLI — done; pushes work.
+- [x] Remote `EdmundLimBoEn/UsageWidget` exists and `origin` is pushed.
 
 ## Code signing (device builds)
 
