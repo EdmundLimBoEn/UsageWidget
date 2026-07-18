@@ -1,6 +1,8 @@
 # UsageWidget Demo Dashboard Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **BLOCKED AFTER TASK 4:** Do not execute the remaining tasks until this plan is revised against `~/.gstack/projects/EdmundLimBoEn-UsageWidget/ceo-plans/2026-07-18-usagewidget-portfolio.md`. The CEO review changed sequencing and contracts for temporary Access/Tunnel trust, CSRF/origin protection, default-off listener, rate limits, audit, demo-device allowlisting, client/server idempotency, expected state revisions, outbox integration, evidence gates, and post-hackathon removal. Existing demo state/poll commits may remain; finish the dashboard only after the remaining plan is reconciled with those decisions.
 
 **Goal:** Ship the approved Lab Console at `demo.usagewidget.edmundlim.systems`, controlling one synthetic demo provider through UsageWidget’s real normalization, persistence, event, APNs, iOS app, and widget pipeline.
 
