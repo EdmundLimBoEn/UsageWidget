@@ -76,3 +76,35 @@ func TestLoadConfigDemoDeviceIDsAndAccessIdentityHeader(t *testing.T) {
 		t.Fatal("expected blank identity header rejection")
 	}
 }
+
+func TestLoadConfigDemoListener(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", "secret")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DemoEnabled {
+		t.Fatal("demo must be disabled by default")
+	}
+	if cfg.DemoListenAddr != "127.0.0.1:8378" {
+		t.Fatalf("demo listen addr=%q", cfg.DemoListenAddr)
+	}
+
+	t.Setenv("USAGEWIDGET_DEMO_ENABLED", "true")
+	for _, addr := range []string{"0.0.0.0:8378", ":8378", "not-an-address"} {
+		t.Setenv("DEMO_LISTEN_ADDR", addr)
+		if _, err := LoadConfig(); err == nil {
+			t.Fatalf("expected %q to be rejected", addr)
+		}
+	}
+
+	t.Setenv("DEMO_LISTEN_ADDR", "127.0.0.2:9000")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DemoEnabled || cfg.DemoListenAddr != "127.0.0.2:9000" {
+		t.Fatalf("unexpected demo config: %+v", cfg)
+	}
+}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 )
@@ -13,6 +14,8 @@ type Config struct {
 	DBPath      string
 	ListenAddr  string
 
+	DemoEnabled          bool
+	DemoListenAddr       string
 	DemoDeviceIDs        []string
 	AccessIdentityHeader string
 
@@ -45,12 +48,27 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("ACCESS_IDENTITY_HEADER must not be blank")
 	}
 
+	demoEnabled := os.Getenv("USAGEWIDGET_DEMO_ENABLED") == "true"
+	demoListenAddr := envOr("DEMO_LISTEN_ADDR", "127.0.0.1:8378")
+	if demoEnabled {
+		host, _, err := net.SplitHostPort(demoListenAddr)
+		if err != nil {
+			return Config{}, fmt.Errorf("DEMO_LISTEN_ADDR: %w", err)
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return Config{}, fmt.Errorf("DEMO_LISTEN_ADDR must use a loopback IP")
+		}
+	}
+
 	return Config{
 		Token:                token,
 		CodexBarURL:          envOr("CODEXBAR_URL", "http://127.0.0.1:8765/usage"),
 		CodexBarCmd:          os.Getenv("CODEXBAR_CMD"),
 		DBPath:               envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:           envOr("LISTEN_ADDR", ":8377"),
+		DemoEnabled:          demoEnabled,
+		DemoListenAddr:       demoListenAddr,
 		DemoDeviceIDs:        deviceIDs,
 		AccessIdentityHeader: strings.TrimSpace(identityHeader),
 
