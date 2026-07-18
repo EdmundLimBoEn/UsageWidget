@@ -60,6 +60,7 @@ const actionButtons = [applyPollButton, surpriseResetButton, testAlertButton];
 const inputs = [primaryInput, secondaryInput, creditsInput, staleInput, providerErrorInput, resetPreset];
 
 let latestView: DemoViewResponse | null = null;
+let resetPresetDirty = false;
 let recentEvents: DemoEventRecord[] = [];
 let activeFilter: EventFilter = "all";
 let busy = false;
@@ -112,9 +113,15 @@ function showFailure(error: unknown): void {
   announce(`Demo API error. ${detail}`);
 }
 
+function showValidation(message: string): void {
+  errorMessage.textContent = message;
+  errorBanner.hidden = false;
+  retryButton.hidden = true;
+  announce(message);
+}
+
 function clearFailure(): void {
   errorBanner.hidden = true;
-  retryButton.hidden = false;
   errorMessage.textContent = "";
 }
 
@@ -176,6 +183,7 @@ function renderControls(state: DemoState): void {
   creditsInput.value = String(state.creditsAvailable);
   staleInput.checked = state.stale;
   providerErrorInput.checked = state.providerError;
+  resetPresetDirty = false;
 }
 
 function setKPI(element: HTMLElement, text: string, tone?: "good" | "warn" | "bad"): void {
@@ -223,8 +231,7 @@ function contextualStageDetail(stageID: string, pipeline: DemoPipelineResult, vi
     return `state loaded · ${formatClock(view.state.updatedAt)}`;
   }
   if (stageID === "normalize" && provider) {
-    const credits = provider.credits ? "1 credits" : "0 credits";
-    return `${provider.windows.length} windows · ${credits}`;
+    return `${provider.windows.length} windows · ${provider.credits?.availableCount ?? 0} credits`;
   }
   if (stageID === "snapshot_persisted") {
     return pipeline.snapshotChanged ? "snapshot changed" : "snapshot unchanged";
@@ -255,7 +262,8 @@ function renderPipeline(view: DemoViewResponse): void {
     }
     node.classList.add(stage.status);
     const outcome = stage.detail || contextualStageDetail(stageID, view.pipeline, view);
-    const pieces = [stageStatusLabel(stage.status), outcome, formatDuration(stage.durationMs)].filter(Boolean);
+    const label = stage.status === "ok" ? "" : stageStatusLabel(stage.status);
+    const pieces = [label, outcome, formatDuration(stage.durationMs)].filter(Boolean);
     detail.textContent = pieces.join(" · ");
   }
 }
@@ -420,8 +428,8 @@ async function loadAll(): Promise<void> {
 
 function readPatch(): DemoStatePatch {
   const credits = creditsInput.valueAsNumber;
-  if (!Number.isInteger(credits) || credits < 0) {
-    throw new Error("Credits must be a non-negative whole number.");
+  if (!Number.isInteger(credits) || credits < 0 || credits > 99) {
+    throw new Error("Credits must be a whole number between 0 and 99.");
   }
   return makePatch({
     primaryUsed: primaryInput.valueAsNumber,
@@ -429,7 +437,7 @@ function readPatch(): DemoStatePatch {
     credits,
     stale: staleInput.checked,
     providerError: providerErrorInput.checked,
-    primaryResetsAt: resetAtForPreset(resetPreset.value as ResetPreset),
+    primaryResetsAt: resetPresetDirty ? resetAtForPreset(resetPreset.value as ResetPreset) : undefined,
   });
 }
 
@@ -452,9 +460,20 @@ secondaryInput.addEventListener("input", () => {
   secondaryOutput.value = formatPercent(secondaryInput.valueAsNumber);
 });
 
+resetPreset.addEventListener("change", () => {
+  resetPresetDirty = true;
+});
+
 applyPollButton.addEventListener("click", () => {
+  let patch: DemoStatePatch;
+  try {
+    patch = readPatch();
+  } catch (error) {
+    showValidation(error instanceof Error ? error.message : "Invalid input.");
+    return;
+  }
   void perform("Applying demo state and polling.", async () => {
-    await patchDemo(readPatch());
+    await patchDemo(patch);
     await pollDemo();
     await loadAll();
   }, "Demo state applied and poll complete.");

@@ -118,6 +118,7 @@ var filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
 var actionButtons = [applyPollButton, surpriseResetButton, testAlertButton];
 var inputs = [primaryInput, secondaryInput, creditsInput, staleInput, providerErrorInput, resetPreset];
 var latestView = null;
+var resetPresetDirty = false;
 var recentEvents = [];
 var activeFilter = "all";
 var busy = false;
@@ -163,9 +164,14 @@ function showFailure(error) {
   retryButton.hidden = false;
   announce(`Demo API error. ${detail}`);
 }
+function showValidation(message) {
+  errorMessage.textContent = message;
+  errorBanner.hidden = false;
+  retryButton.hidden = true;
+  announce(message);
+}
 function clearFailure() {
   errorBanner.hidden = true;
-  retryButton.hidden = false;
   errorMessage.textContent = "";
 }
 async function perform(label, operation, success) {
@@ -219,6 +225,7 @@ function renderControls(state) {
   creditsInput.value = String(state.creditsAvailable);
   staleInput.checked = state.stale;
   providerErrorInput.checked = state.providerError;
+  resetPresetDirty = false;
 }
 function setKPI(element, text, tone) {
   element.textContent = text;
@@ -260,8 +267,7 @@ function contextualStageDetail(stageID, pipeline, view) {
     return `state loaded · ${formatClock(view.state.updatedAt)}`;
   }
   if (stageID === "normalize" && provider) {
-    const credits = provider.credits ? "1 credits" : "0 credits";
-    return `${provider.windows.length} windows · ${credits}`;
+    return `${provider.windows.length} windows · ${provider.credits?.availableCount ?? 0} credits`;
   }
   if (stageID === "snapshot_persisted") {
     return pipeline.snapshotChanged ? "snapshot changed" : "snapshot unchanged";
@@ -291,7 +297,8 @@ function renderPipeline(view) {
     }
     node.classList.add(stage.status);
     const outcome = stage.detail || contextualStageDetail(stageID, view.pipeline, view);
-    const pieces = [stageStatusLabel(stage.status), outcome, formatDuration(stage.durationMs)].filter(Boolean);
+    const label = stage.status === "ok" ? "" : stageStatusLabel(stage.status);
+    const pieces = [label, outcome, formatDuration(stage.durationMs)].filter(Boolean);
     detail.textContent = pieces.join(" · ");
   }
 }
@@ -449,8 +456,8 @@ async function loadAll() {
 }
 function readPatch() {
   const credits = creditsInput.valueAsNumber;
-  if (!Number.isInteger(credits) || credits < 0) {
-    throw new Error("Credits must be a non-negative whole number.");
+  if (!Number.isInteger(credits) || credits < 0 || credits > 99) {
+    throw new Error("Credits must be a whole number between 0 and 99.");
   }
   return makePatch({
     primaryUsed: primaryInput.valueAsNumber,
@@ -458,7 +465,7 @@ function readPatch() {
     credits,
     stale: staleInput.checked,
     providerError: providerErrorInput.checked,
-    primaryResetsAt: resetAtForPreset(resetPreset.value)
+    primaryResetsAt: resetPresetDirty ? resetAtForPreset(resetPreset.value) : undefined
   });
 }
 async function patchDemo(patch) {
@@ -476,9 +483,19 @@ primaryInput.addEventListener("input", () => {
 secondaryInput.addEventListener("input", () => {
   secondaryOutput.value = formatPercent(secondaryInput.valueAsNumber);
 });
+resetPreset.addEventListener("change", () => {
+  resetPresetDirty = true;
+});
 applyPollButton.addEventListener("click", () => {
+  let patch;
+  try {
+    patch = readPatch();
+  } catch (error) {
+    showValidation(error instanceof Error ? error.message : "Invalid input.");
+    return;
+  }
   perform("Applying demo state and polling.", async () => {
-    await patchDemo(readPatch());
+    await patchDemo(patch);
     await pollDemo();
     await loadAll();
   }, "Demo state applied and poll complete.");

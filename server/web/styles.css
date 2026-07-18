@@ -443,13 +443,17 @@ pre {
   outline-offset: 2px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1000px) {
   main {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 1fr 1fr;
   }
 }
 
 @media (max-width: 700px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .hwrap {
     align-items: flex-start;
     flex-direction: column;
