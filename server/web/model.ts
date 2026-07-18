@@ -10,6 +10,8 @@ export interface DemoState {
   stale: boolean;
   providerError: boolean;
   updatedAt: string;
+  revision: number;
+  lastDemoRunID?: string;
 }
 
 export interface DemoStatePatch {
@@ -104,11 +106,29 @@ export interface DemoViewResponse {
   state: DemoState;
   snapshot: DemoSnapshot | null;
   pipeline: DemoPipelineResult | null;
+  csrfToken: string;
+  deliveryHealth: "ok" | "degraded";
 }
 
 export interface DemoPollResponse {
   pipeline: DemoPipelineResult;
   events: DemoEventRecord[];
+  demoRunID: string;
+  deliveryHealth: "ok" | "degraded";
+}
+
+export interface DemoMutationResponse {
+  state?: DemoState;
+  demoRunID: string;
+  deliveryHealth: "ok" | "degraded";
+}
+
+export function mutationHeaders(csrfToken: string, idempotencyKey: string): Record<string, string> {
+  return { "Content-Type": "application/json", "X-Demo-CSRF": csrfToken, "Idempotency-Key": idempotencyKey };
+}
+
+export function makePollBody(state: DemoState): { expectedRevision: number } {
+  return { expectedRevision: state.revision };
 }
 
 export interface DemoEventsResponse {

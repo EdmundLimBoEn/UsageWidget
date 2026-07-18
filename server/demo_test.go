@@ -41,6 +41,18 @@ func TestApplyDemoPatchPreservesOmittedFields(t *testing.T) {
 	}
 }
 
+func TestApplyDemoPatchIncrementsRevision(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	state := DefaultDemoState(now)
+	next, err := ApplyDemoPatch(state, DemoStatePatch{}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Revision != state.Revision+1 {
+		t.Fatalf("revision=%d want %d", next.Revision, state.Revision+1)
+	}
+}
+
 func TestApplyDemoPatchValidation(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	below := -0.1

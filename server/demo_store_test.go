@@ -179,8 +179,54 @@ func TestDemoEventStoreDefaultsCapsAndRetains(t *testing.T) {
 	if err := store.db.QueryRow(`SELECT COUNT(*) FROM demo_event_log`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 500 {
-		t.Fatalf("expected 500 retained demo events, got %d", count)
+	if count != 510 {
+		t.Fatalf("expected all 510 recent demo events retained, got %d", count)
+	}
+}
+
+func TestSaveDemoStatePersistsRevision(t *testing.T) {
+	store := openTestStore(t)
+	state := DefaultDemoState(time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
+	state.Revision = 9
+	if err := store.SaveDemoState(state, "run-9"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.LoadDemoState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Revision != 9 || got.LastDemoRunID != "run-9" {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+func TestDemoAuditRetention(t *testing.T) {
+	store := openTestStore(t)
+	now := time.Now().UTC()
+	for _, entry := range []DemoAuditEntry{
+		{DemoRunID: "old", Identity: "a", Route: "patch", Action: "patch", Result: "ok", Status: 200, CreatedAt: now.Add(-7*24*time.Hour - time.Second)},
+		{DemoRunID: "edge", Identity: "a", Route: "patch", Action: "patch", Result: "ok", Status: 200, CreatedAt: now.Add(-7 * 24 * time.Hour)},
+	} {
+		if _, err := store.db.Exec(`INSERT INTO demo_audit (demo_run_id, identity, route, action, result, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, entry.DemoRunID, entry.Identity, entry.Route, entry.Action, entry.Result, entry.Status, entry.CreatedAt.Format(time.RFC3339Nano)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := store.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pruneDemoRetention(tx, "demo_audit", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	audit, err := store.ListDemoAudit(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 1 || audit[0].DemoRunID != "edge" {
+		t.Fatalf("audit=%+v", audit)
 	}
 }
 

@@ -1,6 +1,9 @@
 package server
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadConfigRequiresToken(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", "")
@@ -46,5 +49,30 @@ func TestLoadConfigAPNsEnabledWhenAllVarsPresent(t *testing.T) {
 	}
 	if !cfg.APNsEnabled() {
 		t.Fatalf("expected APNs enabled when all vars present")
+	}
+}
+
+func TestLoadConfigDemoDeviceIDsAndAccessIdentityHeader(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", "secret")
+	t.Setenv("DEMO_DEVICE_IDS", " phone-a, phone-b,phone-a ")
+	t.Setenv("ACCESS_IDENTITY_HEADER", " X-Operator ")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(cfg.DemoDeviceIDs, ","), "phone-a,phone-b"; got != want {
+		t.Fatalf("device ids=%q want %q", got, want)
+	}
+	if cfg.AccessIdentityHeader != "X-Operator" {
+		t.Fatalf("identity header=%q", cfg.AccessIdentityHeader)
+	}
+	t.Setenv("DEMO_DEVICE_IDS", "phone-a,")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("expected empty device ID rejection")
+	}
+	t.Setenv("DEMO_DEVICE_IDS", "")
+	t.Setenv("ACCESS_IDENTITY_HEADER", "")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("expected blank identity header rejection")
 	}
 }

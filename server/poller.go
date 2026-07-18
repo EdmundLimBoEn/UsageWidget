@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -57,6 +58,7 @@ type DemoPipelineResult struct {
 	Stages             []DemoPipelineStage `json:"stages"`
 	Delivery           DemoDeliveryResult  `json:"delivery"`
 	Error              string              `json:"error,omitempty"`
+	DemoRunID          string              `json:"demoRunID,omitempty"`
 }
 
 var demoPipelineStageIDs = []string{"demo_state", "normalize", "snapshot_persisted", "event_engine", "apns"}
@@ -70,6 +72,8 @@ type Poller struct {
 
 	mu sync.Mutex
 }
+
+var ErrDemoRevisionConflict = errors.New("demo revision conflict")
 
 func NewPoller(store *Store, codexbar *CodexBarClient, notifier Notifier, api *API) *Poller {
 	return &Poller{
@@ -105,15 +109,25 @@ func (p *Poller) interval() time.Duration {
 func (p *Poller) PollNow(ctx context.Context) PollResult {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.poll(ctx, false).poll
+	return p.poll(ctx, false, nil, "", nil, nil).poll
 }
 
 // PollDemoNow runs persisted demo state through the same serialized poll
 // pipeline as real and scheduled polls, recording the detailed outcome.
-func (p *Poller) PollDemoNow(ctx context.Context) DemoPipelineResult {
+func (p *Poller) PollDemoNow(ctx context.Context, expectedRevision int64, demoRunID string, targets []Device) (DemoPipelineResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.poll(ctx, true).demo
+	if targets == nil {
+		targets = []Device{}
+	}
+	state, err := p.store.LoadDemoState()
+	if err != nil {
+		return p.poll(ctx, true, targets, demoRunID, nil, err).demo, nil
+	}
+	if expectedRevision != 0 && expectedRevision != state.Revision {
+		return DemoPipelineResult{}, fmt.Errorf("%w: current %d", ErrDemoRevisionConflict, state.Revision)
+	}
+	return p.poll(ctx, true, targets, demoRunID, &state, nil).demo, nil
 }
 
 // pollOnce is retained for package-internal compatibility and participates in
@@ -121,7 +135,7 @@ func (p *Poller) PollDemoNow(ctx context.Context) DemoPipelineResult {
 func (p *Poller) pollOnce(ctx context.Context) PollResult {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.poll(ctx, false).poll
+	return p.poll(ctx, false, nil, "", nil, nil).poll
 }
 
 type pollExecution struct {
@@ -131,25 +145,25 @@ type pollExecution struct {
 	dispatched dispatchResult
 }
 
-func (p *Poller) poll(ctx context.Context, recordDemo bool) pollExecution {
+func (p *Poller) poll(ctx context.Context, recordDemo bool, targets []Device, demoRunID string, demoState *DemoState, demoStateErr error) pollExecution {
 	now := time.Now().UTC()
 	execution := pollExecution{poll: PollResult{PolledAt: now}}
 	if recordDemo {
 		execution.demo = newDemoPipelineResult(now)
+		execution.demo.DemoRunID = demoRunID
 		started := time.Now()
-		demoState, err := p.store.LoadDemoState()
-		if err != nil {
-			return p.failPoll(execution, "demo_state", started, err, false)
+		if demoStateErr != nil {
+			return p.failPoll(execution, "demo_state", started, demoStateErr, false)
 		}
 		setDemoStage(&execution.demo, "demo_state", DemoStageOK, "", started)
-		execution = p.pollWithInputs(ctx, execution, now, &demoState)
+		execution = p.pollWithInputs(ctx, execution, now, demoState, targets)
 	} else {
-		execution = p.pollWithInputs(ctx, execution, now, nil)
+		execution = p.pollWithInputs(ctx, execution, now, nil, nil)
 	}
 	return execution
 }
 
-func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, now time.Time, demoState *DemoState) pollExecution {
+func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, now time.Time, demoState *DemoState, targets []Device) pollExecution {
 	recordDemo := demoState != nil
 	settings, err := loadSettings(p.store)
 	if err != nil {
@@ -247,7 +261,7 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	}
 
 	dispatchStarted := time.Now()
-	execution.dispatched = p.dispatch(ctx, processed.Emitted, changed)
+	execution.dispatched = p.dispatch(ctx, processed.Emitted, changed, targets)
 	if recordDemo {
 		execution.demo.Delivery = execution.dispatched.Delivery
 		setDemoStage(&execution.demo, "apns", execution.dispatched.Status, execution.dispatched.Detail, dispatchStarted)
@@ -269,18 +283,22 @@ type dispatchResult struct {
 	Detail        string
 }
 
-func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool) dispatchResult {
+func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool, targets []Device) dispatchResult {
 	result := dispatchResult{AlertsByEvent: make(map[string]DeliveryCount), Status: DemoStageSkipped}
 	if status, ok := p.notifier.(notifierStatus); ok && !status.Enabled() {
 		result.Detail = "APNs disabled"
 		return result
 	}
-	devices, err := p.store.ListDevices()
-	if err != nil {
-		log.Printf("poller: list devices: %v", err)
-		result.Status = DemoStageWarning
-		result.Detail = err.Error()
-		return result
+	devices := targets
+	if devices == nil {
+		var err error
+		devices, err = p.store.ListDevices()
+		if err != nil {
+			log.Printf("poller: list devices: %v", err)
+			result.Status = DemoStageWarning
+			result.Detail = err.Error()
+			return result
+		}
 	}
 	for _, ev := range events {
 		count := result.AlertsByEvent[ev.Key]

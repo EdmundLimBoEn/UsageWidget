@@ -456,13 +456,17 @@ func TestDemoAlertNoDevices(t *testing.T) {
 	}
 }
 
-func TestDemoAlertSendsWithoutRecordingEvents(t *testing.T) {
+func TestBearerDemoAlertAllowlistsDemoDevices(t *testing.T) {
 	api, store := newTestAPI(t)
+	api.cfg.DemoDeviceIDs = []string{"dev-1"}
 	recN := &recordingNotifier{}
 	api.SetNotifier(recN)
 
 	if err := store.UpsertDevice("dev-1", "apns-1", "widget-1"); err != nil {
 		t.Fatalf("UpsertDevice: %v", err)
+	}
+	if err := store.UpsertDevice("real-device", "apns-real", "widget-real"); err != nil {
+		t.Fatal(err)
 	}
 
 	rec := doRequest(t, api, http.MethodPost, "/v1/demo/alert", "secret-token", nil)

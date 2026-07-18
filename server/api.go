@@ -398,7 +398,7 @@ func (a *API) handleDemoAlert(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifier not available"})
 		return
 	}
-	devices, err := a.store.ListDevices()
+	devices, err := a.store.DemoTargets(a.cfg.DemoDeviceIDs)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -70,6 +70,19 @@ func latestSnap(t *testing.T, s *Store) Snapshot {
 	return snap
 }
 
+func pollDemoForTest(t *testing.T, poller *Poller) DemoPipelineResult {
+	t.Helper()
+	targets, err := poller.store.ListDevices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := poller.PollDemoNow(context.Background(), 0, "", targets)
+	if err != nil {
+		t.Fatalf("PollDemoNow: %v", err)
+	}
+	return result
+}
+
 func TestPollerSavesSnapshot(t *testing.T) {
 	poller, store, _ := newPollerHarness(t)
 	poller.pollOnce(context.Background())
@@ -98,6 +111,20 @@ func TestPollerStaleFallback(t *testing.T) {
 	}
 	if len(stale.Providers) != len(fresh.Providers) || stale.Providers[0].ID != fresh.Providers[0].ID {
 		t.Fatalf("expected previous providers preserved, got %+v", stale.Providers)
+	}
+}
+
+func TestPollDemoNowRevisionConflict(t *testing.T) {
+	poller, store, _ := newPollerHarness(t)
+	state, err := store.LoadDemoState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := poller.PollDemoNow(context.Background(), state.Revision+1, "conflict", nil); !errors.Is(err, ErrDemoRevisionConflict) {
+		t.Fatalf("err=%v", err)
+	}
+	if _, _, ok, err := store.LatestSnapshot(); err != nil || ok {
+		t.Fatalf("conflict performed a poll: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -198,7 +225,7 @@ func TestPollerDemoPreservesRealProviderAndBaselines(t *testing.T) {
 	seedWindow(t, store, "codex.primary", 5, nil)
 	seedWindow(t, store, "demo.primary", 9, nil)
 
-	result := poller.PollDemoNow(context.Background())
+	result := pollDemoForTest(t, poller)
 	if !result.Success {
 		t.Fatalf("PollDemoNow failed: %+v", result)
 	}
@@ -246,7 +273,7 @@ func TestPollerDemoDispatchesOnlyEmittedEventsAndPersistsOutcomes(t *testing.T) 
 	}
 	seedWindow(t, store, "demo.primary", 5, nil)
 
-	first := poller.PollDemoNow(context.Background())
+	first := pollDemoForTest(t, poller)
 	if !first.Success || first.EventsEmitted == 0 {
 		t.Fatalf("first PollDemoNow=%+v", first)
 	}
@@ -257,7 +284,7 @@ func TestPollerDemoDispatchesOnlyEmittedEventsAndPersistsOutcomes(t *testing.T) 
 	// Recreate the crossing while retaining its claimed event key. The outcome is
 	// deduplicated and therefore must not be sent to APNs.
 	seedWindow(t, store, "demo.primary", 5, nil)
-	second := poller.PollDemoNow(context.Background())
+	second := pollDemoForTest(t, poller)
 	if !second.Success || second.EventsEmitted != 0 || second.EventsDeduplicated == 0 {
 		t.Fatalf("second PollDemoNow=%+v", second)
 	}
@@ -305,7 +332,7 @@ func TestPollDeliveryPartialFailureIsWarning(t *testing.T) {
 	}
 	seedWindow(t, store, "demo.primary", 5, nil)
 
-	result := poller.PollDemoNow(context.Background())
+	result := pollDemoForTest(t, poller)
 	if !result.Success {
 		t.Fatalf("partial APNs failure failed pipeline: %+v", result)
 	}
@@ -327,7 +354,7 @@ func TestPollDeliveryDisabledOrNoTokenIsSkipped(t *testing.T) {
 			t.Fatal(err)
 		}
 		seedWindow(t, store, "demo.primary", 5, nil)
-		result := poller.PollDemoNow(context.Background())
+		result := pollDemoForTest(t, poller)
 		if stageByID(t, result, "apns").Status != DemoStageSkipped || result.Delivery != (DemoDeliveryResult{}) {
 			t.Fatalf("disabled delivery=%+v stages=%+v", result.Delivery, result.Stages)
 		}
@@ -340,7 +367,7 @@ func TestPollDeliveryDisabledOrNoTokenIsSkipped(t *testing.T) {
 			t.Fatal(err)
 		}
 		seedWindow(t, store, "demo.primary", 5, nil)
-		result := poller.PollDemoNow(context.Background())
+		result := pollDemoForTest(t, poller)
 		if stageByID(t, result, "apns").Status != DemoStageSkipped || result.Delivery != (DemoDeliveryResult{}) {
 			t.Fatalf("tokenless delivery=%+v stages=%+v", result.Delivery, result.Stages)
 		}
@@ -389,7 +416,7 @@ func TestPollerDemoFailuresKeepLastSnapshot(t *testing.T) {
 			tt.breakInput(t, store, healthy, &client)
 			poller.codexbar = client
 
-			result := poller.PollDemoNow(context.Background())
+			result := pollDemoForTest(t, poller)
 			if result.Success || result.FailedStage != tt.failed || stageByID(t, result, tt.failed).Status != DemoStageFailed {
 				t.Fatalf("failure result=%+v", result)
 			}
@@ -424,7 +451,7 @@ func TestPollerDemoPersistenceFailureReturnsAndStoresFailure(t *testing.T) {
 		t.Fatalf("create failure trigger: %v", err)
 	}
 
-	result := poller.PollDemoNow(context.Background())
+	result := pollDemoForTest(t, poller)
 	if result.Success {
 		t.Fatalf("persistence failure returned success: %+v", result)
 	}
@@ -519,7 +546,7 @@ func TestPollerAllPollEntriesShareDemoMutex(t *testing.T) {
 			poller := NewPoller(store, client, noopNotifier{}, api)
 
 			demoDone := make(chan DemoPipelineResult, 1)
-			go func() { demoDone <- poller.PollDemoNow(context.Background()) }()
+			go func() { result, _ := poller.PollDemoNow(context.Background(), 0, "", nil); demoDone <- result }()
 			<-firstEntered
 			ctx, cancel := context.WithCancel(context.Background())
 			entryDone := entry.run(ctx, poller)

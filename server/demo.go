@@ -21,6 +21,8 @@ type DemoState struct {
 	Stale            bool            `json:"stale"`
 	ProviderError    bool            `json:"providerError"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
+	Revision         int64           `json:"revision"`
+	LastDemoRunID    string          `json:"lastDemoRunID,omitempty"`
 }
 
 type DemoWindowPatch struct {
@@ -89,6 +91,7 @@ func DefaultDemoState(now time.Time) DemoState {
 		},
 		CreditsAvailable: 2,
 		UpdatedAt:        now,
+		Revision:         1,
 	}
 }
 
@@ -113,6 +116,7 @@ func ApplyDemoPatch(state DemoState, patch DemoStatePatch, now time.Time) (DemoS
 	if err := validateDemoState(state, now); err != nil {
 		return DemoState{}, err
 	}
+	state.Revision++
 	return state, nil
 }
 

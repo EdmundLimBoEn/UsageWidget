@@ -1,4 +1,10 @@
 // model.ts
+function mutationHeaders(csrfToken, idempotencyKey) {
+  return { "Content-Type": "application/json", "X-Demo-CSRF": csrfToken, "Idempotency-Key": idempotencyKey };
+}
+function makePollBody(state) {
+  return { expectedRevision: state.revision };
+}
 function makePatch(values) {
   const primary = { usedPercent: values.primaryUsed };
   if (values.primaryResetsAt !== undefined) {
@@ -122,21 +128,27 @@ var resetPresetDirty = false;
 var recentEvents = [];
 var activeFilter = "all";
 var busy = false;
+var rateLimitedUntil = 0;
 async function requestJSON(path, init) {
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
-    headers: init?.body ? { "Content-Type": "application/json" } : undefined
+    headers: init?.body ? { "Content-Type": "application/json", ...init?.headers ?? {} } : init?.headers
   });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`.trim();
+    let retryAfterSeconds;
     try {
       const body = await response.json();
       if (body.error) {
         detail = body.error;
       }
+      retryAfterSeconds = body.retryAfterSeconds;
     } catch {}
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    error.retryAfterSeconds = retryAfterSeconds;
+    throw error;
   }
   return response.json();
 }
@@ -147,12 +159,12 @@ function setBusy(nextBusy) {
   busy = nextBusy;
   consoleElement.setAttribute("aria-busy", String(nextBusy));
   for (const input of inputs) {
-    input.disabled = nextBusy;
+    input.disabled = nextBusy || Date.now() < rateLimitedUntil;
   }
   for (const button of actionButtons) {
-    button.disabled = nextBusy;
+    button.disabled = nextBusy || Date.now() < rateLimitedUntil;
   }
-  retryButton.disabled = nextBusy;
+  retryButton.disabled = nextBusy || Date.now() < rateLimitedUntil;
   if (!nextBusy) {
     updateSurpriseEligibility();
   }
@@ -185,6 +197,19 @@ async function perform(label, operation, success) {
     clearFailure();
     announce(success);
   } catch (error) {
+    const requestError = error;
+    if (requestError.status === 409) {
+      await loadAll().catch(() => {
+        return;
+      });
+    }
+    if (requestError.status === 429) {
+      const seconds = Math.max(1, requestError.retryAfterSeconds ?? 1);
+      rateLimitedUntil = Date.now() + seconds * 1000;
+      window.setTimeout(() => setBusy(false), seconds * 1000);
+      showFailure(new Error(`Rate limited. Try again in ${seconds} seconds.`));
+      return;
+    }
     showFailure(error);
   } finally {
     setBusy(false);
@@ -255,7 +280,7 @@ function providerPrimaryUsed(provider) {
   if (!provider) {
     return Number.NaN;
   }
-  const primary = provider.windows.find((window) => window.id === "demo.primary" || window.key === "primary");
+  const primary = provider.windows.find((window2) => window2.id === "demo.primary" || window2.key === "primary");
   return primary?.usedPercent ?? Number.NaN;
 }
 function updateSurpriseEligibility() {
@@ -468,14 +493,38 @@ function readPatch() {
     primaryResetsAt: resetPresetDirty ? resetAtForPreset(resetPreset.value) : undefined
   });
 }
-async function patchDemo(patch) {
-  return requestJSON("/v1/demo", {
+function mutationRequest(path, body) {
+  if (!latestView) {
+    return Promise.reject(new Error("Demo state is not loaded."));
+  }
+  return requestJSON(path, {
     method: "PATCH",
-    body: JSON.stringify(patch)
+    body: JSON.stringify(body),
+    headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID())
   });
 }
+async function patchDemo(patch) {
+  return mutationRequest("/v1/demo", patch);
+}
 async function pollDemo() {
-  return requestJSON("/v1/demo/poll", { method: "POST" });
+  if (!latestView) {
+    throw new Error("Demo state is not loaded.");
+  }
+  return requestJSON("/v1/demo/poll", {
+    method: "POST",
+    body: JSON.stringify(makePollBody(latestView.state)),
+    headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID())
+  });
+}
+async function alertDemo() {
+  if (!latestView) {
+    throw new Error("Demo state is not loaded.");
+  }
+  return requestJSON("/v1/demo/alert", {
+    method: "POST",
+    body: "{}",
+    headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID())
+  });
 }
 primaryInput.addEventListener("input", () => {
   primaryOutput.value = formatPercent(primaryInput.valueAsNumber);
@@ -513,7 +562,7 @@ surpriseResetButton.addEventListener("click", () => {
 });
 testAlertButton.addEventListener("click", () => {
   perform("Sending test alert.", async () => {
-    await requestJSON("/v1/demo/alert", { method: "POST" });
+    await alertDemo();
     await loadEvents();
   }, "Test alert complete and events refreshed.");
 });

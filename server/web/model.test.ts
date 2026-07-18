@@ -6,6 +6,8 @@ import {
   formatBeforeAfter,
   formatDelivery,
   makePatch,
+	makePollBody,
+	mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
   type DemoEventRecord,
@@ -25,6 +27,13 @@ const event = (overrides: Partial<DemoEventRecord>): DemoEventRecord => ({
 });
 
 describe("demo controls", () => {
+
+  test("builds CSRF/idempotency headers and carries the current revision", () => {
+    expect(mutationHeaders("csrf", "request-id")).toEqual({
+      "Content-Type": "application/json", "X-Demo-CSRF": "csrf", "Idempotency-Key": "request-id",
+    });
+    expect(makePollBody({ primary: { usedPercent: 1, resetsAt: "x" }, secondary: { usedPercent: 2, resetsAt: "y" }, creditsAvailable: 0, stale: false, providerError: false, updatedAt: "z", revision: 7 })).toEqual({ expectedRevision: 7 });
+  });
   test("surprise reset requires an established primary baseline", () => {
     expect(canSurpriseReset(19)).toBe(false);
     expect(canSurpriseReset(20)).toBe(true);

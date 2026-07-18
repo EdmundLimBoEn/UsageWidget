@@ -4,6 +4,8 @@ import {
   formatBeforeAfter,
   formatDelivery,
   makePatch,
+	makePollBody,
+  mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
   type DemoDeliveryResult,
@@ -11,6 +13,7 @@ import {
   type DemoEventsResponse,
   type DemoPipelineResult,
   type DemoPollResponse,
+  type DemoMutationResponse,
   type DemoProvider,
   type DemoState,
   type DemoStatePatch,
@@ -64,24 +67,30 @@ let resetPresetDirty = false;
 let recentEvents: DemoEventRecord[] = [];
 let activeFilter: EventFilter = "all";
 let busy = false;
+let rateLimitedUntil = 0;
 
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     credentials: "same-origin",
-    headers: init?.body ? { "Content-Type": "application/json" } : undefined,
+    headers: init?.body ? { "Content-Type": "application/json", ...(init?.headers ?? {}) } : init?.headers,
   });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`.trim();
+    let retryAfterSeconds: number | undefined;
     try {
-      const body = await response.json() as { error?: string };
+      const body = await response.json() as { error?: string; retryAfterSeconds?: number };
       if (body.error) {
         detail = body.error;
       }
+      retryAfterSeconds = body.retryAfterSeconds;
     } catch {
       // Keep the HTTP status when an error response is not JSON.
     }
-    throw new Error(detail);
+    const error = new Error(detail) as Error & { status?: number; retryAfterSeconds?: number };
+    error.status = response.status;
+    error.retryAfterSeconds = retryAfterSeconds;
+    throw error;
   }
   return response.json() as Promise<T>;
 }
@@ -94,12 +103,12 @@ function setBusy(nextBusy: boolean): void {
   busy = nextBusy;
   consoleElement.setAttribute("aria-busy", String(nextBusy));
   for (const input of inputs) {
-    input.disabled = nextBusy;
+    input.disabled = nextBusy || Date.now() < rateLimitedUntil;
   }
   for (const button of actionButtons) {
-    button.disabled = nextBusy;
+    button.disabled = nextBusy || Date.now() < rateLimitedUntil;
   }
-  retryButton.disabled = nextBusy;
+  retryButton.disabled = nextBusy || Date.now() < rateLimitedUntil;
   if (!nextBusy) {
     updateSurpriseEligibility();
   }
@@ -136,6 +145,17 @@ async function perform(label: string, operation: () => Promise<void>, success: s
     clearFailure();
     announce(success);
   } catch (error) {
+    const requestError = error as Error & { status?: number; retryAfterSeconds?: number };
+    if (requestError.status === 409) {
+      await loadAll().catch(() => undefined);
+    }
+    if (requestError.status === 429) {
+      const seconds = Math.max(1, requestError.retryAfterSeconds ?? 1);
+      rateLimitedUntil = Date.now() + seconds * 1000;
+      window.setTimeout(() => setBusy(false), seconds * 1000);
+      showFailure(new Error(`Rate limited. Try again in ${seconds} seconds.`));
+      return;
+    }
     showFailure(error);
   } finally {
     setBusy(false);
@@ -441,15 +461,41 @@ function readPatch(): DemoStatePatch {
   });
 }
 
-async function patchDemo(patch: DemoStatePatch): Promise<DemoState> {
-  return requestJSON<DemoState>("/v1/demo", {
+function mutationRequest<T>(path: string, body: unknown): Promise<T> {
+  if (!latestView) {
+    return Promise.reject(new Error("Demo state is not loaded."));
+  }
+  return requestJSON<T>(path, {
     method: "PATCH",
-    body: JSON.stringify(patch),
+    body: JSON.stringify(body),
+    headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID()),
   });
 }
 
+async function patchDemo(patch: DemoStatePatch): Promise<DemoMutationResponse> {
+  return mutationRequest<DemoMutationResponse>("/v1/demo", patch);
+}
+
 async function pollDemo(): Promise<DemoPollResponse> {
-  return requestJSON<DemoPollResponse>("/v1/demo/poll", { method: "POST" });
+  if (!latestView) {
+    throw new Error("Demo state is not loaded.");
+  }
+  return requestJSON<DemoPollResponse>("/v1/demo/poll", {
+    method: "POST",
+    body: JSON.stringify(makePollBody(latestView.state)),
+    headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID()),
+  });
+}
+
+async function alertDemo(): Promise<DemoMutationResponse> {
+  if (!latestView) {
+    throw new Error("Demo state is not loaded.");
+  }
+  return requestJSON<DemoMutationResponse>("/v1/demo/alert", {
+    method: "POST",
+    body: "{}",
+    headers: mutationHeaders(latestView.csrfToken, crypto.randomUUID()),
+  });
 }
 
 primaryInput.addEventListener("input", () => {
@@ -493,7 +539,7 @@ surpriseResetButton.addEventListener("click", () => {
 
 testAlertButton.addEventListener("click", () => {
   void perform("Sending test alert.", async () => {
-    await requestJSON("/v1/demo/alert", { method: "POST" });
+    await alertDemo();
     await loadEvents();
   }, "Test alert complete and events refreshed.");
 });
