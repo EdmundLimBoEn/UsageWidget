@@ -56,6 +56,7 @@ ios/signing/
 *.csr
 .gstack/
 .superpowers/
+.asc/reports/
 
 # Local/demo-only artifacts
 UsageWidget-QR-with-icon.jpg
