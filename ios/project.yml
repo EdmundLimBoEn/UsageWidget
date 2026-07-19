@@ -10,7 +10,7 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: minimal
     CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "Apple Development"
+    DEVELOPMENT_TEAM: DUU8J39BA7
     TARGETED_DEVICE_FAMILY: "1"
     MARKETING_VERSION: "0.1"
     CURRENT_PROJECT_VERSION: "1"
@@ -39,11 +39,15 @@ targets:
         INFOPLIST_KEY_UsageWidgetKeychainAccessGroup: "$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared"
         CODE_SIGN_ENTITLEMENTS: UsageWidget.entitlements
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "Apple Development"
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
     entitlements:
       path: UsageWidget.entitlements
       properties:
-        aps-environment: development
+        aps-environment: "$(APS_ENVIRONMENT)"
         com.apple.security.application-groups:
           - group.systems.edmundlim.usagewidget
         keychain-access-groups:
@@ -69,6 +73,8 @@ targets:
       path: Sources/Widget/Info.plist
       properties:
         CFBundleDisplayName: UsageWidget
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UsageWidgetKeychainAccessGroup: "$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -80,16 +86,20 @@ targets:
         INFOPLIST_KEY_UsageWidgetKeychainAccessGroup: "$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared"
         CODE_SIGN_ENTITLEMENTS: UsageWidgetWidget.entitlements
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_IDENTITY: "Apple Development"
         SKIP_INSTALL: YES
         LD_RUNPATH_SEARCH_PATHS:
           - $(inherited)
           - "@executable_path/Frameworks"
           - "@executable_path/../../Frameworks"
+      configs:
+        Debug:
+          APS_ENVIRONMENT: development
+        Release:
+          APS_ENVIRONMENT: production
     entitlements:
       path: UsageWidgetWidget.entitlements
       properties:
-        aps-environment: development
+        aps-environment: "$(APS_ENVIRONMENT)"
         com.apple.security.application-groups:
           - group.systems.edmundlim.usagewidget
         keychain-access-groups:

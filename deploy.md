@@ -126,8 +126,6 @@ or replace secrets themselves.
 
 - Keep the main listener on `127.0.0.1:8377` and expose it only through
   Tailscale Serve.
-- Keep the optional demo listener on `127.0.0.1:8378` and disabled unless its
-  identity-aware proxy is active.
 - Do not overwrite production environment files or select a different collector
   account unless that change is intentional.
-- Back up before schema-sensitive or live-demo changes.
+- Back up before schema-sensitive changes.

@@ -33,7 +33,7 @@ struct ReadinessView: View {
                 if let note = model.readiness?.latestTest?.acceptanceNote { Text(note).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Demo readiness")
+        .navigationTitle("Release readiness")
         .task { await model.registerTokensIfNeeded(); await model.refreshReadiness() }
         .refreshable { await model.refreshReadiness() }
     }

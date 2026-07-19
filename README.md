@@ -43,8 +43,6 @@ data and preferences.
 | `cli/usagewidget` | Local/server operations CLI |
 | `server-install.sh` | Release-bundle installer and `usagewidget-admin` lifecycle commands |
 | `server-setup.sh` | Interactive Mac-to-Linux source installation |
-| `demo.sh` | Isolated installer verification in systemd containers |
-| `demo-reset-server.sh` | Transactional reset of synthetic demo state on an installed server |
 | `docs/` | Historical implementation plans and design records |
 
 ## Install a server
@@ -74,9 +72,8 @@ server architecture and runs the same installer remotely:
 ```
 
 See [the Linux deployment guide](server/deploy/README.md) for prerequisites,
-APNs configuration, backups, updates, recovery, manual installation, and the
-optional demo console. See [the redeploy runbook](deploy.md) for routine source
-deployments.
+APNs configuration, backups, updates, recovery, and manual installation. See
+[the redeploy runbook](deploy.md) for routine source deployments.
 
 ### Local server development
 
@@ -142,9 +139,6 @@ usagewidget health
 usagewidget snapshot
 usagewidget settings
 usagewidget poll              # force a real collection cycle
-usagewidget demo              # synthetic APNs + widget delivery test
-usagewidget demo-provider on  # enable the persisted synthetic provider and poll
-usagewidget demo-provider off
 usagewidget deploy
 usagewidget logs -f
 usagewidget status
@@ -161,18 +155,12 @@ Every main API route requires
 |--------|------|---------|
 | `GET` | `/v1/health` | Redacted service, collector, database, polling, APNs, and delivery health |
 | `GET` | `/v1/snapshot` | Visible normalized providers, windows, forecasts, and freshness |
-| `GET` / `PUT` | `/v1/settings` | Polling, provider display, demo-provider, and alert-rule settings |
+| `GET` / `PUT` | `/v1/settings` | Polling, provider display, and alert-rule settings |
 | `POST` | `/v1/devices` | Register or rotate APNs and WidgetKit tokens |
 | `DELETE` | `/v1/devices/{deviceID}` | Remove a registered device |
 | `POST` | `/v1/poll` | Force one collection cycle |
-| `POST` | `/v1/demo/alert` | Send a synthetic test alert and widget refresh |
 | `GET` | `/v1/readiness/{deviceID}` | Get redacted server and device readiness checks |
 | `POST` | `/v1/readiness/{deviceID}/test` | Send a targeted audible alert and widget delivery test |
-
-The optional Lab Console is a separate, default-off listener on
-`127.0.0.1:8378`. It exposes only synthetic-demo routes and must sit behind a
-verified identity-aware proxy. It is not part of the bearer-authenticated main
-API.
 
 ## Alerts and forecasts
 
@@ -190,25 +178,26 @@ Forecasts use up to 24 hours of samples from the current reset cycle and appear
 only after at least three increasing samples spanning 30 minutes and one
 percentage point. Forecasts are omitted from stale snapshots.
 
-## Demo and release verification
+## Release verification
 
-The iOS **Demo provider** switch and `usagewidget demo-provider` command inject
-a persisted synthetic provider through the same normalization, storage, event,
-APNs, app, and widget pipeline as real providers. `usagewidget demo` sends only
-a synthetic delivery-test event.
+Use **Release readiness** in the iOS app to inspect server, APNs, and device
+registration state and to send a targeted audible alert and widget refresh.
+Run `go test ./...` in `server/`, `bash tests/installer_test.sh`, and the
+unsigned Xcode build above before producing a distribution archive.
 
-Before a live demo, `./demo-reset-server.sh` backs up the server, resets only
-synthetic demo state/history, enables the provider, polls, and verifies health.
-Registered phones, real-provider history, settings, credentials, and APNs
-configuration are preserved.
-
-To exercise the supported installer without a server:
+TestFlight archive and export:
 
 ```bash
-./demo.sh                    # Ubuntu 24.04 container
-./demo.sh matrix             # Ubuntu 22.04, Ubuntu 24.04, Debian 12
-./demo.sh doctor
-./demo.sh down
+cd ios
+xcodebuild -project UsageWidget.xcodeproj -scheme UsageWidget \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath build/UsageWidget.xcarchive \
+  -allowProvisioningUpdates archive
+xcodebuild -exportArchive \
+  -archivePath build/UsageWidget.xcarchive \
+  -exportPath build/TestFlight \
+  -exportOptionsPlist ExportOptions.plist \
+  -allowProvisioningUpdates
 ```
 
 Release tags (`v*`) run Go tests, shell syntax checks, installer tests, and
@@ -218,4 +207,4 @@ build amd64/arm64 bundles through GitHub Actions.
 
 Read [SECURITY.md](SECURITY.md) before exposing a service or publishing the
 repository. Apple signing, APNs, private networking, release publication, and
-optional demo-console steps are tracked in [HUMANS.md](HUMANS.md).
+device verification steps are tracked in [HUMANS.md](HUMANS.md).

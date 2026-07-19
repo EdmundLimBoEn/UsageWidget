@@ -6,7 +6,7 @@ final class ModelsAndStoreTests: XCTestCase {
         XCTAssertEqual(ProviderLogoAsset.name(for: "codex"), "ProviderCodex")
         XCTAssertEqual(ProviderLogoAsset.name(for: " Claude "), "ProviderClaude")
         XCTAssertEqual(ProviderLogoAsset.name(for: "GROK"), "ProviderGrok")
-        XCTAssertNil(ProviderLogoAsset.name(for: "demo"))
+        XCTAssertNil(ProviderLogoAsset.name(for: "unknown"))
     }
 
     func testDecodeFullSnapshot() throws {
@@ -152,7 +152,7 @@ final class ModelsAndStoreTests: XCTestCase {
     }
 
     func testDecodeLegacySettingsUsesNewDefaults() throws {
-        let json = #"{"pollIntervalMinutes":5,"providerOrder":["codex"],"hiddenProviders":[],"demoProviderEnabled":false,"notificationsEnabled":true,"earlyThresholdPct":25,"dangerThresholdPct":10}"#.data(using: .utf8)!
+        let json = #"{"pollIntervalMinutes":5,"providerOrder":["codex"],"hiddenProviders":[],"notificationsEnabled":true,"earlyThresholdPct":25,"dangerThresholdPct":10}"#.data(using: .utf8)!
         let settings = try JSONCoding.decoder.decode(ServerSettings.self, from: json)
         XCTAssertEqual(settings.defaultRepeatIntervalMinutes, 0)
         XCTAssertFalse(settings.quietHours.enabled)

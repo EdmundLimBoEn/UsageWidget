@@ -180,7 +180,6 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public var pollIntervalMinutes: Int
     public var providerOrder: [String]
     public var hiddenProviders: [String]
-    public var demoProviderEnabled: Bool
     public var notificationsEnabled: Bool
     public var earlyThresholdPct: Double
     public var dangerThresholdPct: Double
@@ -192,7 +191,6 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         pollIntervalMinutes: Int = 5,
         providerOrder: [String] = ["codex", "claude", "grok"],
         hiddenProviders: [String] = [],
-        demoProviderEnabled: Bool = false,
         notificationsEnabled: Bool = true,
         earlyThresholdPct: Double = 10,
         dangerThresholdPct: Double = 10,
@@ -203,7 +201,6 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         self.pollIntervalMinutes = pollIntervalMinutes
         self.providerOrder = providerOrder
         self.hiddenProviders = hiddenProviders
-        self.demoProviderEnabled = demoProviderEnabled
         self.notificationsEnabled = notificationsEnabled
         self.earlyThresholdPct = earlyThresholdPct
         self.dangerThresholdPct = dangerThresholdPct
@@ -213,7 +210,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case pollIntervalMinutes, providerOrder, hiddenProviders, demoProviderEnabled
+        case pollIntervalMinutes, providerOrder, hiddenProviders
         case notificationsEnabled, earlyThresholdPct, dangerThresholdPct
         case defaultRepeatIntervalMinutes, quietHours, alertOverrides
     }
@@ -223,7 +220,6 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         pollIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .pollIntervalMinutes) ?? 5
         providerOrder = try c.decodeIfPresent([String].self, forKey: .providerOrder) ?? ["codex", "claude", "grok"]
         hiddenProviders = try c.decodeIfPresent([String].self, forKey: .hiddenProviders) ?? []
-        demoProviderEnabled = try c.decodeIfPresent(Bool.self, forKey: .demoProviderEnabled) ?? false
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         earlyThresholdPct = try c.decodeIfPresent(Double.self, forKey: .earlyThresholdPct) ?? 10
         dangerThresholdPct = try c.decodeIfPresent(Double.self, forKey: .dangerThresholdPct) ?? 10
@@ -362,18 +358,6 @@ public struct PollResult: Codable, Equatable, Sendable {
         self.events = events
         self.snapshotChanged = snapshotChanged
         self.error = error
-    }
-}
-
-public struct DemoAlertResult: Codable, Equatable, Sendable {
-    public var ok: Bool
-    public var devicesAlerted: Int
-    public var widgetsRefreshed: Int
-
-    public init(ok: Bool, devicesAlerted: Int, widgetsRefreshed: Int) {
-        self.ok = ok
-        self.devicesAlerted = devicesAlerted
-        self.widgetsRefreshed = widgetsRefreshed
     }
 }
 

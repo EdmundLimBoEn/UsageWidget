@@ -89,10 +89,6 @@ public struct APIClient: Sendable {
         }
     }
 
-    public func sendDemoAlert() async throws -> DemoAlertResult {
-        try await sendEmpty(path: "/v1/demo/alert", method: "POST")
-    }
-
     public func fetchReadiness(deviceID: String) async throws -> Readiness {
         try await get(path: "/v1/readiness/\(deviceID)")
     }

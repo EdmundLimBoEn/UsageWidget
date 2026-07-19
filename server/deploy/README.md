@@ -13,7 +13,6 @@ and sends APNs alerts and WidgetKit refreshes.
 | Init system | systemd |
 | Main listener | `127.0.0.1:8377` |
 | Private route | Tailscale Serve path `/usagewidget` |
-| Demo listener | `127.0.0.1:8378`, disabled by default |
 | Main service | `usagewidget.service` as user `usagewidget` |
 | Collector | `usagewidget-collector.service` as the CodexBar login account |
 | Configuration | `/etc/usagewidget/env` and `/etc/usagewidget/collector.env` |
@@ -139,10 +138,6 @@ Server variables:
 | `CODEXBAR_URL` | unset | Development HTTP-source override |
 | `CODEXBAR_CMD` | unset | Legacy command-source override |
 | `APNS_*` | unset | APNs signing configuration; all required to enable push |
-| `USAGEWIDGET_DEMO_ENABLED` | false | Enable the separate Lab Console listener |
-| `DEMO_LISTEN_ADDR` | `127.0.0.1:8378` | Loopback-only console address |
-| `DEMO_DEVICE_IDS` | unset | Comma-separated registered devices eligible for console delivery |
-| `ACCESS_IDENTITY_HEADER` | `Cf-Access-Authenticated-User-Email` | Trusted proxy identity header |
 
 `/etc/usagewidget/collector.env` normally contains:
 
@@ -226,9 +221,6 @@ usagewidget health
 usagewidget snapshot
 usagewidget settings
 usagewidget poll
-usagewidget demo
-usagewidget demo-provider on
-usagewidget demo-provider off
 usagewidget deploy
 usagewidget logs -f
 usagewidget status
@@ -238,41 +230,6 @@ usagewidget ssh
 Local configuration is `~/.config/usagewidget/env` with mode `600`. On the
 server, the CLI automatically reads `/etc/usagewidget/env` and talks to
 `http://127.0.0.1:8377`.
-
-## Optional Lab Console
-
-The console is not needed for the iOS synthetic-provider toggle. It is a
-separate browser control surface intended for a short-lived, private demo.
-
-To enable it safely:
-
-1. Put an identity-aware reverse proxy in front of a tunnel that targets only
-   `http://127.0.0.1:8378`.
-2. Verify the proxy's authenticated-identity header against current tenant
-   configuration and set `ACCESS_IDENTITY_HEADER` if the default is wrong.
-3. Restrict the proxy policy to the exact operator or group; never allow
-   anonymous access or an `Everyone` policy.
-4. Set `DEMO_DEVICE_IDS` to the explicit registered devices allowed to receive
-   console-triggered alerts.
-5. Set `USAGEWIDGET_DEMO_ENABLED=true` and restart `usagewidget` only after the
-   proxy protection is active.
-
-The process rejects non-loopback `DEMO_LISTEN_ADDR` values. The console listener
-serves static assets plus only these same-origin routes:
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| `GET` | `/v1/demo` | Synthetic state, CSRF token, and redacted delivery status |
-| `PATCH` | `/v1/demo` | Update synthetic state with revision/idempotency guards |
-| `POST` | `/v1/demo/poll` | Run the synthetic state through the real poll pipeline |
-| `GET` | `/v1/demo/events` | Read bounded synthetic event history |
-| `POST` | `/v1/demo/alert` | Test delivery to configured demo devices |
-
-Mutations require same-origin checks, a CSRF token, authenticated identity, and
-an idempotency key, and they are rate limited and audited. The console exposes
-no main health, settings, device, real-provider, database, or deployment route.
-
-Disable the listener and remove the proxy route after the demo.
 
 ## Manual source deployment
 
@@ -298,11 +255,10 @@ All main `/v1/*` routes require
 |--------|------|---------|
 | `GET` | `/v1/health` | Redacted service and dependency health |
 | `GET` | `/v1/snapshot` | Latest visible normalized snapshot and forecasts |
-| `GET` / `PUT` | `/v1/settings` | Polling, display, demo-provider, and alert settings |
+| `GET` / `PUT` | `/v1/settings` | Polling, display, and alert settings |
 | `POST` | `/v1/devices` | Register or rotate APNs and WidgetKit tokens |
 | `DELETE` | `/v1/devices/{deviceID}` | Remove a device |
 | `POST` | `/v1/poll` | Force one collection cycle |
-| `POST` | `/v1/demo/alert` | Synthetic delivery test |
 | `GET` | `/v1/readiness/{deviceID}` | Redacted server/device readiness |
 | `POST` | `/v1/readiness/{deviceID}/test` | Targeted audible delivery test |
 

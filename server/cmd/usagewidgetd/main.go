@@ -62,25 +62,6 @@ func main() {
 
 	servers := []*http.Server{mainServer}
 	listeners := []net.Listener{mainListener}
-	if cfg.DemoEnabled {
-		demoAPI := server.NewDemoAPI(store, poller, cfg, notifier)
-		demoServer := &http.Server{
-			Addr:              cfg.DemoListenAddr,
-			Handler:           demoAPI.Handler(),
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       15 * time.Second,
-			WriteTimeout:      95 * time.Second,
-			IdleTimeout:       60 * time.Second,
-			MaxHeaderBytes:    16 << 10,
-		}
-		demoListener, err := net.Listen("tcp", cfg.DemoListenAddr)
-		if err != nil {
-			mainListener.Close()
-			log.Fatalf("listen %s: %v", cfg.DemoListenAddr, err)
-		}
-		servers = append(servers, demoServer)
-		listeners = append(listeners, demoListener)
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

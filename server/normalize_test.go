@@ -286,9 +286,9 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-func TestNormalizeDemoProviderScopedStale(t *testing.T) {
+func TestNormalizeProviderScopedStale(t *testing.T) {
 	fetchedAt := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	snapshot, err := Normalize([]byte(`{"provider":"demo","name":"Demo","stale":true,"usage":{}}`), 5, fetchedAt)
+	snapshot, err := Normalize([]byte(`{"provider":"test","name":"Test","stale":true,"usage":{}}`), 5, fetchedAt)
 	if err != nil {
 		t.Fatal(err)
 	}

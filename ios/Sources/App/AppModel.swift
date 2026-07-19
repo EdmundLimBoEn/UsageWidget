@@ -190,20 +190,6 @@ final class AppModel {
         Task { await applySettings() }
     }
 
-    func setDemoProviderEnabled(_ enabled: Bool) {
-        settings.demoProviderEnabled = enabled
-        if enabled {
-            preferences.hiddenProviders.removeAll { $0 == "demo" }
-            if !preferences.providerOrder.contains("demo") {
-                preferences.providerOrder.append("demo")
-            }
-        }
-        Task {
-            await applySettings()
-            await forcePoll()
-        }
-    }
-
     func registerTokensIfNeeded(apnsToken: String? = nil, widgetToken: String? = nil) async {
         do {
             let client = try client()
@@ -244,17 +230,4 @@ final class AppModel {
         }
     }
 
-    func sendDemoAlert() async {
-        isTestingAction = true
-        defer { isTestingAction = false }
-        do {
-            let client = try client()
-            let result = try await client.sendDemoAlert()
-            statusMessage = "Test alert → \(result.devicesAlerted) device(s), \(result.widgetsRefreshed) widget(s)"
-            errorMessage = nil
-        } catch {
-            errorMessage = String(describing: error)
-            statusMessage = nil
-        }
-    }
 }

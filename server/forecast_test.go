@@ -43,12 +43,12 @@ func TestSaveSnapshotWithForecastsComputesRegression(t *testing.T) {
 	}
 }
 
-func TestForecastSkipsDemoStaleAndInsufficientSamples(t *testing.T) {
+func TestForecastSkipsStaleProviders(t *testing.T) {
 	store, _ := OpenStore(":memory:")
 	defer store.Close()
 	now := time.Now().UTC()
 	reset := now.Add(time.Hour)
-	snap := Snapshot{FetchedAt: now, Providers: []Provider{{ID: "demo", Windows: []Window{{ID: "demo.primary", ResetsAt: &reset, UsedPercent: 50}}}, {ID: "codex", Stale: true, Windows: []Window{{ID: "codex.primary", ResetsAt: &reset, UsedPercent: 50}}}}}
+	snap := Snapshot{FetchedAt: now, Providers: []Provider{{ID: "codex", Stale: true, Windows: []Window{{ID: "codex.primary", ResetsAt: &reset, UsedPercent: 50}}}}}
 	if err := store.SaveSnapshotWithForecasts(&snap); err != nil {
 		t.Fatal(err)
 	}

@@ -184,7 +184,7 @@ Commit when green.
 
 ## Task 8: Docs polish + final verification
 
-- Ensure README covers: architecture diagram (text), server API table, iOS setup, demo flow.
+- Ensure README covers: architecture diagram (text), server API table, iOS setup, and release verification.
 - HUMANS.md up to date.
 - Run full Go test suite + swift build one more time; fix anything broken.
 

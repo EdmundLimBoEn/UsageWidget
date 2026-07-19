@@ -60,7 +60,7 @@ struct AlertRulesView: View {
     private var providerIDs: [String] {
         var ids = model.preferences.providerOrder + draft.alertOverrides.map(\.providerID)
         ids += model.snapshot?.providers.map(\.id) ?? []
-        var seen = Set<String>(); return ids.filter { $0 != "demo" && seen.insert($0).inserted }
+        var seen = Set<String>(); return ids.filter { seen.insert($0).inserted }
     }
 
     private func providerName(_ id: String) -> String { model.snapshot?.providers.first(where: { $0.id == id })?.name ?? id }

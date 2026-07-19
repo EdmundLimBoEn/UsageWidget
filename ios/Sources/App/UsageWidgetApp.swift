@@ -76,9 +76,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        // Demo actions are commonly triggered while UsageWidget is open on the
-        // test phone. iOS suppresses foreground banners unless the delegate
-        // explicitly opts in to presenting them.
+        // Readiness checks may be triggered while UsageWidget is open. iOS
+        // suppresses foreground banners unless the delegate opts in.
         [.banner, .list, .sound]
     }
 

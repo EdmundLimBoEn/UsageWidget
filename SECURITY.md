@@ -21,12 +21,6 @@ The production collector runs as the unprivileged account that owns CodexBar's
 provider sessions and exposes only `GET /usage` on a group-restricted Unix
 socket. The main daemon must not run with that account's home-directory access.
 
-The optional Lab Console is a separate, loopback-only listener. It has no bearer
-token because it trusts an identity-aware reverse proxy to authenticate the
-operator and supply the configured identity header. Enabling that listener
-without the proxy makes the trust model invalid. Console routes are restricted
-to synthetic demo state and explicit server-side device targets.
-
 ## Secrets and sensitive data
 
 - Generate a unique `USAGEWIDGET_TOKEN` of at least 32 characters. Token

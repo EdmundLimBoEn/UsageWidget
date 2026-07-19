@@ -90,11 +90,6 @@ Commands:
   snapshot         GET /v1/snapshot
   settings         GET /v1/settings
   poll             POST /v1/poll  (force CodexBar sample)
-  demo | test      POST /v1/demo/alert  (synthetic APNs + widget push)
-  demo-provider    Show demo-provider status
-  demo-provider on Enable it and poll immediately
-  demo-provider off Disable it and poll immediately
-  demo-provider poll  Poll with the current setting
   deploy           Cross-compile + install + restart on the server
   logs [-f]        journalctl -u usagewidget on the server
   status           systemd status on the server
@@ -105,7 +100,6 @@ Examples:
   usagewidget env sync
   usagewidget health
   usagewidget poll
-  usagewidget demo
   usagewidget deploy
   usagewidget logs -f
 EOF
@@ -195,23 +189,6 @@ cmd_status() {
   ssh -o BatchMode=yes "${USAGEWIDGET_DEPLOY_HOST}" "systemctl status usagewidget --no-pager | head -30"
 }
 
-cmd_demo_provider() {
-  local action="${1:-status}"
-  case "$action" in
-    status) api GET /v1/settings ;;
-    on)
-      api PUT /v1/settings -H "Content-Type: application/json" -d '{"demoProviderEnabled":true}'
-      USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll
-      ;;
-    off)
-      api PUT /v1/settings -H "Content-Type: application/json" -d '{"demoProviderEnabled":false}'
-      USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll
-      ;;
-    poll) USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll ;;
-    *) die "unknown demo-provider action: $action (status|on|off|poll)" ;;
-  esac
-}
-
 cmd_ssh() {
   load_config
   require_host
@@ -239,8 +216,6 @@ main() {
     snapshot) api GET /v1/snapshot ;;
     settings) api GET /v1/settings ;;
     poll) USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll ;;
-    demo|test|demo-alert|alert) api POST /v1/demo/alert ;;
-    demo-provider) cmd_demo_provider "$@" ;;
     deploy|redeploy) cmd_deploy "$@" ;;
     logs) cmd_logs "$@" ;;
     status) cmd_status ;;

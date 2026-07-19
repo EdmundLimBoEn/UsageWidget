@@ -19,8 +19,9 @@ committed to the repository.
 
 - [ ] Register unique app, widget, App Group, and shared Keychain identifiers;
   update `ios/project.yml`, both entitlements files, and `AppConstants` together.
-- [ ] Select the Apple Development team in Xcode. No team or provisioning profile
-  is committed by this project.
+- [ ] The project is configured for team `DUU8J39BA7`. Release maintainers need
+  the matching distribution certificate and the two App Store profiles named in
+  `ios/ExportOptions.plist`; private keys and provisioning profiles stay local.
 - [ ] Create a dedicated APNs authentication key. Store its `.p8` outside the
   repository with restrictive permissions and do not reuse an App Store Connect
   API key.
@@ -52,34 +53,15 @@ committed to the repository.
 - [ ] Store the Mac CLI configuration at `~/.config/usagewidget/env` with mode
   `600`; set `USAGEWIDGET_DEPLOY_HOST`, `USAGEWIDGET_URL`, and
   `USAGEWIDGET_REPO` only when source redeploys are needed.
-- [ ] Back up before upgrades or demo resets and test restoring a backup on a
+- [ ] Back up before upgrades and test restoring a backup on a
   non-production host.
-
-## Optional Lab Console
-
-- [ ] Leave `USAGEWIDGET_DEMO_ENABLED` unset unless the console is actively
-  needed. The synthetic provider in the iOS app does not require this listener.
-- [ ] Confirm from the current identity-provider and proxy documentation which
-  trusted header carries the authenticated operator identity. Set
-  `ACCESS_IDENTITY_HEADER` explicitly if it is not
-  `Cf-Access-Authenticated-User-Email`.
-- [ ] Configure an identity-aware proxy and private tunnel to
-  `http://127.0.0.1:8378`. Protect the hostname before publishing the route and
-  never allow an `Everyone` policy.
-- [ ] Set `DEMO_DEVICE_IDS` only to the registered devices intended to receive
-  console-triggered alerts. Do not expose device selection to the browser.
-- [ ] Verify unauthenticated and unauthorized requests are denied at the proxy,
-  authorized same-origin mutations work, audit entries identify the operator,
-  and no main API route is reachable through the console hostname.
-- [ ] Disable the listener and remove the proxy route, DNS record, and temporary
-  access policy after the demo.
 
 ## Release publication
 
 - [ ] Update `release-manifest.json` only after verifying the pinned CodexBar
   assets and SHA-256 values for both supported architectures.
-- [ ] Run the full verification commands documented in `README.md`, including
-  `./demo.sh matrix`, on a clean checkout.
+- [ ] Run the full verification commands documented in `README.md` on a clean
+  checkout.
 - [ ] Create a `v*` tag, verify the GitHub Actions release workflow, and inspect
   both amd64 and arm64 archives plus their checksum files before announcing the
   release.

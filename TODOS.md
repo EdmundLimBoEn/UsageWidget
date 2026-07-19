@@ -23,8 +23,8 @@ support contact details, and a clean-device installation test.
   on amd64 and arm64.
 - Diagnostics, release updates, checksummed bundles, backup/restore, token
   rotation, setup QR generation, and preserving or purging uninstall paths.
-- Interactive source installation, isolated distro-matrix installer demo, and
-  GitHub Actions release packaging.
+- Interactive source installation, installer verification, and GitHub Actions
+  release packaging.
 - Shared app/widget Keychain access group with one-time migration from App Group
   defaults.
 - Raw upstream provider payloads removed from phone-facing snapshot responses.

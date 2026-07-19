@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -102,7 +101,7 @@ func (a *API) SetNextPollAt(at time.Time) {
 	a.nextPollAt = &at
 }
 
-func (a *API) RecordWidgetDelivery(delivery DeliveryCount, status DemoStageStatus, detail string) {
+func (a *API) RecordWidgetDelivery(delivery DeliveryCount, status DeliveryStatus, detail string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	now := time.Now().UTC()
@@ -128,7 +127,6 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/devices", a.handlePostDevice)
 	mux.HandleFunc("DELETE /v1/devices/{deviceID}", a.handleDeleteDevice)
 	mux.HandleFunc("POST /v1/poll", a.handleForcePoll)
-	mux.HandleFunc("POST /v1/demo/alert", a.handleDemoAlert)
 	mux.HandleFunc("GET /v1/readiness/{deviceID}", a.handleGetReadiness)
 	mux.HandleFunc("POST /v1/readiness/{deviceID}/test", a.handleReadinessTest)
 	return a.withAuth(mux)
@@ -303,10 +301,7 @@ func (a *API) handleReadinessTest(w http.ResponseWriter, r *http.Request) {
 	if device.APNsToken != "" {
 		result.AlertAttempted = true
 		if a.apnsOperational() {
-			ev := demoEvent()
-			ev.Type = "readiness_test"
-			ev.Title = "UsageWidget readiness test"
-			ev.Silent = false
+			ev := readinessTestEvent()
 			if err := a.notifier.SendAlert(r.Context(), device.APNsToken, ev); err == nil {
 				result.AlertAccepted = true
 			} else {
@@ -502,7 +497,6 @@ type Settings struct {
 	PollIntervalMinutes          int             `json:"pollIntervalMinutes"`
 	ProviderOrder                []string        `json:"providerOrder"`
 	HiddenProviders              []string        `json:"hiddenProviders"`
-	DemoProviderEnabled          bool            `json:"demoProviderEnabled"`
 	NotificationsEnabled         bool            `json:"notificationsEnabled"`
 	EarlyThresholdPct            float64         `json:"earlyThresholdPct"`
 	DangerThresholdPct           float64         `json:"dangerThresholdPct"`
@@ -574,13 +568,6 @@ func loadSettings(store *Store) (Settings, error) {
 	s.PollIntervalMinutes, _ = strconv.Atoi(raw["poll_interval_minutes"])
 	json.Unmarshal([]byte(raw["provider_order"]), &s.ProviderOrder)
 	json.Unmarshal([]byte(raw["hidden_providers"]), &s.HiddenProviders)
-	s.DemoProviderEnabled = raw["demo_provider_enabled"] == "true"
-	if s.DemoProviderEnabled {
-		s.HiddenProviders = removeString(s.HiddenProviders, "demo")
-		if !containsString(s.ProviderOrder, "demo") {
-			s.ProviderOrder = append(s.ProviderOrder, "demo")
-		}
-	}
 	s.NotificationsEnabled = raw["notifications_enabled"] == "true"
 	s.EarlyThresholdPct, _ = strconv.ParseFloat(raw["early_threshold_pct"], 64)
 	s.DangerThresholdPct, _ = strconv.ParseFloat(raw["danger_threshold_pct"], 64)
@@ -627,7 +614,6 @@ type updateSettingsRequest struct {
 	PollIntervalMinutes          *int             `json:"pollIntervalMinutes"`
 	ProviderOrder                *[]string        `json:"providerOrder"`
 	HiddenProviders              *[]string        `json:"hiddenProviders"`
-	DemoProviderEnabled          *bool            `json:"demoProviderEnabled"`
 	NotificationsEnabled         *bool            `json:"notificationsEnabled"`
 	EarlyThresholdPct            *float64         `json:"earlyThresholdPct"`
 	DangerThresholdPct           *float64         `json:"dangerThresholdPct"`
@@ -688,9 +674,6 @@ func (a *API) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if req.HiddenProviders != nil {
 		b, _ := json.Marshal(*req.HiddenProviders)
 		set("hidden_providers", string(b))
-	}
-	if req.DemoProviderEnabled != nil {
-		set("demo_provider_enabled", strconv.FormatBool(*req.DemoProviderEnabled))
 	}
 	if req.NotificationsEnabled != nil {
 		set("notifications_enabled", strconv.FormatBool(*req.NotificationsEnabled))
@@ -886,58 +869,14 @@ func (a *API) handleForcePoll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-type demoAlertResponse struct {
-	OK               bool `json:"ok"`
-	DevicesAlerted   int  `json:"devicesAlerted"`
-	WidgetsRefreshed int  `json:"widgetsRefreshed"`
-}
-
-func demoEvent() Event {
+func readinessTestEvent() Event {
 	return Event{
-		Key:              fmt.Sprintf("demo.test_alert.%d", time.Now().UTC().UnixNano()),
-		Type:             "test_alert",
-		Title:            "UsageWidget demo",
-		ProviderID:       "demo",
-		ProviderName:     "Demo",
-		WindowID:         "demo.primary",
-		WindowTitle:      "Primary",
-		UsedPercent:      72,
-		RemainingPercent: 28,
+		Key:          fmt.Sprintf("readiness.test_alert.%d", time.Now().UTC().UnixNano()),
+		Type:         "readiness_test",
+		Title:        "UsageWidget readiness test",
+		ProviderID:   "system",
+		ProviderName: "UsageWidget",
+		WindowID:     "readiness",
+		WindowTitle:  "Delivery",
 	}
-}
-
-func (a *API) handleDemoAlert(w http.ResponseWriter, r *http.Request) {
-	if a.notifier == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "notifier not available"})
-		return
-	}
-	devices, err := a.store.DemoTargets(a.cfg.DemoDeviceIDs)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-
-	ev := demoEvent()
-	var alerted, refreshed int
-	for _, d := range devices {
-		if d.APNsToken != "" {
-			if err := a.notifier.SendAlert(r.Context(), d.APNsToken, ev); err != nil {
-				log.Printf("demo alert: send to %s: %v", d.DeviceID, err)
-			} else {
-				alerted++
-			}
-		}
-		if d.WidgetToken != "" {
-			if err := a.notifier.SendWidgetRefresh(r.Context(), d.WidgetToken); err != nil {
-				log.Printf("demo alert: widget refresh %s: %v", d.DeviceID, err)
-			} else {
-				refreshed++
-			}
-		}
-	}
-	writeJSON(w, http.StatusOK, demoAlertResponse{
-		OK:               true,
-		DevicesAlerted:   alerted,
-		WidgetsRefreshed: refreshed,
-	})
 }

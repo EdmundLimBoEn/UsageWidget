@@ -165,16 +165,10 @@ func windowEventValue(usedPercent float64, resetsAt *time.Time) EventValue {
 }
 
 func creditsWindowID(providerID string) string {
-	if providerID == "demo" {
-		return "demo.credits"
-	}
 	return providerID + "#credits"
 }
 
 func creditsEventKey(providerID string, count int) string {
-	if providerID == "demo" {
-		return fmt.Sprintf("demo.event.credits:%d", count)
-	}
 	return fmt.Sprintf("credits:%s:%d", providerID, count)
 }
 
@@ -232,8 +226,6 @@ func surpriseResetTitle(providerID string) string {
 		return "Tibo has struck again! Claude limits reset"
 	case "codex":
 		return "Saint Tibo has blessed you with tokens, Codex limits reset"
-	case "demo":
-		return "mini-tibo (me) has blessed you with pretend tokens"
 	default:
 		return "Surprise reset"
 	}
@@ -262,13 +254,7 @@ func mkEvent(typ, title, key string, p Provider, w Window) Event {
 }
 
 func providerEventKey(kind, providerID, windowID string, resetsAt *time.Time) string {
-	if providerID == "demo" {
-		token := "epoch"
-		if resetsAt != nil {
-			token = resetsAt.UTC().Format(time.RFC3339)
-		}
-		return fmt.Sprintf("demo.event.%s:%s:%s", kind, windowID, token)
-	}
+	_ = providerID
 	return eventKey(kind, windowID, resetsAt)
 }
 
