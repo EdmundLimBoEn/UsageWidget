@@ -99,7 +99,11 @@ func (c *apnsClient) SendAlert(ctx context.Context, deviceToken string, ev Event
 	if err != nil {
 		return fmt.Errorf("apns: marshal alert: %w", err)
 	}
-	return c.push(ctx, deviceToken, "alert", c.bundleID, "10", body)
+	priority := "10"
+	if ev.Silent {
+		priority = "5"
+	}
+	return c.push(ctx, deviceToken, "alert", c.bundleID, priority, body)
 }
 
 func (c *apnsClient) SendWidgetRefresh(ctx context.Context, widgetToken string) error {
@@ -227,11 +231,14 @@ func loadECPrivateKey(path string) (*ecdsa.PrivateKey, error) {
 }
 
 func alertPayload(ev Event) map[string]any {
+	aps := map[string]any{"alert": map[string]any{"title": ev.Title, "body": alertBody(ev)}}
+	if ev.Silent {
+		aps["interruption-level"] = "passive"
+	} else {
+		aps["sound"] = "default"
+	}
 	payload := map[string]any{
-		"aps": map[string]any{
-			"alert": map[string]any{"title": ev.Title, "body": alertBody(ev)},
-			"sound": "default",
-		},
+		"aps":              aps,
 		"provider":         ev.ProviderID,
 		"providerName":     ev.ProviderName,
 		"windowTitle":      ev.WindowTitle,

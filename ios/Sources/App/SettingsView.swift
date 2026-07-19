@@ -32,28 +32,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Notifications", isOn: $model.settings.notificationsEnabled)
-                    .onChange(of: model.settings.notificationsEnabled) { _, _ in
-                        Task { await model.applySettings() }
-                    }
-                Stepper(
-                    "Early alert at \(Int(model.settings.earlyThresholdPct))% used",
-                    value: $model.settings.earlyThresholdPct,
-                    in: 1...99,
-                    step: 1
-                )
-                .onChange(of: model.settings.earlyThresholdPct) { _, _ in
-                    Task { await model.applySettings() }
-                }
-                Stepper(
-                    "Danger alert at \(Int(model.settings.dangerThresholdPct))% remaining",
-                    value: $model.settings.dangerThresholdPct,
-                    in: 1...99,
-                    step: 1
-                )
-                .onChange(of: model.settings.dangerThresholdPct) { _, _ in
-                    Task { await model.applySettings() }
-                }
+                NavigationLink { AlertRulesView() } label: { Label("Alert rules", systemImage: "bell.and.waves.left.and.right") }
                 Button("Request notification permission") {
                     Task { await requestNotifications() }
                 }
@@ -105,6 +84,7 @@ struct SettingsView: View {
             }
 
             Section {
+                NavigationLink { ReadinessView() } label: { Label("Demo readiness", systemImage: "checkmark.seal") }
                 Button {
                     Task { await model.forcePoll() }
                 } label: {

@@ -93,6 +93,14 @@ public struct APIClient: Sendable {
         try await sendEmpty(path: "/v1/demo/alert", method: "POST")
     }
 
+    public func fetchReadiness(deviceID: String) async throws -> Readiness {
+        try await get(path: "/v1/readiness/\(deviceID)")
+    }
+
+    public func testReadiness(deviceID: String) async throws -> ReadinessTestResult {
+        try await sendEmpty(path: "/v1/readiness/\(deviceID)/test", method: "POST")
+    }
+
     // MARK: - Internals
 
     private func get<T: Decodable>(path: String) async throws -> T {

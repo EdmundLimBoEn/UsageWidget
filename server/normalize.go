@@ -25,12 +25,13 @@ type Provider struct {
 }
 
 type Window struct {
-	ID               string     `json:"id"`
-	Key              string     `json:"key"`
-	Title            string     `json:"title"`
-	UsedPercent      float64    `json:"usedPercent"`
-	RemainingPercent float64    `json:"remainingPercent"`
-	ResetsAt         *time.Time `json:"resetsAt,omitempty"`
+	ID               string          `json:"id"`
+	Key              string          `json:"key"`
+	Title            string          `json:"title"`
+	UsedPercent      float64         `json:"usedPercent"`
+	RemainingPercent float64         `json:"remainingPercent"`
+	ResetsAt         *time.Time      `json:"resetsAt,omitempty"`
+	Forecast         *WindowForecast `json:"forecast,omitempty"`
 }
 
 type Credits struct {

@@ -1,8 +1,12 @@
 # UsageWidget Demo Dashboard Design
 
+> **Status:** Approved design record. Operational defaults, supported hosts,
+> configuration variables, and current API summaries live in `README.md` and
+> `server/deploy/README.md`.
+
 ## Goal
 
-Build a private web dashboard at `demo.usagewidget.edmundlim.systems` for controlling and showcasing a synthetic UsageWidget provider through the real server-to-iPhone pipeline.
+Build a private web dashboard at `demo.example.com` for controlling and showcasing a synthetic UsageWidget provider through the real server-to-iPhone pipeline.
 
 The frontend stays clean, restrained, and easy to operate. The deliberate complexity belongs in the secure end-to-end system behind it.
 
@@ -43,10 +47,10 @@ The mockup is the frontend design source of truth. Implementation may replace pl
 
 ```text
 Browser
-  -> demo.usagewidget.edmundlim.systems
+  -> demo.example.com
   -> Cloudflare Access
   -> Cloudflare Tunnel
-  -> 127.0.0.1:8378 on edServe
+  -> 127.0.0.1:8378 on the server
   -> static Lab Console and demo-only API
   -> demo state merged into raw provider payload
   -> existing normalization
@@ -56,7 +60,7 @@ Browser
   -> signed iPhone app and widget
 ```
 
-Cloudflare Access authenticates the operator before the request reaches edServe. The Tunnel targets a dedicated loopback listener on port 8378 that serves only the Lab Console and demo routes. The existing full API remains on port 8377 behind Tailscale and is not exposed through the demo hostname.
+Cloudflare Access authenticates the operator before the request reaches the server. The Tunnel targets a dedicated loopback listener on port 8378 that serves only the Lab Console and demo routes. The existing full API remains on port 8377 behind Tailscale and is not exposed through the demo hostname.
 
 The dashboard and demo API share one origin, so the design needs no Pages deployment, Worker proxy, browser-held upstream token, or CORS configuration.
 
@@ -164,13 +168,13 @@ The Lab Console keeps the last successful snapshot visible when a request fails,
 ## Security Boundaries
 
 - Cloudflare Access is the operator authentication layer.
-- The Tunnel is the only path from the public hostname to edServe.
+- The Tunnel is the only path from the public hostname to the server.
 - The Tunnel targets only `127.0.0.1:8378`.
 - Port 8378 registers no real-provider or operational routes.
 - The existing bearer-authenticated API on port 8377 remains reachable only through its current Tailscale path.
 - Demo routes cannot select a provider ID.
 - All mutable keys and event keys are restricted to the `demo.*` namespace.
-- The browser stores no edServe bearer token.
+- The browser stores no server bearer token.
 
 ## Verification
 
@@ -223,7 +227,7 @@ Real-provider behavior must remain unchanged.
 ## Deployment
 
 - Start the demo-only listener on `127.0.0.1:8378` as part of `usagewidgetd`.
-- Configure a Cloudflare Tunnel public hostname for `demo.usagewidget.edmundlim.systems` targeting `http://127.0.0.1:8378`.
+- Configure a Cloudflare Tunnel public hostname for `demo.example.com` targeting `http://127.0.0.1:8378`.
 - Protect the hostname with Cloudflare Access.
 - Serve the Lab Console and demo API from the same local listener and origin.
 - Keep the existing port 8377 Tailscale endpoint and iOS configuration unchanged.

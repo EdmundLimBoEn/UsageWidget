@@ -6,16 +6,19 @@ import (
 )
 
 type Event struct {
-	Key              string
-	Type             string
-	Title            string
-	ProviderID       string
-	ProviderName     string
-	WindowID         string
-	WindowTitle      string
-	UsedPercent      float64
-	RemainingPercent float64
-	ResetsAt         *time.Time
+	Key                     string
+	Type                    string
+	Title                   string
+	ProviderID              string
+	ProviderName            string
+	WindowID                string
+	WindowTitle             string
+	UsedPercent             float64
+	RemainingPercent        float64
+	ResetsAt                *time.Time
+	Silent                  bool
+	DangerPolicyFingerprint string
+	DangerResetEpoch        string
 }
 
 type EventValue struct {
@@ -60,14 +63,18 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 		if hidden[p.ID] || p.Stale || p.Error != "" {
 			continue
 		}
+		providerRule := s.EffectiveRule(p.ID, "")
 
 		for _, w := range p.Windows {
+			rule := s.EffectiveRule(p.ID, w.ID)
 			prev, had, err := e.store.GetWindowState(w.ID)
 			if err != nil {
 				return EventProcessResult{}, err
 			}
-			if had && s.NotificationsEnabled {
-				for _, ev := range detectWindowEvents(prev, w, p, s, now) {
+			if had && s.NotificationsEnabled && rule.Enabled {
+				dangerEmitted := false
+				for _, ev := range detectWindowEvents(prev, w, p, rule, now) {
+					ev.Silent = s.QuietHours.Contains(now)
 					claimed, err := e.claim(ev.Key)
 					if err != nil {
 						return EventProcessResult{}, err
@@ -79,6 +86,25 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 						Deduplicated: !claimed,
 					})
 					if claimed {
+						if ev.Type == "danger_threshold" {
+							ev.DangerResetEpoch = resetEpoch(w.ResetsAt)
+							ev.DangerPolicyFingerprint = policyFingerprint(rule)
+							dangerEmitted = true
+						}
+						result.Emitted = append(result.Emitted, ev)
+					}
+				}
+				if !dangerEmitted && w.RemainingPercent <= rule.DangerThresholdPct && rule.RepeatIntervalMinutes > 0 {
+					epoch, fingerprint := resetEpoch(w.ResetsAt), policyFingerprint(rule)
+					claimed, err := e.store.DangerDeliveryDue(w.ID, epoch, fingerprint, now, time.Duration(rule.RepeatIntervalMinutes)*time.Minute)
+					if err != nil {
+						return EventProcessResult{}, err
+					}
+					if claimed {
+						ev := mkEvent("danger_reminder", "Still almost out", fmt.Sprintf("danger-reminder:%s:%d", w.ID, now.Unix()), p, w)
+						ev.Silent = s.QuietHours.Contains(now)
+						ev.DangerResetEpoch = epoch
+						ev.DangerPolicyFingerprint = fingerprint
 						result.Emitted = append(result.Emitted, ev)
 					}
 				}
@@ -98,7 +124,7 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 			if err != nil {
 				return EventProcessResult{}, err
 			}
-			if had && s.NotificationsEnabled && prev.CreditsAvailable != nil && p.Credits.AvailableCount > *prev.CreditsAvailable {
+			if had && s.NotificationsEnabled && providerRule.Enabled && prev.CreditsAvailable != nil && p.Credits.AvailableCount > *prev.CreditsAvailable {
 				ev := Event{
 					Key:          creditsEventKey(p.ID, p.Credits.AvailableCount),
 					Type:         "credits_increase",
@@ -118,6 +144,7 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 					Deduplicated: !claimed,
 				})
 				if claimed {
+					ev.Silent = s.QuietHours.Contains(now)
 					result.Emitted = append(result.Emitted, ev)
 				}
 			}
@@ -165,15 +192,15 @@ func (e *EventEngine) claim(key string) (bool, error) {
 	return true, nil
 }
 
-func detectWindowEvents(prev WindowState, w Window, p Provider, s Settings, now time.Time) []Event {
+func detectWindowEvents(prev WindowState, w Window, p Provider, rule AlertRule, now time.Time) []Event {
 	var evs []Event
 
-	if prev.UsedPercent < s.EarlyThresholdPct && w.UsedPercent >= s.EarlyThresholdPct {
+	if prev.UsedPercent < rule.EarlyThresholdPct && w.UsedPercent >= rule.EarlyThresholdPct {
 		evs = append(evs, mkEvent("early_threshold", "Approaching limit", providerEventKey("early", p.ID, w.ID, w.ResetsAt), p, w))
 	}
 
 	prevRemaining := 100 - prev.UsedPercent
-	if prevRemaining > s.DangerThresholdPct && w.RemainingPercent <= s.DangerThresholdPct {
+	if prevRemaining > rule.DangerThresholdPct && w.RemainingPercent <= rule.DangerThresholdPct {
 		evs = append(evs, mkEvent("danger_threshold", "Almost out", providerEventKey("danger", p.ID, w.ID, w.ResetsAt), p, w))
 	}
 
@@ -190,6 +217,13 @@ func detectWindowEvents(prev WindowState, w Window, p Provider, s Settings, now 
 	}
 
 	return evs
+}
+
+func resetEpoch(resetsAt *time.Time) string {
+	if resetsAt == nil {
+		return "epoch"
+	}
+	return resetsAt.UTC().Format(time.RFC3339)
 }
 
 func surpriseResetTitle(providerID string) string {

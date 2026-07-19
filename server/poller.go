@@ -248,17 +248,28 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 
 	normalizeStarted := time.Now()
 	body, err := p.codexbar.Fetch(ctx)
+	normalizeWarning := ""
 	if err != nil {
 		log.Printf("poller: fetch failed, keeping last snapshot: %v", err)
 		if recordDemo {
-			return p.failPoll(execution, "normalize", normalizeStarted, fmt.Errorf("fetch upstream: %w", err), false, action, demoState)
+			// The demo console must remain usable when the real collector is
+			// temporarily unavailable. Rehydrate cached raw providers as stale and
+			// run the synthetic provider through the normal downstream pipeline.
+			body = p.cachedProviderBody()
+			normalizeWarning = "upstream unavailable; used cached providers"
+		} else {
+			p.markStale()
+			execution.poll.Error = err.Error()
+			return execution
 		}
-		p.markStale()
-		execution.poll.Error = err.Error()
-		return execution
 	}
 	if injectedDemoState != nil {
 		body, err = InjectDemoProvider(body, *injectedDemoState)
+		if err != nil && recordDemo && normalizeWarning == "" {
+			body = p.cachedProviderBody()
+			body, err = InjectDemoProvider(body, *injectedDemoState)
+			normalizeWarning = "upstream payload invalid; used cached providers"
+		}
 		if err != nil {
 			log.Printf("poller: inject demo provider: %v", err)
 			if recordDemo {
@@ -270,6 +281,14 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	}
 
 	snap, err := Normalize(body, settings.PollIntervalMinutes, now)
+	if err != nil && recordDemo && normalizeWarning == "" {
+		body = p.cachedProviderBody()
+		body, injectErr := InjectDemoProvider(body, *injectedDemoState)
+		if injectErr == nil {
+			snap, err = Normalize(body, settings.PollIntervalMinutes, now)
+		}
+		normalizeWarning = "upstream payload invalid; used cached providers"
+	}
 	if err != nil {
 		log.Printf("poller: normalize failed: %v", err)
 		if recordDemo {
@@ -278,22 +297,18 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 		execution.poll.Error = err.Error()
 		return execution
 	}
+	p.preserveLastKnownProviderUsage(&snap)
 	if recordDemo {
-		setDemoStage(&execution.demo, "normalize", DemoStageOK, "", normalizeStarted)
+		status := DemoStageOK
+		if normalizeWarning != "" {
+			status = DemoStageWarning
+		}
+		setDemoStage(&execution.demo, "normalize", status, normalizeWarning, normalizeStarted)
 	}
 
 	changed := p.snapshotChanged(snap)
 	snapshotStarted := time.Now()
-	payload, err := json.Marshal(snap)
-	if err != nil {
-		log.Printf("poller: marshal snapshot: %v", err)
-		if recordDemo {
-			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false, action, demoState)
-		}
-		execution.poll.Error = err.Error()
-		return execution
-	}
-	if err := p.store.SaveSnapshot(now, payload); err != nil {
+	if err := p.store.SaveSnapshotWithForecasts(&snap); err != nil {
 		log.Printf("poller: save snapshot: %v", err)
 		if recordDemo {
 			return p.failPoll(execution, "snapshot_persisted", snapshotStarted, err, false, action, demoState)
@@ -351,6 +366,75 @@ func (p *Poller) pollWithInputs(ctx context.Context, execution pollExecution, no
 	return execution
 }
 
+func (p *Poller) cachedProviderBody() []byte {
+	_, payload, ok, err := p.store.LatestSnapshot()
+	if err != nil || !ok {
+		return []byte(`[]`)
+	}
+	var previous Snapshot
+	if json.Unmarshal(payload, &previous) != nil {
+		return []byte(`[]`)
+	}
+	rawProviders := make([]json.RawMessage, 0, len(previous.Providers))
+	for _, provider := range previous.Providers {
+		if provider.ID == "demo" || len(provider.Raw) == 0 {
+			continue
+		}
+		var raw map[string]any
+		if json.Unmarshal(provider.Raw, &raw) != nil {
+			continue
+		}
+		raw["stale"] = true
+		encoded, err := json.Marshal(raw)
+		if err == nil {
+			rawProviders = append(rawProviders, encoded)
+		}
+	}
+	if len(rawProviders) == 0 {
+		return []byte(`[]`)
+	}
+	body, err := json.Marshal(struct {
+		Providers []json.RawMessage `json:"providers"`
+	}{Providers: rawProviders})
+	if err != nil {
+		return []byte(`[]`)
+	}
+	return body
+}
+
+// preserveLastKnownProviderUsage keeps one transient provider failure from
+// erasing the other providers' fresh results or the failed provider's last
+// useful windows. The provider remains stale so the event engine will not emit
+// alerts from cached values, while the raw payload retains the diagnostic.
+func (p *Poller) preserveLastKnownProviderUsage(snap *Snapshot) {
+	_, payload, ok, err := p.store.LatestSnapshot()
+	if err != nil || !ok {
+		return
+	}
+	var previous Snapshot
+	if err := json.Unmarshal(payload, &previous); err != nil {
+		return
+	}
+	byID := make(map[string]Provider, len(previous.Providers))
+	for _, provider := range previous.Providers {
+		byID[provider.ID] = provider
+	}
+	for i := range snap.Providers {
+		current := &snap.Providers[i]
+		if current.ID == "demo" || current.Error == "" || len(current.Windows) != 0 {
+			continue
+		}
+		prior, found := byID[current.ID]
+		if !found || len(prior.Windows) == 0 {
+			continue
+		}
+		current.Windows = prior.Windows
+		current.Credits = prior.Credits
+		current.Stale = true
+		current.Error = ""
+	}
+}
+
 type dispatchResult struct {
 	Delivery      DemoDeliveryResult
 	AlertsByEvent map[string]DeliveryCount
@@ -399,6 +483,11 @@ func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool, tar
 			}
 		}
 		result.AlertsByEvent[ev.Key] = count
+		if count.Succeeded > 0 && ev.DangerPolicyFingerprint != "" {
+			if err := p.store.RecordDangerDelivery(ev.WindowID, ev.DangerResetEpoch, ev.DangerPolicyFingerprint, time.Now().UTC()); err != nil {
+				log.Printf("poller: persist danger delivery: %v", err)
+			}
+		}
 	}
 	if changed {
 		for _, d := range devices {
@@ -601,6 +690,7 @@ func (p *Poller) markStale() {
 		return
 	}
 	snap.Stale = true
+	clearForecasts(&snap)
 	updated, err := json.Marshal(snap)
 	if err != nil {
 		return

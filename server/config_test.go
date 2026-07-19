@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+const validTestToken = "0123456789abcdef0123456789abcdef"
+
 func TestLoadConfigRequiresToken(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", "")
 	if _, err := LoadConfig(); err == nil {
@@ -12,8 +14,17 @@ func TestLoadConfigRequiresToken(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsWeakOrWhitespaceToken(t *testing.T) {
+	for _, token := range []string{"short", validTestToken + "\n"} {
+		t.Setenv("USAGEWIDGET_TOKEN", token)
+		if _, err := LoadConfig(); err == nil {
+			t.Fatalf("expected token %q to be rejected", token)
+		}
+	}
+}
+
 func TestLoadConfigDefaults(t *testing.T) {
-	t.Setenv("USAGEWIDGET_TOKEN", "secret")
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
 	t.Setenv("CODEXBAR_URL", "")
 	t.Setenv("DB_PATH", "")
 	t.Setenv("LISTEN_ADDR", "")
@@ -31,7 +42,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.DBPath != "./usagewidget.db" {
 		t.Fatalf("unexpected default DBPath: %s", cfg.DBPath)
 	}
-	if cfg.ListenAddr != ":8377" {
+	if cfg.ListenAddr != "127.0.0.1:8377" {
 		t.Fatalf("unexpected default ListenAddr: %s", cfg.ListenAddr)
 	}
 	if cfg.APNsEnabled() {
@@ -40,7 +51,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 }
 
 func TestLoadConfigAPNsEnabledWhenAllVarsPresent(t *testing.T) {
-	t.Setenv("USAGEWIDGET_TOKEN", "secret")
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
 	t.Setenv("APNS_KEY_PATH", "/tmp/key.p8")
 	t.Setenv("APNS_KEY_ID", "KEYID")
 	t.Setenv("APNS_TEAM_ID", "TEAMID")
@@ -56,7 +67,7 @@ func TestLoadConfigAPNsEnabledWhenAllVarsPresent(t *testing.T) {
 }
 
 func TestLoadConfigDemoDeviceIDsAndAccessIdentityHeader(t *testing.T) {
-	t.Setenv("USAGEWIDGET_TOKEN", "secret")
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
 	t.Setenv("DEMO_DEVICE_IDS", " phone-a, phone-b,phone-a ")
 	t.Setenv("ACCESS_IDENTITY_HEADER", " X-Operator ")
 	cfg, err := LoadConfig()
@@ -81,7 +92,7 @@ func TestLoadConfigDemoDeviceIDsAndAccessIdentityHeader(t *testing.T) {
 }
 
 func TestLoadConfigDemoListener(t *testing.T) {
-	t.Setenv("USAGEWIDGET_TOKEN", "secret")
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
 
 	cfg, err := LoadConfig()
 	if err != nil {

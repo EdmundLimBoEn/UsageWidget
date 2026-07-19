@@ -1,0 +1,20 @@
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+ENV container=docker
+RUN printf '#!/bin/sh\nexit 101\n' >/usr/sbin/policy-rc.d \
+    && chmod +x /usr/sbin/policy-rc.d \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       ca-certificates curl dbus iproute2 jq openssl qrencode sqlite3 systemd systemd-sysv \
+    && rm -f /usr/sbin/policy-rc.d \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash demo \
+    && systemctl mask dev-hugepages.mount sys-fs-fuse-connections.mount systemd-remount-fs.service
+
+COPY mock-codexbar /usr/local/bin/codexbar
+COPY mock-tailscale /usr/local/bin/tailscale
+RUN chmod 0755 /usr/local/bin/codexbar /usr/local/bin/tailscale
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

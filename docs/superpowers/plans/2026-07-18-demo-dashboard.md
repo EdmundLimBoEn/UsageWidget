@@ -1,14 +1,20 @@
 # UsageWidget Demo Dashboard Implementation Plan
 
+> **Status:** Working implementation record, not an operator runbook. Checkbox
+> and task state below describe the staged plan at the time it was written and
+> may not match the current checkout. Use `README.md`, `SECURITY.md`, and
+> `server/deploy/README.md` for current setup, trust boundaries, routes, and
+> teardown guidance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **RECONCILED (2026-07-18) — Tasks 5+ rewritten against the CEO plan.** Tasks 1–4 are complete and committed (Task 1 `8e46b0a..1c8d248`, Task 2 `2b0d410`, Task 3 `f415abb..5d2f482`, Task 4 `5193cc0`, with Bun test/build and `go test ./...` passing). The prior "BLOCKED AFTER TASK 4" notice is lifted: Tasks 5 through 12 below are now reconciled with `~/.gstack/projects/EdmundLimBoEn-UsageWidget/ceo-plans/2026-07-18-usagewidget-portfolio.md` — temporary Access/Tunnel trust boundary, stateless CSRF + same-origin guards, default-off loopback listener, per-Access-identity and global rate limits, mutation audit, explicit demo delivery targets, client/server idempotency, `expectedRevision` conflict, persistent leased per-device APNs outbox, snapshot-freshness vs delivery-health split, iOS foreground banner, candidate-tag evidence gates, and post-hackathon removal. The reconciled order is: finish the console API and demo action records (Task 5) → default-off listener (Task 6) → **freeze the dashboard contract (Task 7)** → outbox reliability migration for every delivery producer (Task 8) → freshness/delivery-health split (Task 9) → iOS decode/render + foreground banner (Task 10) → evidence gates/deploy/docs (Task 11) → post-hackathon removal (Task 12). Task 7 is a hard gate: do not begin Task 8 until the contract is frozen.
 >
 > **Human verification before Task 5 implementation:** the Cloudflare Access identity header that carries the operator email must be confirmed against the live tenant and current Cloudflare docs before coding. This plan uses `Cf-Access-Authenticated-User-Email` as the default identity source for audit and rate-limit keys, with the signed `Cf-Access-Jwt-Assertion` JWT as the verified alternative. Because the demo path is Tunnel-to-loopback (an accepted trust boundary in the CEO plan), the origin trusts this header without independently validating the JWT. This human action is tracked in `HUMANS.md`.
 
-**Goal:** Ship the approved Lab Console at `demo.usagewidget.edmundlim.systems`, controlling one synthetic demo provider through UsageWidget’s real normalization, persistence, event, APNs, iOS app, and widget pipeline.
+**Goal:** Ship the approved Lab Console at `demo.example.com`, controlling one synthetic demo provider through UsageWidget’s real normalization, persistence, event, APNs, iOS app, and widget pipeline.
 
-**Architecture:** Cloudflare Access protects a Cloudflare Tunnel that forwards only to a dedicated `127.0.0.1:8378` listener on edServe. That listener serves the static console and a demo-only API. Demo state is persisted in SQLite and injected into the raw upstream payload before the existing normalizer; the existing `:8377` bearer-authenticated Tailscale API remains unchanged.
+**Architecture:** Cloudflare Access protects a Cloudflare Tunnel that forwards only to a dedicated `127.0.0.1:8378` listener on the server. That listener serves the static console and a demo-only API. Demo state is persisted in SQLite and injected into the raw upstream payload before the existing normalizer; the existing `:8377` bearer-authenticated Tailscale API remains unchanged.
 
 **Tech Stack:** Go 1.26 standard library, `modernc.org/sqlite`, vanilla HTML/CSS/TypeScript, Bun for frontend tests and bundling, Swift/SwiftUI/WidgetKit, Cloudflare Access and Tunnel.
 
@@ -24,7 +30,7 @@
 - Inject the synthetic provider before `Normalize`; do not create a parallel demo normalization/event pipeline.
 - `Snapshot.Stale` remains the whole-upstream failure flag. Demo staleness is provider-scoped.
 - Never expose real-provider, health, settings, devices, database, APNs administration, or deployment routes through the demo listener.
-- Before every git command, run `curl -s api.ipify.org`; if it returns `223.25.70.145`, enable the `edserve` Tailscale exit node for that command and restore it immediately afterward.
+- Before network-sensitive operations, follow your organization's approved private-network policy; do not commit home or office public IP addresses.
 - Frontend implementation/review should use a Fable agent when Claude workers are available; while unavailable, use Codex workers with this plan and the approved mockup as context.
 
 ---
@@ -263,7 +269,7 @@ Expected: PASS.
 
 ```bash
 curl -s api.ipify.org
-# If required: tailscale set --exit-node=edserve
+# If required: tailscale set --exit-node=<approved-node>
 git add server/demo.go server/demo_test.go server/demo_store.go server/demo_store_test.go server/store.go server/store_test.go server/normalize.go server/normalize_test.go
 git commit -m "Add persisted demo provider state"
 # If enabled: tailscale set --exit-node=
@@ -950,7 +956,7 @@ Expected: PASS.
 
 ```bash
 curl -s api.ipify.org
-# If required: tailscale set --exit-node=edserve
+# If required: tailscale set --exit-node=<approved-node>
 git add server/demo_api.go server/demo_api_test.go server/demo_guard.go server/demo_guard_test.go \
         server/demo.go server/demo_test.go server/demo_store.go server/demo_store_test.go \
         server/poller.go server/poller_test.go server/api.go server/api_test.go \
@@ -1287,7 +1293,7 @@ Run the pinned legacy-reader integration gate before the normal suite:
 ```bash
 legacy_dir=$(mktemp -d /tmp/usagewidget-legacy-XXXXXX)
 curl -s api.ipify.org
-# If it returns 223.25.70.145, enable the edserve exit node for this command and restore it immediately afterward.
+# If required by policy, enable the approved private-network exit node temporarily.
 git worktree add --detach "$legacy_dir" 5193cc0
 (cd "$legacy_dir/server" && go build -o /tmp/usagewidgetd-legacy-5193cc0 ./cmd/usagewidgetd)
 cd server
@@ -1500,10 +1506,10 @@ Do not send alerts or mutate demo state during deployment.
 Add to `server/deploy/README.md` and `HUMANS.md`:
 
 1. Confirm the Access identity header against the live tenant and current docs before enabling the flag; set `ACCESS_IDENTITY_HEADER` (default `Cf-Access-Authenticated-User-Email`).
-2. Create a Cloudflare Access self-hosted application for `demo.usagewidget.edmundlim.systems`.
+2. Create a Cloudflare Access self-hosted application for `demo.example.com`.
 3. Add a narrow Allow policy for the operator's exact identity/group; never `Everyone`.
 4. Configure the IdP, session duration, and MFA policy.
-5. Create/select the edServe Tunnel and publish the hostname to `http://127.0.0.1:8378`.
+5. Create/select the server Tunnel and publish the hostname to `http://127.0.0.1:8378`.
 6. Enable Protect with Access before exposing the route.
 7. Set `USAGEWIDGET_DEMO_ENABLED=true` and `DEMO_DEVICE_IDS` only after Access is confirmed.
 8. Verify unauthenticated denial, unauthorized denial, authorized access, healthy connector, and same-origin mutation without a browser-held token.
@@ -1514,7 +1520,7 @@ Immediately before Gate 1, commit all intended candidate content and create the 
 
 ```bash
 curl -s api.ipify.org
-# If it returns 223.25.70.145, enable the edserve exit node for this command and restore it immediately afterward.
+# If required by policy, enable the approved private-network exit node temporarily.
 git tag -a portfolio-candidate-N -m "Portfolio candidate N"
 git rev-parse portfolio-candidate-N
 ```
@@ -1584,7 +1590,7 @@ Expected: push succeeds after all automated and physical-device gates pass.
 
 - [ ] **Step 1: Disable the flag and remove the Cloudflare surface (human)**
 
-Set `USAGEWIDGET_DEMO_ENABLED=false` (or unset), disable/remove the Tunnel published route for `demo.usagewidget.edmundlim.systems`, confirm the hostname no longer reaches `127.0.0.1:8378`, and remove the Access application/DNS. Record these in `HUMANS.md`.
+Set `USAGEWIDGET_DEMO_ENABLED=false` (or unset), disable/remove the Tunnel published route for `demo.example.com`, confirm the hostname no longer reaches `127.0.0.1:8378`, and remove the Access application/DNS. Record these in `HUMANS.md`.
 
 - [ ] **Step 2: Remove demo code, routes, interfaces, configuration, and assets**
 

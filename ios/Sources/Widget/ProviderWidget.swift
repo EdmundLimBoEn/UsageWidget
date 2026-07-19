@@ -178,7 +178,7 @@ struct ProviderWidgetRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     if let primary {
-                        Text(resetText(primary))
+                        Text(ForecastText.string(for: primary) ?? resetText(primary))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -222,6 +222,7 @@ struct ProviderWidgetRow: View {
         if let reset = primary?.resetsAt {
             parts.append("resets \(RelativeTime.string(for: reset))")
         }
+        if let primary, let forecast = ForecastText.string(for: primary) { parts.append(forecast) }
         return parts.joined(separator: ", ")
     }
 

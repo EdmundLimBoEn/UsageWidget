@@ -47,7 +47,7 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.Binary, "usage", "--json")
+	cmd := exec.CommandContext(ctx, c.Binary, "usage", "--format", "json")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

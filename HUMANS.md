@@ -1,53 +1,85 @@
-# Human-only steps
+# Human-only setup
 
-Checklist items that cannot be fully automated from this repo.
+These steps require an account owner, physical device, private-network
+administrator, or release maintainer. They cannot be safely automated or
+committed to the repository.
 
-## Repo / git
+## Before publishing the repository
 
-- [x] Re-auth GitHub CLI — done; pushes work.
-- [x] Remote `EdmundLimBoEn/UsageWidget` exists and `origin` is pushed.
+- [ ] Inspect every reachable commit and tag for tokens, APNs keys, databases,
+  device tokens, private hostnames/IPs, and personal operational notes.
+- [ ] Rotate any credential that ever entered Git before rewriting or replacing
+  the affected history.
+- [ ] Enable secret scanning, push protection, private vulnerability reporting,
+  and branch protection on the hosting provider.
+- [ ] Keep local environment files, signing material, backups, generated release
+  bundles, and test evidence out of Git.
 
-## Code signing (device builds)
+## Apple signing and APNs
 
-Device `CodeSign` fails with `errSecInternalComponent` when the login keychain is locked or the Apple Development private key denies `codesign`. Simulator builds are fine (ad-hoc).
+- [ ] Register unique app, widget, App Group, and shared Keychain identifiers;
+  update `ios/project.yml`, both entitlements files, and `AppConstants` together.
+- [ ] Select the Apple Development team in Xcode. No team or provisioning profile
+  is committed by this project.
+- [ ] Create a dedicated APNs authentication key. Store its `.p8` outside the
+  repository with restrictive permissions and do not reuse an App Store Connect
+  API key.
+- [ ] Put `APNS_KEY_PATH`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, and
+  the correct `APNS_ENV` only in `/etc/usagewidget/env`.
+- [ ] On a physical iOS 26+ device, grant camera and notification permission,
+  scan a freshly generated setup QR, and verify app launch, widget loading,
+  background refresh, an audible automatic alert, a quiet-hours passive alert,
+  and an audible readiness test.
+- [ ] Before TestFlight or App Store distribution, complete privacy disclosures,
+  support details, screenshots, production APNs validation, and a clean-install
+  onboarding test.
 
-- [ ] Unlock login keychain: open **Keychain Access** → lock then unlock **login**, or sign out/in of the Mac session.
-- [ ] When macOS prompts “codesign wants to access key …”, choose **Always Allow**.
-- [ ] Optional one-liner in Terminal.app (uses your Mac login password once):
-  `security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" login.keychain-db`
-- [ ] Xcode → Settings → Accounts → manage certificates: ensure **Apple Development** exists for team `DUU8J39BA7`.
-- [ ] Project already sets `DEVELOPMENT_TEAM = DUU8J39BA7` in `ios/project.yml` (re-run `xcodegen generate` after edits).
+## Linux server and Tailscale
 
-## Apple Developer / device
+- [ ] Log in to CodexBar as the unprivileged account selected for the collector;
+  verify `CodexBarCLI config validate` and `CodexBarCLI usage --format json` as
+  that exact account.
+- [ ] Log Tailscale into the intended tailnet before installation and verify the
+  server's MagicDNS name.
+- [ ] Keep `LISTEN_ADDR=127.0.0.1:8377` and expose only the `/usagewidget` route
+  through Tailscale Serve. Never publish port 8377 directly.
+- [ ] Use a unique random bearer token of at least 32 characters and keep
+  `/etc/usagewidget/env`, `/etc/usagewidget/collector.env`, the SQLite database,
+  backups, and APNs key restricted to their intended accounts.
+- [ ] Run `sudo usagewidget-admin doctor`, force a poll, inspect both systemd
+  services, and confirm logs and health responses contain no credentials or raw
+  provider payloads.
+- [ ] Store the Mac CLI configuration at `~/.config/usagewidget/env` with mode
+  `600`; set `USAGEWIDGET_DEPLOY_HOST`, `USAGEWIDGET_URL`, and
+  `USAGEWIDGET_REPO` only when source redeploys are needed.
+- [ ] Back up before upgrades or demo resets and test restoring a backup on a
+  non-production host.
 
-- [x] APNs Auth Key created (Key ID `YK47N2PQ54`); installed on edServe as `/etc/usagewidget/AuthKey_YK47N2PQ54.p8` (mode 640, group usagewidget). ASC API key is separate — do not reuse for push.
-- [x] Team ID `DUU8J39BA7`; `APNS_ENV=sandbox` for Debug builds.
-- [x] App IDs + App Group registered; device has registered APNs + widget tokens.
-- [ ] Automatic signing / keychain unlock if device CodeSign fails.
-- [ ] On phone: grant notification permission; confirm demo alert appears (Settings → Testing → Send test alert, or `usagewidget demo`).
+## Optional Lab Console
 
-## edServe / Linux
+- [ ] Leave `USAGEWIDGET_DEMO_ENABLED` unset unless the console is actively
+  needed. The synthetic provider in the iOS app does not require this listener.
+- [ ] Confirm from the current identity-provider and proxy documentation which
+  trusted header carries the authenticated operator identity. Set
+  `ACCESS_IDENTITY_HEADER` explicitly if it is not
+  `Cf-Access-Authenticated-User-Email`.
+- [ ] Configure an identity-aware proxy and private tunnel to
+  `http://127.0.0.1:8378`. Protect the hostname before publishing the route and
+  never allow an `Everyone` policy.
+- [ ] Set `DEMO_DEVICE_IDS` only to the registered devices intended to receive
+  console-triggered alerts. Do not expose device selection to the browser.
+- [ ] Verify unauthenticated and unauthorized requests are denied at the proxy,
+  authorized same-origin mutations work, audit entries identify the operator,
+  and no main API route is reachable through the console hostname.
+- [ ] Disable the listener and remove the proxy route, DNS record, and temporary
+  access policy after the demo.
 
-- [x] `usagewidgetd` installed + systemd enabled (`usagewidget.service`); redeploy with `./server/deploy/redeploy.sh` or `/usagewidget-deploy`.
-- [x] `/etc/usagewidget/env` exists (token + CodexBar URL); mode 600 on host only.
-- [x] Tailscale Serve: `https://edserve.tail125275.ts.net/usagewidget` → `127.0.0.1:8377`.
-- [ ] Ensure CodexBar `serve` is running on localhost and `/usage` returns live provider data.
-- [x] APNs `.p8` + `APNS_*` env on edServe (health shows `"apns":true`; live send succeeds).
-- [x] Cloudflare CLI authenticated; `usagewidget-demo` Tunnel, operator-only Access policy, and `demo-usagewidget.edmundlim.systems` DNS are live.
-- [ ] From the phone (or any tailnet device), hit `GET /v1/health` with the bearer token (or `usagewidget health`).
+## Release publication
 
-## Demo validation
-
-- [ ] Dashboard shows live Codex / Claude / Grok (or whatever CodexBar returns).
-- [ ] Widget renders up to four provider rows with data age.
-- [ ] Settings → **Poll server now** forces an immediate CodexBar sample (health lastPoll updates).
-- [ ] Settings → **Send test alert** delivers a synthetic APNs notification + widget refresh (plumbing check; does not mutate usage).
-- [ ] Trigger a real usage threshold / reset on CodexBar and confirm real event APNs + widget refresh.
-- [ ] Restart usagewidgetd; confirm no duplicate real alerts and baseline is not re-fired.
-- [ ] Briefly lose Tailscale; app/widget still show last cached snapshot as stale.
-
-## Hackathon portfolio closeout
-
-- [ ] After automated gates pass, run the named physical-device matrix and retain redacted screenshots/logs under `docs/evidence/`.
-- [ ] Capture and publish the required demo video only after dashboard browser QA and physical-device QA pass.
-- [ ] After the hackathon, set `USAGEWIDGET_DEMO_ENABLED=false`, disable the Cloudflare demo hostname/Tunnel/Access policy, and remove temporary demo-only surfaces as planned.
+- [ ] Update `release-manifest.json` only after verifying the pinned CodexBar
+  assets and SHA-256 values for both supported architectures.
+- [ ] Run the full verification commands documented in `README.md`, including
+  `./demo.sh matrix`, on a clean checkout.
+- [ ] Create a `v*` tag, verify the GitHub Actions release workflow, and inspect
+  both amd64 and arm64 archives plus their checksum files before announcing the
+  release.

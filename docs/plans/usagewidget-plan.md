@@ -1,5 +1,12 @@
 # UsageWidget Implementation Plan
 
+> **Status:** Historical implementation plan. The shipped implementation has
+> evolved beyond this document, including iOS 26 support, the isolated Unix
+> socket collector, setup-QR onboarding, readiness diagnostics, hierarchical
+> alert rules, and usage forecasts. Use the top-level `README.md` and
+> `server/deploy/README.md` for current behavior and operations; keep this file
+> as implementation provenance.
+
 ## Global Constraints
 
 - Repo layout: `server/` (Go module `usagewidget/server`), `ios/` (XcodeGen project `UsageWidget`).
@@ -128,7 +135,7 @@ Commit when green.
 - `server/deploy/usagewidget.service` — systemd unit (After=network, Environment file `/etc/usagewidget/env`, ExecStart, Restart=on-failure, DynamicUser or dedicated user).
 - `server/deploy/README.md` — build (`GOOS=linux GOARCH=amd64 go build`), install steps, Tailscale Serve command (`tailscale serve --bg --set-path /usagewidget http://127.0.0.1:8377` or https proxy), env file template (token, APNs vars).
 - Top-level `README.md` — project overview, both components, setup.
-- `HUMANS.md` — checklist of human-only steps (Apple Developer APNs key creation, provisioning, deploy to edserve, Tailscale serve enable).
+- `HUMANS.md` — checklist of human-only steps (Apple Developer APNs key creation, provisioning, server deployment, Tailscale Serve enablement).
 
 No tests. Commit.
 
@@ -168,7 +175,7 @@ In `ios/Sources/Widget/`:
 
 - `UsageWidgetBundle.swift`, `ProviderWidget.swift`: systemLarge widget.
 - TimelineProvider: on timeline request, attempt live `APIClient.fetchSnapshot()` (short timeout) — on success cache to SnapshotStore; on failure render cached snapshot marked with its age. Entry refresh policy `.after(now + pollInterval)`.
-- iOS 27 WidgetKit push: adopt the WidgetKit push-token API so edServe pushes trigger reloads; token surfaced to app via App Group for upload (and/or `WidgetPushHandler` per iOS 27 API — implementer verifies exact API via Apple docs and uses it).
+- iOS 27 WidgetKit push: adopt the WidgetKit push-token API so server pushes trigger reloads; token surfaced to app via App Group for upload (and/or `WidgetPushHandler` per iOS 27 API — implementer verifies exact API via Apple docs and uses it).
 - View: up to 4 provider rows (visible providers in user order), each row: provider name, primary progress bar, secondary progress bar if present, remaining % of primary, nearest resetsAt (relative). If more visible providers than fit: last row shows "+N more". Footer: data age ("Updated 3m ago"), stale indicator.
 - Accessibility: rows have sensible labels; supports dynamic type without truncating critical numbers (test smallest reasonable sizes).
 - Build must pass for widget target.

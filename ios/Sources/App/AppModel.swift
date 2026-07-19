@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import WidgetKit
+import UserNotifications
 
 @MainActor
 @Observable
@@ -15,6 +16,7 @@ final class AppModel {
     var errorMessage: String?
     var statusMessage: String?
     var notificationStatus: String = "unknown"
+    var readiness: Readiness?
 
     private let keychain: KeychainStore
     private let store: SnapshotStore
@@ -129,6 +131,39 @@ final class AppModel {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    func saveSettings(_ draft: ServerSettings) async throws {
+        let updated = try await client().updateSettings(draft)
+        settings = updated
+        preferences = DisplayPreferences(providerOrder: updated.providerOrder, hiddenProviders: updated.hiddenProviders)
+        try store.savePreferences(preferences)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    func refreshReadiness() async {
+        do {
+            readiness = try await client().fetchReadiness(deviceID: store.deviceID())
+            let local = await UNUserNotificationCenter.current().notificationSettings()
+            switch local.authorizationStatus {
+            case .authorized: notificationStatus = "authorized"
+            case .provisional: notificationStatus = "provisional"
+            case .ephemeral: notificationStatus = "ephemeral"
+            case .denied: notificationStatus = "denied"
+            case .notDetermined: notificationStatus = "not determined"
+            @unknown default: notificationStatus = "unknown"
+            }
+            errorMessage = nil
+        } catch { errorMessage = String(describing: error) }
+    }
+
+    func runReadinessTest() async {
+        isTestingAction = true; defer { isTestingAction = false }
+        do {
+            let result = try await client().testReadiness(deviceID: store.deviceID())
+            statusMessage = result.alertAccepted ? "APNs accepted the device test" : "The device test was not accepted"
+            await refreshReadiness()
+        } catch { errorMessage = String(describing: error) }
     }
 
     func moveProvider(from source: IndexSet, to destination: Int) {

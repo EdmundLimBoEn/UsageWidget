@@ -33,8 +33,11 @@ func (c Config) APNsEnabled() bool {
 
 func LoadConfig() (Config, error) {
 	token := os.Getenv("USAGEWIDGET_TOKEN")
-	if token == "" {
-		return Config{}, fmt.Errorf("USAGEWIDGET_TOKEN is required")
+	if len(token) < 32 {
+		return Config{}, fmt.Errorf("USAGEWIDGET_TOKEN must be at least 32 characters")
+	}
+	if token != strings.TrimSpace(token) {
+		return Config{}, fmt.Errorf("USAGEWIDGET_TOKEN must not have surrounding whitespace")
 	}
 
 	deviceIDs, err := parseDemoDeviceIDs(os.Getenv("DEMO_DEVICE_IDS"))
@@ -68,7 +71,7 @@ func LoadConfig() (Config, error) {
 		CodexBarCmd:          os.Getenv("CODEXBAR_CMD"),
 		CollectorSocket:      envOr("COLLECTOR_SOCKET", "/run/usagewidget/codexbar.sock"),
 		DBPath:               envOr("DB_PATH", "./usagewidget.db"),
-		ListenAddr:           envOr("LISTEN_ADDR", ":8377"),
+		ListenAddr:           envOr("LISTEN_ADDR", "127.0.0.1:8377"),
 		DemoEnabled:          demoEnabled,
 		DemoListenAddr:       demoListenAddr,
 		DemoDeviceIDs:        deviceIDs,

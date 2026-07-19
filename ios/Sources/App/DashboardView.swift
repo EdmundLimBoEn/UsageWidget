@@ -130,7 +130,11 @@ struct ProviderCapacityCard: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider.name)
                         .font(.headline)
-                    if let error = provider.error, !error.isEmpty {
+                    if provider.stale && !provider.windows.isEmpty {
+                        Text("Showing last known usage")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if let error = provider.error, !error.isEmpty {
                         Text("Source needs attention")
                             .font(.caption)
                             .foregroundStyle(.red)
@@ -153,7 +157,8 @@ struct ProviderCapacityCard: View {
                 }
             }
 
-            if let error = provider.error, !error.isEmpty {
+            if let error = provider.error, !error.isEmpty,
+               !provider.stale || provider.windows.isEmpty {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.subheadline)
                     .foregroundStyle(.red)
@@ -203,6 +208,12 @@ struct CapacityWindowRow: View {
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
+            if let forecast = ForecastText.string(for: window) {
+                Label(forecast, systemImage: window.forecast?.exhaustsBeforeReset == true ? "hourglass.bottomhalf.filled" : "checkmark.circle")
+                    .font(.caption2)
+                    .foregroundStyle(window.forecast?.exhaustsBeforeReset == true ? .orange : .green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
@@ -214,7 +225,7 @@ struct CapacityWindowRow: View {
     }
 
     private var accessibilityText: String {
-        "\(window.title), \(Int(window.remainingPercent)) percent remaining, \(resetText)"
+        ["\(window.title), \(Int(window.remainingPercent)) percent remaining", resetText, ForecastText.string(for: window)].compactMap { $0 }.joined(separator: ", ")
     }
 }
 

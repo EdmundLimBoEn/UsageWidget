@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-}" in
+  status)
+    if [[ ${2:-} == --json ]]; then
+      printf '{"BackendState":"Running","Self":{"DNSName":"usagewidget-demo.example.ts.net."}}\n'
+    else
+      echo "100.64.0.1 usagewidget-demo"
+    fi
+    ;;
+  serve)
+    printf '%s\n' "$*" >/tmp/usagewidget-demo-tailscale-serve.log
+    ;;
+  *)
+    echo "unsupported mock Tailscale command: $*" >&2
+    exit 64
+    ;;
+esac

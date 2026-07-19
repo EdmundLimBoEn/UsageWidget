@@ -18,6 +18,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var error: String?
+    public var stale: Bool
     public var windows: [UsageWindow]
     public var credits: Credits?
     public var raw: Data?
@@ -26,6 +27,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
         id: String,
         name: String,
         error: String? = nil,
+        stale: Bool = false,
         windows: [UsageWindow] = [],
         credits: Credits? = nil,
         raw: Data? = nil
@@ -33,13 +35,14 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
         self.id = id
         self.name = name
         self.error = error
+        self.stale = stale
         self.windows = windows
         self.credits = credits
         self.raw = raw
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, error, windows, credits, raw
+        case id, name, error, stale, windows, credits, raw
     }
 
     public init(from decoder: Decoder) throws {
@@ -47,6 +50,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
         id = try c.decode(String.self, forKey: .id)
         name = try c.decode(String.self, forKey: .name)
         error = try c.decodeIfPresent(String.self, forKey: .error)
+        stale = try c.decodeIfPresent(Bool.self, forKey: .stale) ?? false
         windows = try c.decodeIfPresent([UsageWindow].self, forKey: .windows) ?? []
         credits = try c.decodeIfPresent(Credits.self, forKey: .credits)
         if let rawMessage = try? c.decodeIfPresent(Data.self, forKey: .raw) {
@@ -66,6 +70,7 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
     public var usedPercent: Double
     public var remainingPercent: Double
     public var resetsAt: Date?
+    public var forecast: WindowForecast?
 
     public init(
         id: String,
@@ -73,7 +78,8 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
         title: String,
         usedPercent: Double,
         remainingPercent: Double,
-        resetsAt: Date? = nil
+        resetsAt: Date? = nil,
+        forecast: WindowForecast? = nil
     ) {
         self.id = id
         self.key = key
@@ -81,7 +87,17 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
         self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
         self.resetsAt = resetsAt
+        self.forecast = forecast
     }
+}
+
+public struct WindowForecast: Codable, Equatable, Sendable {
+    public var computedAt: Date
+    public var burnRatePercentPerHour: Double
+    public var estimatedExhaustionAt: Date
+    public var exhaustsBeforeReset: Bool
+    public var sampleCount: Int
+    public var basedOnHours: Double
 }
 
 public struct Credits: Codable, Equatable, Sendable {
@@ -102,6 +118,8 @@ public struct Health: Codable, Equatable, Sendable {
     public var lastSuccessAt: Date?
     public var collector: CollectorHealth?
     public var widgetDelivery: WidgetDeliveryHealth?
+    public var version: String?
+    public var schemaVersion: Int?
 
     public init(
         service: String,
@@ -112,7 +130,9 @@ public struct Health: Codable, Equatable, Sendable {
         lastPollAt: Date? = nil,
         lastSuccessAt: Date? = nil,
         collector: CollectorHealth? = nil,
-        widgetDelivery: WidgetDeliveryHealth? = nil
+        widgetDelivery: WidgetDeliveryHealth? = nil,
+        version: String? = nil,
+        schemaVersion: Int? = nil
     ) {
         self.service = service
         self.codexbar = codexbar
@@ -123,6 +143,8 @@ public struct Health: Codable, Equatable, Sendable {
         self.lastSuccessAt = lastSuccessAt
         self.collector = collector
         self.widgetDelivery = widgetDelivery
+        self.version = version
+        self.schemaVersion = schemaVersion
     }
 }
 
@@ -162,6 +184,9 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public var notificationsEnabled: Bool
     public var earlyThresholdPct: Double
     public var dangerThresholdPct: Double
+    public var defaultRepeatIntervalMinutes: Int
+    public var quietHours: QuietHours
+    public var alertOverrides: [AlertOverride]
 
     public init(
         pollIntervalMinutes: Int = 5,
@@ -170,7 +195,10 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         demoProviderEnabled: Bool = false,
         notificationsEnabled: Bool = true,
         earlyThresholdPct: Double = 10,
-        dangerThresholdPct: Double = 10
+        dangerThresholdPct: Double = 10,
+        defaultRepeatIntervalMinutes: Int = 0,
+        quietHours: QuietHours = QuietHours(),
+        alertOverrides: [AlertOverride] = []
     ) {
         self.pollIntervalMinutes = pollIntervalMinutes
         self.providerOrder = providerOrder
@@ -179,7 +207,125 @@ public struct ServerSettings: Codable, Equatable, Sendable {
         self.notificationsEnabled = notificationsEnabled
         self.earlyThresholdPct = earlyThresholdPct
         self.dangerThresholdPct = dangerThresholdPct
+        self.defaultRepeatIntervalMinutes = defaultRepeatIntervalMinutes
+        self.quietHours = quietHours
+        self.alertOverrides = alertOverrides
     }
+
+    enum CodingKeys: String, CodingKey {
+        case pollIntervalMinutes, providerOrder, hiddenProviders, demoProviderEnabled
+        case notificationsEnabled, earlyThresholdPct, dangerThresholdPct
+        case defaultRepeatIntervalMinutes, quietHours, alertOverrides
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pollIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .pollIntervalMinutes) ?? 5
+        providerOrder = try c.decodeIfPresent([String].self, forKey: .providerOrder) ?? ["codex", "claude", "grok"]
+        hiddenProviders = try c.decodeIfPresent([String].self, forKey: .hiddenProviders) ?? []
+        demoProviderEnabled = try c.decodeIfPresent(Bool.self, forKey: .demoProviderEnabled) ?? false
+        notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
+        earlyThresholdPct = try c.decodeIfPresent(Double.self, forKey: .earlyThresholdPct) ?? 10
+        dangerThresholdPct = try c.decodeIfPresent(Double.self, forKey: .dangerThresholdPct) ?? 10
+        defaultRepeatIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .defaultRepeatIntervalMinutes) ?? 0
+        quietHours = try c.decodeIfPresent(QuietHours.self, forKey: .quietHours) ?? QuietHours()
+        alertOverrides = try c.decodeIfPresent([AlertOverride].self, forKey: .alertOverrides) ?? []
+    }
+}
+
+public struct AlertRule: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var earlyThresholdPct: Double
+    public var dangerThresholdPct: Double
+    public var repeatIntervalMinutes: Int
+
+    public init(enabled: Bool = true, earlyThresholdPct: Double = 10, dangerThresholdPct: Double = 10, repeatIntervalMinutes: Int = 0) {
+        self.enabled = enabled; self.earlyThresholdPct = earlyThresholdPct
+        self.dangerThresholdPct = dangerThresholdPct; self.repeatIntervalMinutes = repeatIntervalMinutes
+    }
+}
+
+public struct QuietHours: Codable, Equatable, Sendable {
+    public var enabled: Bool
+    public var startMinute: Int
+    public var endMinute: Int
+    public var timeZone: String
+
+    public init(enabled: Bool = false, startMinute: Int = 1320, endMinute: Int = 420, timeZone: String = "UTC") {
+        self.enabled = enabled; self.startMinute = startMinute; self.endMinute = endMinute; self.timeZone = timeZone
+    }
+}
+
+public struct AlertOverride: Codable, Equatable, Sendable, Identifiable {
+    public var providerID: String
+    public var windowID: String?
+    public var rule: AlertRule
+    public var id: String { providerID + "\u{0}" + (windowID ?? "") }
+}
+
+public extension ServerSettings {
+    var globalAlertRule: AlertRule {
+        get { AlertRule(enabled: notificationsEnabled, earlyThresholdPct: earlyThresholdPct, dangerThresholdPct: dangerThresholdPct, repeatIntervalMinutes: defaultRepeatIntervalMinutes) }
+        set {
+            notificationsEnabled = newValue.enabled; earlyThresholdPct = newValue.earlyThresholdPct
+            dangerThresholdPct = newValue.dangerThresholdPct; defaultRepeatIntervalMinutes = newValue.repeatIntervalMinutes
+        }
+    }
+
+    func effectiveRule(providerID: String, windowID: String? = nil) -> AlertRule {
+        var result = globalAlertRule
+        if let provider = alertOverrides.first(where: { $0.providerID == providerID && $0.windowID == nil }) { result = provider.rule }
+        if let windowID, let window = alertOverrides.first(where: { $0.providerID == providerID && $0.windowID == windowID }) { result = window.rule }
+        return result
+    }
+}
+
+public struct ReadinessCheck: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var title: String
+    public var status: String
+    public var detail: String
+    public var core: Bool
+}
+
+public struct ReadinessTestResult: Codable, Equatable, Sendable {
+    public var attemptedAt: Date
+    public var alertAttempted: Bool
+    public var alertAccepted: Bool
+    public var widgetAttempted: Bool
+    public var widgetAccepted: Bool
+    public var acceptanceNote: String
+}
+
+public struct Readiness: Codable, Equatable, Sendable {
+    public var ready: Bool
+    public var checkedAt: Date
+    public var checks: [ReadinessCheck]
+    public var latestTest: ReadinessTestResult?
+}
+
+public struct QRConfiguration: Equatable, Sendable {
+    public var serverURL: String
+    public var token: String
+
+    public static func parse(_ payload: String) throws -> QRConfiguration {
+        guard let components = URLComponents(string: payload),
+              components.scheme == "usagewidget", components.host == "configure",
+              components.path.isEmpty else { throw QRConfigurationError.invalidAction }
+        let items = components.queryItems ?? []
+        guard items.count == 3, Set(items.map(\.name)) == Set(["v", "server", "token"]),
+              items.filter({ $0.name == "v" }).count == 1,
+              items.first(where: { $0.name == "v" })?.value == "1" else { throw QRConfigurationError.invalidVersion }
+        guard let server = items.first(where: { $0.name == "server" })?.value,
+              let url = URL(string: server), url.scheme == "https", url.host != nil else { throw QRConfigurationError.insecureServer }
+        guard let token = items.first(where: { $0.name == "token" })?.value,
+              token.count >= 32, token == token.trimmingCharacters(in: .whitespacesAndNewlines) else { throw QRConfigurationError.invalidToken }
+        return QRConfiguration(serverURL: server, token: token)
+    }
+}
+
+public enum QRConfigurationError: Error, Equatable {
+    case invalidAction, invalidVersion, insecureServer, invalidToken
 }
 
 public struct DeviceRegistration: Codable, Equatable, Sendable {
@@ -317,6 +463,16 @@ public enum RelativeTime {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
         return f.localizedString(for: date, relativeTo: now)
+    }
+}
+
+public enum ForecastText {
+    public static func string(for window: UsageWindow, now: Date = Date()) -> String? {
+        guard let forecast = window.forecast else { return nil }
+        if forecast.exhaustsBeforeReset {
+            return "Likely out \(RelativeTime.string(for: forecast.estimatedExhaustionAt, relativeTo: now))"
+        }
+        return "On track until reset"
     }
 }
 

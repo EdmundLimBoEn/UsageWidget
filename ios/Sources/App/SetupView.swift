@@ -1,4 +1,5 @@
 import SwiftUI
+import VisionKit
 
 struct SetupView: View {
     @Environment(AppModel.self) private var model
@@ -7,11 +8,14 @@ struct SetupView: View {
     @State private var isTesting = false
     @State private var statusText: String?
     @State private var statusOK = false
+    @State private var showScanner = false
+    @State private var pendingQR: QRConfiguration?
+    @State private var showQRConfirmation = false
 
     var body: some View {
         Form {
             Section {
-                TextField("https://edserve.ts.net/usagewidget", text: $serverURL)
+                TextField("https://your-host.your-tailnet.ts.net/usagewidget", text: $serverURL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
@@ -19,12 +23,20 @@ struct SetupView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             } header: {
-                Text("edServe connection")
+                Text("Server connection")
             } footer: {
                 Text("Use the Tailscale HTTPS URL and the USAGEWIDGET_TOKEN from the server env file. CodexBar credentials never leave the Linux host.")
             }
 
             Section {
+                Button {
+                    if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                        showScanner = true
+                    } else {
+                        statusOK = false; statusText = "QR scanning is unavailable. Check camera permission or use manual entry."
+                    }
+                } label: { Label("Scan installer QR", systemImage: "qrcode.viewfinder") }
+
                 Button {
                     Task { await testAndSave() }
                 } label: {
@@ -48,6 +60,30 @@ struct SetupView: View {
                 serverURL = creds.serverURL
                 token = creds.token
             }
+        }
+        .fullScreenCover(isPresented: $showScanner) {
+            NavigationStack {
+                QRScannerView { payload in
+                    showScanner = false
+                    do {
+                        pendingQR = try QRConfiguration.parse(payload)
+                        showQRConfirmation = true
+                    } catch {
+                        statusOK = false; statusText = "Invalid UsageWidget QR code."
+                    }
+                }
+                .ignoresSafeArea()
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showScanner = false } } }
+            }
+        }
+        .alert("Connect to this server?", isPresented: $showQRConfirmation, presenting: pendingQR) { configuration in
+            Button("Cancel", role: .cancel) { pendingQR = nil }
+            Button("Test & Save") {
+                serverURL = configuration.serverURL; token = configuration.token
+                Task { await testAndSave() }
+            }
+        } message: { configuration in
+            Text(URL(string: configuration.serverURL)?.host ?? configuration.serverURL)
         }
     }
 

@@ -12,6 +12,7 @@ Restart=on-failure
 RestartSec=5
 User=usagewidget
 Group=usagewidget
+UMask=0077
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

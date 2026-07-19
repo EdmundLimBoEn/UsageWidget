@@ -60,7 +60,8 @@ public final class KeychainStore: @unchecked Sendable {
         var query = baseQuery(account: account)
         SecItemDelete(query as CFDictionary)
         query[kSecValueData as String] = data
-        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        query[kSecAttrSynchronizable as String] = false
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)

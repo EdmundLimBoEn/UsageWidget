@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# usagewidget — Mac-side CLI for the UsageWidget companion API + edServe deploy.
+# usagewidget — client and deployment helper for the UsageWidget companion API.
 set -euo pipefail
 
 CONFIG_DIR="${USAGEWIDGET_CONFIG_DIR:-$HOME/.config/usagewidget}"
 CONFIG_FILE="${USAGEWIDGET_CONFIG:-$CONFIG_DIR/env}"
 SERVER_ENV="${USAGEWIDGET_SERVER_ENV:-/etc/usagewidget/env}"
-DEFAULT_URL="https://edserve.tail125275.ts.net/usagewidget"
+DEFAULT_URL=""
 DEFAULT_LOCAL_URL="http://127.0.0.1:8377"
-DEFAULT_HOST="root@100.83.252.53"
-DEFAULT_REPO="${USAGEWIDGET_REPO:-$HOME/Documents/apps/claude/UsageWidget}"
+DEFAULT_HOST=""
+DEFAULT_REPO=""
 
 die() { echo "usagewidget: $*" >&2; exit 1; }
 
@@ -21,7 +21,7 @@ load_config() {
     source "$CONFIG_FILE"
     set +a
   elif [[ -r "$SERVER_ENV" ]]; then
-    # On edServe, talk directly to the local daemon and reuse its service env.
+    # On the server, talk directly to the local daemon and reuse its service env.
     set -a
     # shellcheck disable=SC1090
     source "$SERVER_ENV"
@@ -37,7 +37,13 @@ load_config() {
 
 require_token() {
   load_config
-  [[ -n "${USAGEWIDGET_TOKEN:-}" ]] || die "USAGEWIDGET_TOKEN not set. Run: usagewidget env sync"
+  local token="${USAGEWIDGET_TOKEN:-}"
+  [[ ${#token} -ge 32 ]] || die "USAGEWIDGET_TOKEN must be at least 32 characters"
+  [[ -n "${USAGEWIDGET_URL:-}" ]] || die "USAGEWIDGET_URL is not set"
+}
+
+require_host() {
+  [[ -n "${USAGEWIDGET_DEPLOY_HOST:-}" ]] || die "USAGEWIDGET_DEPLOY_HOST is not set"
 }
 
 api() {
@@ -67,18 +73,18 @@ api() {
 
 cmd_help() {
   cat <<'EOF'
-usagewidget — talk to usagewidgetd / deploy to edServe
+usagewidget — talk to usagewidgetd or deploy it to your server
 
 Config:  ~/.config/usagewidget/env  (mode 600, never commit)
-         /etc/usagewidget/env on edServe
-  USAGEWIDGET_URL            default https://edserve.tail125275.ts.net/usagewidget
-  USAGEWIDGET_TOKEN          bearer token (synced from edServe)
-  USAGEWIDGET_DEPLOY_HOST    default root@100.83.252.53
+         /etc/usagewidget/env on the server
+  USAGEWIDGET_URL            required API base URL (local service auto-detected)
+  USAGEWIDGET_TOKEN          bearer token (minimum 32 characters)
+  USAGEWIDGET_DEPLOY_HOST    required SSH destination for remote commands
   USAGEWIDGET_REPO           local repo path
 
 Commands:
   env [show]       Show config (token redacted)
-  env sync         Pull token + write Mac env from edServe
+  env sync         Pull token + write local config from the server
   env path         Print config file path
   health           GET /v1/health
   snapshot         GET /v1/snapshot
@@ -89,9 +95,9 @@ Commands:
   demo-provider on Enable it and poll immediately
   demo-provider off Disable it and poll immediately
   demo-provider poll  Poll with the current setting
-  deploy           Cross-compile + install + restart on edServe
-  logs [-f]        journalctl -u usagewidget on edServe
-  status           systemd status on edServe
+  deploy           Cross-compile + install + restart on the server
+  logs [-f]        journalctl -u usagewidget on the server
+  status           systemd status on the server
   ssh [cmd...]     ssh to deploy host (default: interactive shell)
   help             This help
 
@@ -121,7 +127,7 @@ cmd_env_show() {
   echo "repo:    ${USAGEWIDGET_REPO}"
   if [[ -n "${USAGEWIDGET_TOKEN:-}" ]]; then
     local n="${#USAGEWIDGET_TOKEN}"
-    echo "token:   ${USAGEWIDGET_TOKEN:0:4}…${USAGEWIDGET_TOKEN: -4} ($n chars)"
+    echo "token:   (set; $n chars)"
   else
     echo "token:   (unset)"
   fi
@@ -139,6 +145,8 @@ cmd_env_sync() {
     set -a; source "$CONFIG_FILE"; set +a
     host="${USAGEWIDGET_DEPLOY_HOST:-$host}"
   fi
+  [[ -n "$host" ]] || die "USAGEWIDGET_DEPLOY_HOST is not set"
+  [[ -n "${USAGEWIDGET_URL:-$DEFAULT_URL}" ]] || die "USAGEWIDGET_URL is not set"
   echo "Syncing token from ${host}…"
   local token
   token="$(ssh -o BatchMode=yes "$host" 'grep ^USAGEWIDGET_TOKEN= /etc/usagewidget/env | cut -d= -f2-')" \
@@ -148,14 +156,14 @@ cmd_env_sync() {
 
   mkdir -p "$CONFIG_DIR"
   umask 077
-  cat >"$CONFIG_FILE" <<EOF
-# UsageWidget Mac client config — do not commit
-# Managed by: usagewidget env sync
-USAGEWIDGET_URL=${USAGEWIDGET_URL:-$DEFAULT_URL}
-USAGEWIDGET_TOKEN=${token}
-USAGEWIDGET_DEPLOY_HOST=${host}
-USAGEWIDGET_REPO=${USAGEWIDGET_REPO:-$DEFAULT_REPO}
-EOF
+  {
+    echo "# UsageWidget client config — do not commit"
+    echo "# Managed by: usagewidget env sync"
+    printf 'USAGEWIDGET_URL=%q\n' "${USAGEWIDGET_URL:-$DEFAULT_URL}"
+    printf 'USAGEWIDGET_TOKEN=%q\n' "$token"
+    printf 'USAGEWIDGET_DEPLOY_HOST=%q\n' "$host"
+    printf 'USAGEWIDGET_REPO=%q\n' "${USAGEWIDGET_REPO:-$DEFAULT_REPO}"
+  } >"$CONFIG_FILE"
   chmod 600 "$CONFIG_FILE"
   echo "Wrote $CONFIG_FILE (mode 600)"
   cmd_env_show
@@ -163,6 +171,8 @@ EOF
 
 cmd_deploy() {
   load_config
+  require_host
+  [[ -n "${USAGEWIDGET_REPO:-}" ]] || die "USAGEWIDGET_REPO is not set"
   local repo="${USAGEWIDGET_REPO}"
   local script="$repo/server/deploy/redeploy.sh"
   [[ -x "$script" || -f "$script" ]] || die "redeploy script missing: $script"
@@ -171,6 +181,7 @@ cmd_deploy() {
 
 cmd_logs() {
   load_config
+  require_host
   local extra=(-n 50 --no-pager)
   if [[ "${1:-}" == "-f" || "${1:-}" == "--follow" ]]; then
     extra=(-f)
@@ -180,6 +191,7 @@ cmd_logs() {
 
 cmd_status() {
   load_config
+  require_host
   ssh -o BatchMode=yes "${USAGEWIDGET_DEPLOY_HOST}" "systemctl status usagewidget --no-pager | head -30"
 }
 
@@ -202,6 +214,7 @@ cmd_demo_provider() {
 
 cmd_ssh() {
   load_config
+  require_host
   if [[ $# -eq 0 ]]; then
     ssh "${USAGEWIDGET_DEPLOY_HOST}"
   else

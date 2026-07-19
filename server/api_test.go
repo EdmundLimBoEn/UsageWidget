@@ -215,6 +215,33 @@ func TestPutSettingsRejectsBadThreshold(t *testing.T) {
 	}
 }
 
+func TestPutSettingsPersistsAndValidatesAlertPolicy(t *testing.T) {
+	api, _ := newTestAPI(t)
+	body := []byte(`{"defaultRepeatIntervalMinutes":180,"quietHours":{"enabled":true,"startMinute":1320,"endMinute":420,"timeZone":"Asia/Singapore"},"alertOverrides":[{"providerID":"codex","rule":{"enabled":true,"earlyThresholdPct":25,"dangerThresholdPct":12,"repeatIntervalMinutes":60}},{"providerID":"codex","windowID":"codex.primary","rule":{"enabled":false,"earlyThresholdPct":30,"dangerThresholdPct":5,"repeatIntervalMinutes":0}}]}`)
+	rec := doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got Settings
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.DefaultRepeatIntervalMinutes != 180 || !got.QuietHours.Enabled || len(got.AlertOverrides) != 2 {
+		t.Fatalf("settings=%+v", got)
+	}
+	if got.EffectiveRule("codex", "codex.primary").Enabled {
+		t.Fatal("exact window override not effective")
+	}
+	bad := doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", []byte(`{"quietHours":{"enabled":true,"startMinute":60,"endMinute":60,"timeZone":"UTC"}}`))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("equal quiet hours status=%d", bad.Code)
+	}
+	bad = doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", []byte(`{"defaultRepeatIntervalMinutes":30}`))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("repeat status=%d", bad.Code)
+	}
+}
+
 func TestDeviceUpsertRotationAndDelete(t *testing.T) {
 	api, store := newTestAPI(t)
 
@@ -295,6 +322,19 @@ func TestDevicePostRequiresDeviceID(t *testing.T) {
 	}
 }
 
+func TestAPIRejectsUnknownAndOversizedJSON(t *testing.T) {
+	api, _ := newTestAPI(t)
+	unknown := doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", []byte(`{"unexpected":true}`))
+	if unknown.Code != http.StatusBadRequest {
+		t.Fatalf("expected unknown field rejection, got %d", unknown.Code)
+	}
+	oversized := []byte(`{"deviceID":"` + strings.Repeat("a", 17<<10) + `"}`)
+	rec := doRequest(t, api, http.MethodPost, "/v1/devices", "secret-token", oversized)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected oversized body rejection, got %d", rec.Code)
+	}
+}
+
 func TestHealthIsPassiveAndReportsLastPollOutcome(t *testing.T) {
 	requests := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -372,6 +412,49 @@ func (r *recordingNotifier) SendAlert(_ context.Context, _ string, ev Event) err
 func (r *recordingNotifier) SendWidgetRefresh(_ context.Context, _ string) error {
 	r.widgets++
 	return nil
+}
+
+func TestReadinessTestTargetsDevicePersistsAndRateLimits(t *testing.T) {
+	store := openTestStore(t)
+	cfg := Config{Token: "secret-token", CodexBarURL: "http://127.0.0.1:0", APNsKeyPath: "key", APNsKeyID: "kid", APNsTeamID: "team", APNsBundleID: "app"}
+	api := NewAPI(cfg, store, NewCodexBarClient(cfg.CodexBarURL))
+	notifier := &recordingNotifier{}
+	api.SetNotifier(notifier)
+	if err := store.UpsertDevice("phone-a", "alert-a", "widget-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDevice("phone-b", "alert-b", "widget-b"); err != nil {
+		t.Fatal(err)
+	}
+	rec := doRequest(t, api, http.MethodPost, "/v1/readiness/phone-a/test", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("test status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(notifier.alerts) != 1 || notifier.widgets != 1 {
+		t.Fatalf("delivery alerts=%d widgets=%d", len(notifier.alerts), notifier.widgets)
+	}
+	var result ReadinessTestResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.AlertAccepted || !result.WidgetAccepted {
+		t.Fatalf("result=%+v", result)
+	}
+	stored, ok, err := store.LatestDeviceTestResult("phone-a")
+	if err != nil || !ok || !stored.AlertAccepted {
+		t.Fatalf("stored=%+v ok=%v err=%v", stored, ok, err)
+	}
+	rec = doRequest(t, api, http.MethodPost, "/v1/readiness/phone-a/test", "secret-token", nil)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status=%d", rec.Code)
+	}
+	rec = doRequest(t, api, http.MethodGet, "/v1/readiness/phone-a", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status=%d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "alert-a") || strings.Contains(rec.Body.String(), "widget-a") {
+		t.Fatalf("readiness leaked token: %s", rec.Body.String())
+	}
 }
 
 func TestForcePollRequiresAuth(t *testing.T) {

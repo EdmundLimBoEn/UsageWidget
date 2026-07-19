@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+case "${1:-usage}" in
+  config)
+    [[ ${2:-} == validate ]] || { echo "unsupported mock config command" >&2; exit 64; }
+    printf '{"valid":true}\n'
+    ;;
+  usage)
+    primary_reset="$(date -u -d '+5 hours' +%Y-%m-%dT%H:%M:%SZ)"
+    weekly_reset="$(date -u -d '+5 days' +%Y-%m-%dT%H:%M:%SZ)"
+    printf '[{"provider":"codex","name":"Codex","usage":{"primary":{"title":"5h limit","usedPercent":42,"windowMinutes":300,"resetsAt":"%s"},"secondary":{"title":"Weekly","usedPercent":18,"windowMinutes":10080,"resetsAt":"%s"}},"credits":{"availableCount":2}}]\n' "$primary_reset" "$weekly_reset"
+    ;;
+  --version|-V)
+    echo "CodexBarCLI demo-mock"
+    ;;
+  *)
+    echo "unsupported mock CodexBar command: $*" >&2
+    exit 64
+    ;;
+esac

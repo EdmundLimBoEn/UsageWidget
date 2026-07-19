@@ -143,6 +143,37 @@ func TestPollerStaleFallback(t *testing.T) {
 	}
 }
 
+func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
+	poller, store, _ := newPollerHarness(t)
+	responses := []string{
+		`[{"provider":"claude","usage":{"primary":{"usedPercent":25,"windowMinutes":300}}},{"provider":"codex","usage":{"primary":{"usedPercent":10,"windowMinutes":300}}}]`,
+		`[{"provider":"claude","error":{"message":"Could not parse claude usage: claude cli usage endpoint is rate limited right now. Please try again later."}},{"provider":"codex","usage":{"primary":{"usedPercent":20,"windowMinutes":300}}}]`,
+	}
+	request := 0
+	poller.codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		body := responses[request]
+		request++
+		return testHTTPResponse(http.StatusOK, body), nil
+	})}
+
+	if result := poller.PollNow(context.Background()); !result.Success {
+		t.Fatalf("first poll failed: %+v", result)
+	}
+	if result := poller.PollNow(context.Background()); !result.Success {
+		t.Fatalf("partial poll failed: %+v", result)
+	}
+
+	snap := latestSnap(t, store)
+	claude := snap.Providers[0]
+	if !claude.Stale || claude.Error != "" || len(claude.Windows) != 1 || claude.Windows[0].UsedPercent != 25 {
+		t.Fatalf("Claude last-known usage was not preserved: %+v", claude)
+	}
+	codex := snap.Providers[1]
+	if codex.Stale || len(codex.Windows) != 1 || codex.Windows[0].UsedPercent != 20 {
+		t.Fatalf("fresh Codex usage was not saved: %+v", codex)
+	}
+}
+
 func TestPollDemoNowRevisionConflict(t *testing.T) {
 	poller, store, _ := newPollerHarness(t)
 	state, err := store.LoadDemoState()
@@ -457,17 +488,6 @@ func TestPollerDemoFailuresKeepLastSnapshot(t *testing.T) {
 			},
 			failed: "demo_state",
 		},
-		{
-			name: "normalize",
-			breakInput: func(t *testing.T, _ *Store, _ *atomic.Bool, client **CodexBarClient) {
-				broken := NewCodexBarClient("http://codexbar.test")
-				broken.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-					return testHTTPResponse(http.StatusOK, `{"providers":[{"name":"missing id"}]}`), nil
-				})}
-				*client = broken
-			},
-			failed: "normalize",
-		},
 	}
 
 	for _, tt := range tests {
@@ -501,6 +521,51 @@ func TestPollerDemoFailuresKeepLastSnapshot(t *testing.T) {
 			}
 			if len(feed) == 0 || feed[0].Type != "pipeline_error" {
 				t.Fatalf("pipeline failure was not persisted: %+v", feed)
+			}
+		})
+	}
+}
+
+func TestPollerDemoUsesCachedProvidersWhenUpstreamUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "fetch failure", body: "boom"},
+		{name: "invalid payload", body: `{"providers":[{"name":"missing id"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			poller, store, healthy := newPollerHarness(t)
+			if got := poller.PollNow(context.Background()); !got.Success {
+				t.Fatalf("seed poll failed: %+v", got)
+			}
+			state, err := store.LoadDemoState()
+			if err != nil {
+				t.Fatal(err)
+			}
+			state.Primary.UsedPercent = 81
+			state.UpdatedAt = time.Now().UTC()
+			if err := store.SaveDemoState(state); err != nil {
+				t.Fatal(err)
+			}
+
+			if tc.name == "fetch failure" {
+				healthy.Store(false)
+			} else {
+				poller.codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+					return testHTTPResponse(http.StatusOK, tc.body), nil
+				})}
+			}
+			result := pollDemoForTest(t, poller)
+			if !result.Success || stageByID(t, result, "normalize").Status != DemoStageWarning {
+				t.Fatalf("fallback result=%+v", result)
+			}
+			snap := latestSnap(t, store)
+			if demoProvider(t, snap).Windows[0].UsedPercent != 81 {
+				t.Fatalf("demo state not applied: %+v", snap)
+			}
+			if len(snap.Providers) != 2 || snap.Providers[0].ID != "codex" || !snap.Providers[0].Stale {
+				t.Fatalf("cached real provider not retained as stale: %+v", snap.Providers)
 			}
 		})
 	}

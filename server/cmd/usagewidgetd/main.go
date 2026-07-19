@@ -46,7 +46,15 @@ func main() {
 	api.SetPoller(poller)
 	api.SetNotifier(notifier)
 
-	mainServer := &http.Server{Addr: cfg.ListenAddr, Handler: api.Handler()}
+	mainServer := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           api.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      95 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
 	mainListener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		log.Fatalf("listen %s: %v", cfg.ListenAddr, err)

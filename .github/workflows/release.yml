@@ -1,0 +1,59 @@
+name: Release Linux bundles
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without v prefix
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - run: go test ./...
+        working-directory: server
+      - run: bash -n server-install.sh server-setup.sh demo-reset-server.sh scripts/package-release.sh cli/usagewidget demo.sh demo/mock-codexbar demo/mock-tailscale server/deploy/redeploy.sh
+      - run: tests/installer_test.sh
+
+  bundle:
+    needs: test
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          value="${{ inputs.version }}"
+          if [[ -z "$value" ]]; then value="${GITHUB_REF_NAME#v}"; fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+      - run: sudo apt-get update && sudo apt-get install -y jq
+      - run: scripts/package-release.sh "${{ steps.version.outputs.value }}" "${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usagewidget-linux-${{ matrix.arch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+      - if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256

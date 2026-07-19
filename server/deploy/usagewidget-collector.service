@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=edmundlim
+User=usagewidget-collector
 Group=usagewidget
-Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-/etc/usagewidget/collector.env
 RuntimeDirectory=usagewidget
 RuntimeDirectoryMode=0750

@@ -1,33 +1,34 @@
-# TODOS
+# Roadmap
 
-## Release
-
-### Package a generic self-hosted installation
-
-**What:** Create a configurable install, diagnostics, update, and uninstall path for supported server hosts.
-
-**Why:** Replace personal hostnames, repository paths, signing values, and deployment assumptions so another user can run UsageWidget without guided setup.
-
-**Context:** Define supported platforms first, then document CodexBar, network, SQLite, APNs, and service prerequisites. Include health diagnostics and one external-user setup test before calling the release path supported.
-
-**Effort:** L
-**Priority:** P2
-**Depends on:** Portfolio completion
+## Pending
 
 ### Distribute the iOS client
 
-**What:** Use source builds as the interim external path, then evaluate TestFlight and App Store distribution when the release prerequisites are ready.
+**What:** Keep source builds as the current external path, then add TestFlight
+and evaluate App Store distribution.
 
-**Why:** Let users install the client without maintaining their own Xcode signing setup.
+**Why:** Let users install the client without maintaining their own Xcode
+signing setup.
 
-**Context:** The Apple Developer account already exists, so submission can happen when useful. TestFlight/App Store still require privacy disclosures, supported onboarding, backend setup, credential handling, and support expectations. App Store review does not block early source-build testing.
+**Before release:** Confirm production APNs, privacy disclosures, supported
+onboarding and backend expectations, unique bundle identifiers, screenshots,
+support contact details, and a clean-device installation test.
 
 **Effort:** L
 **Priority:** P2
-**Depends on:** Package a generic self-hosted installation
 
 ## Completed
 
-- Shared app/widget Keychain access group with one-time migration from App Group defaults.
+- Generic, rerunnable Linux installation for Ubuntu 22.04/24.04 and Debian 12
+  on amd64 and arm64.
+- Diagnostics, release updates, checksummed bundles, backup/restore, token
+  rotation, setup QR generation, and preserving or purging uninstall paths.
+- Interactive source installation, isolated distro-matrix installer demo, and
+  GitHub Actions release packaging.
+- Shared app/widget Keychain access group with one-time migration from App Group
+  defaults.
 - Raw upstream provider payloads removed from phone-facing snapshot responses.
-- CLI collector sidecar, passive collection health, bounded poll history, and widget delivery diagnostics.
+- CLI collector sidecar, passive collection health, bounded poll history, and
+  widget delivery diagnostics.
+- Per-provider/per-window alert rules, quiet hours, danger reminders, usage
+  forecasts, QR onboarding, and device-readiness tests.

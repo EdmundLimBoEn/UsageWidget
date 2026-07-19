@@ -7,8 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0752B96E005C2EB8DE39D0C5 /* ReadinessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 606B38BE571BCFE6118D7307 /* ReadinessView.swift */; };
 		2CCF22BD11B2247F766BB013 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */; };
 		30457299B15782A42898D343 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C9413AB842939E4D04BCF4CC /* Assets.xcassets */; };
+		3BD8ACC8EC60A8E3D8734284 /* AlertRulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D197429C0EF4FAD719F815C3 /* AlertRulesView.swift */; };
 		40200372AB308C2FF15A607F /* ProviderWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C97EFEE957482B45488865 /* ProviderWidget.swift */; };
 		40CBAB71472205F39864DC27 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4387E300CF78B6B0A031E35A /* Models.swift */; };
 		4BFE63AD2E85F9CA71F49737 /* UsageWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03A086B4D6BBA4C638C83902 /* UsageWidgetBundle.swift */; };
@@ -22,6 +24,7 @@
 		88B7F4CE9AE671F868E779D3 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201D218A913911D9205F095E /* Keychain.swift */; };
 		89DF76463446CAA1FDEC71D5 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 519B226524C63CB78E07EBF4 /* SetupView.swift */; };
 		90634D6C43F09CE6424C6B14 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */; };
+		9E001F1A3F19CEEA319193AB /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FCF12F96F44AA797D1C03FD /* QRScannerView.swift */; };
 		B31A232A74FED44035964455 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9186B24417284724FA53937F /* DashboardView.swift */; };
 		BE72EEC9B3E42A42CCA6D0C5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09DE6FA3341C5D78CD3B77A1 /* SettingsView.swift */; };
 		CD84AF333C28C61C0D338D20 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13FAEA3D5DA9CD700832B6C7 /* APIClient.swift */; };
@@ -75,9 +78,12 @@
 		4E21CB00A7FBD8EC856A0948 /* SnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotStore.swift; sourceTree = "<group>"; };
 		519B226524C63CB78E07EBF4 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		52F6619A23EEDB57CF191D0D /* UsageWidgetApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageWidgetApp.swift; sourceTree = "<group>"; };
+		5FCF12F96F44AA797D1C03FD /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		606B38BE571BCFE6118D7307 /* ReadinessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadinessView.swift; sourceTree = "<group>"; };
 		8D8DFD73368C96DA8218AFAD /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
 		9186B24417284724FA53937F /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		C9413AB842939E4D04BCF4CC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D197429C0EF4FAD719F815C3 /* AlertRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertRulesView.swift; sourceTree = "<group>"; };
 		E35713D140F89FB01716BC28 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -85,8 +91,11 @@
 		1C15C80B278DF7373BD6312F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				D197429C0EF4FAD719F815C3 /* AlertRulesView.swift */,
 				E35713D140F89FB01716BC28 /* AppModel.swift */,
 				9186B24417284724FA53937F /* DashboardView.swift */,
+				5FCF12F96F44AA797D1C03FD /* QRScannerView.swift */,
+				606B38BE571BCFE6118D7307 /* ReadinessView.swift */,
 				09DE6FA3341C5D78CD3B77A1 /* SettingsView.swift */,
 				519B226524C63CB78E07EBF4 /* SetupView.swift */,
 				52F6619A23EEDB57CF191D0D /* UsageWidgetApp.swift */,
@@ -238,16 +247,13 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					4177115B6F14E2FF6DB84D18 = {
-						DevelopmentTeam = DUU8J39BA7;
-						ProvisioningStyle = Manual;
+						ProvisioningStyle = Automatic;
 					};
 					9F6C459FAFB4FAA82E6443EF = {
-						DevelopmentTeam = DUU8J39BA7;
 						ProvisioningStyle = Automatic;
 					};
 					E03D5305B8B9245DE16712F1 = {
-						DevelopmentTeam = DUU8J39BA7;
-						ProvisioningStyle = Manual;
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -311,11 +317,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				5A8D34E32DEDE40F4CCFB5A6 /* APIClient.swift in Sources */,
+				3BD8ACC8EC60A8E3D8734284 /* AlertRulesView.swift in Sources */,
 				5CDBC8FF4BD8153C5F933B26 /* AppModel.swift in Sources */,
 				B31A232A74FED44035964455 /* DashboardView.swift in Sources */,
 				88B7F4CE9AE671F868E779D3 /* Keychain.swift in Sources */,
 				8795CC5966C7DCE47B59CE50 /* Models.swift in Sources */,
 				90634D6C43F09CE6424C6B14 /* ProviderMark.swift in Sources */,
+				9E001F1A3F19CEEA319193AB /* QRScannerView.swift in Sources */,
+				0752B96E005C2EB8DE39D0C5 /* ReadinessView.swift in Sources */,
 				BE72EEC9B3E42A42CCA6D0C5 /* SettingsView.swift in Sources */,
 				89DF76463446CAA1FDEC71D5 /* SetupView.swift in Sources */,
 				5E541468D89B61C33E829179 /* SnapshotStore.swift in Sources */,
@@ -352,8 +361,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = UsageWidgetWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
+				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Widget/Info.plist;
 				INFOPLIST_KEY_UsageWidgetKeychainAccessGroup = "$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared";
@@ -363,7 +371,6 @@
 					"@executable_path/../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = systems.edmundlim.UsageWidget.widget;
-				PROVISIONING_PROFILE_SPECIFIER = "UsageWidget Widget Dev 20260718";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -375,7 +382,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -394,8 +400,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = UsageWidgetWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
+				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Sources/Widget/Info.plist;
 				INFOPLIST_KEY_UsageWidgetKeychainAccessGroup = "$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared";
@@ -405,7 +410,6 @@
 					"@executable_path/../../Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = systems.edmundlim.UsageWidget.widget;
-				PROVISIONING_PROFILE_SPECIFIER = "UsageWidget Widget Dev 20260718";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -450,7 +454,6 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = DUU8J39BA7;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -462,7 +465,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -482,10 +485,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = UsageWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
+				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = UsageWidget;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a UsageWidget server setup QR code.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown";
@@ -495,7 +498,6 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = systems.edmundlim.UsageWidget;
-				PROVISIONING_PROFILE_SPECIFIER = "UsageWidget Dev 20260718";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -507,10 +509,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = UsageWidget.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Manual;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
+				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = UsageWidget;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Scan a UsageWidget server setup QR code.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown";
@@ -520,7 +522,6 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = systems.edmundlim.UsageWidget;
-				PROVISIONING_PROFILE_SPECIFIER = "UsageWidget Dev 20260718";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -564,7 +565,6 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -582,7 +582,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -602,7 +602,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = DUU8J39BA7;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

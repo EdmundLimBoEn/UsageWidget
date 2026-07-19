@@ -1,0 +1,17 @@
+{
+  "version": "dev",
+  "schemaVersion": 1,
+  "codexbar": {
+    "version": "0.45.0",
+    "linux": {
+      "amd64": {
+        "asset": "CodexBarCLI-v0.45.0-linux-x86_64.tar.gz",
+        "sha256": "e400c78b390896daf3899f77032802e2df2c709e12e7d15e596107ef6de32f9e"
+      },
+      "arm64": {
+        "asset": "CodexBarCLI-v0.45.0-linux-aarch64.tar.gz",
+        "sha256": "ddd215fa70bfecc27767baf07e2b33a48dcbe95ab9c58a0161945d9700af3ef4"
+      }
+    }
+  }
+}

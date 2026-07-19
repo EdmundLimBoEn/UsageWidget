@@ -150,6 +150,44 @@ final class ModelsAndStoreTests: XCTestCase {
         XCTAssertNil(health.collector)
         XCTAssertNil(health.widgetDelivery)
     }
+
+    func testDecodeLegacySettingsUsesNewDefaults() throws {
+        let json = #"{"pollIntervalMinutes":5,"providerOrder":["codex"],"hiddenProviders":[],"demoProviderEnabled":false,"notificationsEnabled":true,"earlyThresholdPct":25,"dangerThresholdPct":10}"#.data(using: .utf8)!
+        let settings = try JSONCoding.decoder.decode(ServerSettings.self, from: json)
+        XCTAssertEqual(settings.defaultRepeatIntervalMinutes, 0)
+        XCTAssertFalse(settings.quietHours.enabled)
+        XCTAssertTrue(settings.alertOverrides.isEmpty)
+    }
+
+    func testForecastDecodeAndFormatting() throws {
+        let json = """
+        {"fetchedAt":"2026-07-19T00:00:00Z","stale":false,"pollIntervalMinutes":5,"providers":[{"id":"codex","name":"Codex","windows":[{"id":"codex.primary","key":"primary","title":"5h","usedPercent":50,"remainingPercent":50,"resetsAt":"2026-07-19T05:00:00Z","forecast":{"computedAt":"2026-07-19T00:00:00Z","burnRatePercentPerHour":20,"estimatedExhaustionAt":"2026-07-19T02:30:00Z","exhaustsBeforeReset":true,"sampleCount":4,"basedOnHours":1}}]}]}
+        """.data(using: .utf8)!
+        let snap = try JSONCoding.decoder.decode(Snapshot.self, from: json)
+        XCTAssertEqual(snap.providers[0].windows[0].forecast?.sampleCount, 4)
+        XCTAssertTrue(ForecastText.string(for: snap.providers[0].windows[0], now: snap.fetchedAt)?.hasPrefix("Likely out") == true)
+    }
+
+    func testAlertInheritance() {
+        var settings = ServerSettings(earlyThresholdPct: 10)
+        settings.alertOverrides = [
+            AlertOverride(providerID: "codex", windowID: nil, rule: AlertRule(earlyThresholdPct: 20)),
+            AlertOverride(providerID: "codex", windowID: "codex.primary", rule: AlertRule(enabled: false, earlyThresholdPct: 30)),
+        ]
+        XCTAssertEqual(settings.effectiveRule(providerID: "codex", windowID: "codex.secondary").earlyThresholdPct, 20)
+        XCTAssertFalse(settings.effectiveRule(providerID: "codex", windowID: "codex.primary").enabled)
+        XCTAssertEqual(settings.effectiveRule(providerID: "claude").earlyThresholdPct, 10)
+    }
+
+    func testQRConfigurationRoundTripAndValidation() throws {
+        let token = String(repeating: "a", count: 64)
+        let server = "https%3A%2F%2Fhost.example.ts.net%2Fusagewidget"
+        let parsed = try QRConfiguration.parse("usagewidget://configure?v=1&server=\(server)&token=\(token)")
+        XCTAssertEqual(parsed.serverURL, "https://host.example.ts.net/usagewidget")
+        XCTAssertThrowsError(try QRConfiguration.parse("usagewidget://configure?v=2&server=\(server)&token=\(token)"))
+        XCTAssertThrowsError(try QRConfiguration.parse("usagewidget://configure?v=1&server=http%3A%2F%2Fhost%2Fusagewidget&token=\(token)"))
+        XCTAssertThrowsError(try QRConfiguration.parse("usagewidget://other?v=1&server=\(server)&token=\(token)"))
+    }
 }
 
 final class APIClientRequestTests: XCTestCase {

@@ -1,93 +1,133 @@
-# Deploy UsageWidget to edServe
+# Source redeploy runbook
 
-The companion Go service and CodexBar collector run on **edServe**
-(`100.83.252.53`, MagicDNS `edserve.tail125275.ts.net`). Connect over SSH as
-**root**.
-
-The canonical first-time installation reference is
-[`server/deploy/README.md`](server/deploy/README.md).
+Use this runbook for day-to-day deployment of the current checkout to an
+already installed UsageWidget server. For a first installation or release
+upgrade, use [the Linux deployment guide](server/deploy/README.md).
 
 ## Preconditions
 
-- Tailscale is running and `edserve` appears in `tailscale status`.
-- `ssh -o BatchMode=yes root@100.83.252.53 true` succeeds.
-- The local Go toolchain can cross-compile with `GOOS=linux GOARCH=amd64`.
-- Never print or commit `/etc/usagewidget/env`, `/etc/usagewidget/collector.env`,
-  or an APNs `.p8` key.
+- `USAGEWIDGET_DEPLOY_HOST` is an SSH destination for an Ubuntu 22.04/24.04 or
+  Debian 12 systemd host.
+- Batch-mode SSH succeeds and the SSH account can install files and restart
+  services without an interactive prompt.
+- Go 1.26.5 or newer is available locally. The script detects amd64 or arm64 on
+  the remote host and cross-compiles the matching binaries.
+- UsageWidget has already created `/etc/usagewidget/env`, its service account,
+  data directory, and systemd units.
+- The selected collector user has a valid CodexBar session.
+
+Do not print or commit `/etc/usagewidget/env`,
+`/etc/usagewidget/collector.env`, the SQLite database, a backup, or an APNs
+`.p8` key.
+
+## Configure the local CLI
+
+Create `~/.config/usagewidget/env` with mode `600`, or let an existing config
+supply these values:
+
+```bash
+USAGEWIDGET_DEPLOY_HOST=deploy@example-host
+USAGEWIDGET_URL=https://your-host.your-tailnet.ts.net/usagewidget
+USAGEWIDGET_REPO=/absolute/path/to/UsageWidget
+```
+
+`usagewidget env sync` securely reads the bearer token from the server into the
+same local file. The command never prints the token.
 
 ## Redeploy
 
-From the repository root, run:
+From the repository root:
 
 ```bash
 ./server/deploy/redeploy.sh
 ```
 
-The helper cross-compiles and installs both `usagewidgetd` and
-`usagewidget-collector`, updates the CLI and systemd units, restarts both
-services, and verifies health plus a live poll.
-
-The Mac CLI exposes the same workflow after linking it into the local path:
+Or through the CLI:
 
 ```bash
-ln -sfn "$PWD/cli/usagewidget" ~/.local/bin/usagewidget
 usagewidget deploy
-usagewidget health
-usagewidget poll
-usagewidget demo
 ```
 
-Mac configuration lives at `~/.config/usagewidget/env` and can be populated
-with `usagewidget env sync`.
+The helper:
 
-To deploy to a different host:
+1. resolves the remote architecture and collector account;
+2. cross-compiles `usagewidgetd` and `usagewidget-collector`;
+3. uploads both binaries, the CLI, and systemd units;
+4. installs a collector-user systemd override;
+5. restarts both services; and
+6. forces a poll and checks health.
+
+Override the collector account only when automatic detection is wrong:
 
 ```bash
-USAGEWIDGET_DEPLOY_HOST=root@example ./server/deploy/redeploy.sh
+USAGEWIDGET_COLLECTOR_USER=codexbar \
+  USAGEWIDGET_DEPLOY_HOST=deploy@example-host \
+  ./server/deploy/redeploy.sh
 ```
+
+This source workflow does not publish a release or replace the installed
+`server-install.sh` lifecycle tool. Use a tagged release and
+`usagewidget-admin update` for production release upgrades.
 
 ## Verify
 
 ```bash
-ssh root@100.83.252.53 '
+usagewidget health
+usagewidget poll
+usagewidget snapshot
+usagewidget status
+```
+
+Direct server verification:
+
+```bash
+ssh "$USAGEWIDGET_DEPLOY_HOST" '
   set -a; source /etc/usagewidget/env; set +a
-  curl -sS -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/health
-  echo
-  curl -sS -o /dev/null -w "poll:%{http_code}\n" -X POST \
-    -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/poll
-  curl -sS -o /dev/null -w "demo:%{http_code}\n" -X POST \
-    -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/demo/alert
-  systemctl status usagewidget usagewidget-collector --no-pager | head -40
+  curl -fsS -H "Authorization: Bearer $USAGEWIDGET_TOKEN" \
+    http://127.0.0.1:8377/v1/health
+  curl -fsS -X POST -H "Authorization: Bearer $USAGEWIDGET_TOKEN" \
+    http://127.0.0.1:8377/v1/poll
+  systemctl is-active usagewidget usagewidget-collector
 '
 ```
 
-Over Tailscale Serve, the path-based health endpoint is:
+The private path-based endpoint is:
 
 ```text
-https://edserve.tail125275.ts.net/usagewidget/v1/health
+https://your-host.your-tailnet.ts.net/usagewidget/v1/health
 ```
 
-Expect `service=ok`, `polling=true`, and `POST /v1/poll` and
-`POST /v1/demo/alert` to return `200`. A provider-specific failure may still be
-present in an otherwise successful poll.
+Healthy output has `service: "ok"`, `database: true`, and `polling: true`.
+`codexbar` and collector details identify upstream-session failures; APNs may be
+`false` for a deliberately dashboard-only installation.
 
-## Logs
+## Logs and rollback
 
 ```bash
-ssh root@100.83.252.53 'journalctl -u usagewidget -u usagewidget-collector -n 50 --no-pager'
-ssh root@100.83.252.53 'journalctl -u usagewidget -u usagewidget-collector -f'
+usagewidget logs
+usagewidget logs -f
+
+ssh "$USAGEWIDGET_DEPLOY_HOST" \
+  'journalctl -u usagewidget -u usagewidget-collector -n 100 --no-pager'
 ```
 
-## First-time installation
+Before a high-risk change, create a recoverable backup:
 
-Follow [`server/deploy/README.md`](server/deploy/README.md) to create the
-service account, environment files, systemd units, and Tailscale Serve route.
-These steps are not needed for routine redeploys.
+```bash
+ssh "$USAGEWIDGET_DEPLOY_HOST" sudo usagewidget-admin backup
+```
+
+If the new checkout is unhealthy, diagnose the service and collector separately
+before redeploying a known-good commit. A database/configuration rollback should
+use `usagewidget-admin restore --file ARCHIVE`; source redeploys do not migrate
+or replace secrets themselves.
 
 ## Safety constraints
 
-- Keep port `8377` bound to localhost and expose it only through Tailscale
-  Serve.
-- Do not overwrite production environment files unless explicitly requested.
-- Do not commit tokens, production environment files, or APNs keys.
-- Cross-compile on the Mac; edServe does not have the Go build toolchain.
+- Keep the main listener on `127.0.0.1:8377` and expose it only through
+  Tailscale Serve.
+- Keep the optional demo listener on `127.0.0.1:8378` and disabled unless its
+  identity-aware proxy is active.
+- Do not overwrite production environment files or select a different collector
+  account unless that change is intentional.
+- Back up before schema-sensitive or live-demo changes.

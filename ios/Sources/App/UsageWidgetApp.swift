@@ -15,6 +15,10 @@ struct UsageWidgetApp: App {
                 .environment(model)
                 .onAppear {
                     appDelegate.model = model
+                    // Registration is separate from alert authorization. Do
+                    // this after wiring the model so a fast token callback can
+                    // always be uploaded to the server.
+                    UIApplication.shared.registerForRemoteNotifications()
                     Task {
                         await model.refresh()
                         await model.registerTokensIfNeeded()
@@ -66,6 +70,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         return true
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        // Demo actions are commonly triggered while UsageWidget is open on the
+        // test phone. iOS suppresses foreground banners unless the delegate
+        // explicitly opts in to presenting them.
+        [.banner, .list, .sound]
     }
 
     func application(

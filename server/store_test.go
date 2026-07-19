@@ -1,10 +1,79 @@
 package server
 
 import (
+	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestOpenStoreMigratesLegacyDatabaseWithoutDataLoss(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `CREATE TABLE snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,fetched_at TEXT NOT NULL,payload TEXT NOT NULL);CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);CREATE TABLE devices(device_id TEXT PRIMARY KEY,apns_token TEXT NOT NULL DEFAULT '',widget_token TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL);CREATE TABLE events(event_key TEXT PRIMARY KEY,created_at TEXT NOT NULL);CREATE TABLE window_state(window_id TEXT PRIMARY KEY,used_percent REAL NOT NULL,resets_at TEXT,credits_available INTEGER,updated_at TEXT NOT NULL);CREATE TABLE poll_runs(id INTEGER PRIMARY KEY AUTOINCREMENT,polled_at TEXT NOT NULL,success INTEGER NOT NULL,snapshot_changed INTEGER NOT NULL,duration_ms INTEGER NOT NULL,error TEXT NOT NULL DEFAULT '');`
+	if _, err = db.Exec(legacy); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, statement := range []string{
+		`INSERT INTO snapshots(fetched_at,payload) VALUES('2026-07-19T00:00:00Z','{}')`,
+		`INSERT INTO settings(key,value) VALUES('poll_interval_minutes','15')`,
+		`INSERT INTO devices(device_id,apns_token,widget_token,updated_at) VALUES('phone','alert','widget','` + now + `')`,
+		`INSERT INTO events(event_key,created_at) VALUES('danger:legacy','` + now + `')`,
+		`INSERT INTO window_state(window_id,used_percent,updated_at) VALUES('codex.primary',42,'` + now + `')`,
+	} {
+		if _, err = db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	store, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if version, _ := store.SchemaVersion(); version != CurrentSchemaVersion {
+		t.Fatalf("schema=%d", version)
+	}
+	if value, _ := store.GetSetting("poll_interval_minutes"); value != "15" {
+		t.Fatalf("setting=%q", value)
+	}
+	if _, ok, _ := store.GetDevice("phone"); !ok {
+		t.Fatal("device lost")
+	}
+	if notified, _ := store.EventNotified("danger:legacy"); !notified {
+		t.Fatal("event state lost")
+	}
+	if state, ok, _ := store.GetWindowState("codex.primary"); !ok || state.UsedPercent != 42 {
+		t.Fatalf("window state=%+v ok=%v", state, ok)
+	}
+	if _, _, ok, _ := store.LatestSnapshot(); !ok {
+		t.Fatal("snapshot lost")
+	}
+}
+
+func TestOpenStoreUsesPrivateFilePermissions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "private.db")
+	if err := os.WriteFile(dbPath, nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0600 {
+		t.Fatalf("database mode=%#o want 0600", got)
+	}
+}
 
 func openTestStore(t *testing.T) *Store {
 	t.Helper()

@@ -1,6 +1,6 @@
 module usagewidget/server
 
-go 1.26.3
+go 1.26.5
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

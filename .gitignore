@@ -3,12 +3,17 @@ server/usagewidgetd
 server/usagewidget.db
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
 # Xcode / macOS
 ios/DerivedData/
 **/xcuserdata/
 **/*.xcuserstate
 .DS_Store
+dist/
 *.moved-aside
 *.pbxuser
 !default.pbxuser
@@ -21,9 +26,15 @@ ios/DerivedData/
 
 # Secrets — never commit
 **/AuthKey_*.p8
+*.p8
+*.pem
+*.key
+*.mobileprovision
 **/env
 .env
 .env.*
+!.env.example
+.envrc
 
 # Local signing material (never commit)
 ios/signing/

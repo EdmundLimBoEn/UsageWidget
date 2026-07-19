@@ -3,13 +3,12 @@ import {
   findPipelineStage,
   formatBeforeAfter,
   formatDelivery,
-	makePatch,
+  makePatch,
 	makePollBody,
 	makePollBodyForPatch,
   mutationHeaders,
   resetAtForPreset,
   stageStatusLabel,
-  surpriseResetNeedsArming,
   type DemoDeliveryResult,
 	type DemoAlertResponse,
   type DemoEventRecord,
@@ -236,20 +235,8 @@ function renderKPIs(view: DemoViewResponse): void {
   eventsKPI.textContent = String(recentEvents.length);
 }
 
-function providerPrimaryUsed(provider?: DemoProvider): number {
-  if (!provider) {
-    return Number.NaN;
-  }
-  const primary = provider.windows.find((window) => window.id === "demo.primary" || window.key === "primary");
-  return primary?.usedPercent ?? Number.NaN;
-}
-
-function providerPrimaryReset(provider?: DemoProvider): string | undefined {
-  return provider?.windows.find((window) => window.id === "demo.primary" || window.key === "primary")?.resetsAt;
-}
-
 function updateSurpriseEligibility(): void {
-  surpriseResetButton.disabled = busy || !Number.isFinite(providerPrimaryUsed(latestView?.snapshot?.provider));
+  surpriseResetButton.disabled = busy || Date.now() < rateLimitedUntil || latestView === null;
 }
 
 function contextualStageDetail(stageID: string, pipeline: DemoPipelineResult, view: DemoViewResponse): string {
@@ -453,6 +440,18 @@ async function loadAll(): Promise<void> {
   await loadEvents();
 }
 
+async function refreshMutationContext(): Promise<void> {
+  const fresh = await requestJSON<DemoViewResponse>("/v1/demo");
+  if (!latestView) {
+    latestView = fresh;
+    return;
+  }
+  // Keep the operator's unsaved controls intact while renewing the 15-minute
+  // CSRF token and synchronizing the revision used by chained mutations.
+  latestView.csrfToken = fresh.csrfToken;
+  latestView.state = fresh.state;
+}
+
 function readPatch(): DemoStatePatch {
   const credits = creditsInput.valueAsNumber;
   if (!Number.isInteger(credits) || credits < 0 || credits > 99) {
@@ -526,6 +525,7 @@ applyPollButton.addEventListener("click", () => {
     return;
   }
   void perform("Applying demo state and polling.", async () => {
+    await refreshMutationContext();
     const patched = await patchDemo(patch);
     await pollDemo(patched.state, patched);
     await loadAll();
@@ -534,19 +534,18 @@ applyPollButton.addEventListener("click", () => {
 
 surpriseResetButton.addEventListener("click", () => {
   void perform("Running surprise reset.", async () => {
-    const baseline = providerPrimaryUsed(latestView?.snapshot?.provider);
-    if (!Number.isFinite(baseline)) {
-      throw new Error("Surprise reset requires a normalized primary window.");
-    }
-    if (surpriseResetNeedsArming(baseline, providerPrimaryReset(latestView?.snapshot?.provider))) {
-      const armed = await patchDemo({
-        primary: {
-          usedPercent: 20,
-          resetsAt: resetAtForPreset("two-hours-eight"),
-        },
-      });
-      await pollDemo(armed.state, armed);
-    }
+    await refreshMutationContext();
+    // Always establish a new, future-dated baseline. This makes every reset
+    // independent of current usage and gives event deduplication a fresh key.
+    const armed = await patchDemo({
+      primary: {
+        usedPercent: 20,
+        resetsAt: resetAtForPreset("two-hours-eight"),
+      },
+      stale: false,
+      providerError: false,
+    });
+    await pollDemo(armed.state, armed);
     const patched = await patchDemo({ primary: { usedPercent: 5 } });
     await pollDemo(patched.state, patched);
     await loadAll();
@@ -555,6 +554,7 @@ surpriseResetButton.addEventListener("click", () => {
 
 testAlertButton.addEventListener("click", () => {
   void perform("Sending test alert.", async () => {
+    await refreshMutationContext();
     await alertDemo();
     await loadEvents();
   }, "Test alert complete and events refreshed.");
