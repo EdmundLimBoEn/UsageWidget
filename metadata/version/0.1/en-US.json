@@ -1,0 +1,8 @@
+{
+  "description": "UsageWidget puts your account usage at a glance on iPhone and the Home Screen. Connect it to your self-hosted UsageWidget server to see Codex, Claude, and Grok usage windows, reset times, forecasts, and alerts in one focused dashboard.\n\nFeatures:\n- Home Screen widget for quick usage checks\n- Codex, Claude, and Grok provider views\n- Remaining-usage and reset-time details\n- Configurable usage alerts and quiet hours\n- Release-readiness checks for server and notification setup\n- Secure manual or QR-based connection to your own server\n\nUsageWidget is designed for a private, self-hosted setup. Your server address and access token are stored in the iOS Keychain. The developer does not operate your production server or collect your usage data.",
+  "keywords": "usage,widget,codex,claude,grok,limits,quota,developer,self-hosted,monitor",
+  "marketingUrl": "https://github.com/EdmundLimBoEn/UsageWidget",
+  "promotionalText": "Keep your account usage, reset times, forecasts, and alerts close at hand.",
+  "supportUrl": "https://github.com/EdmundLimBoEn/UsageWidget/issues",
+  "whatsNew": "Initial release of UsageWidget for iPhone and the Home Screen."
+}

@@ -32,6 +32,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: UsageWidget
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_NSCameraUsageDescription: "Scan a UsageWidget server setup QR code."
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortraitUpsideDown"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         GENERATE_INFOPLIST_FILE: YES
@@ -75,6 +76,7 @@ targets:
         CFBundleDisplayName: UsageWidget
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
         UsageWidgetKeychainAccessGroup: "$(AppIdentifierPrefix)systems.edmundlim.UsageWidget.shared"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
