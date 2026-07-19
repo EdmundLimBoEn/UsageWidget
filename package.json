@@ -1,0 +1,12 @@
+{
+  "name": "usagewidget-cloudflare-install",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy:install-worker": "cf deploy",
+    "dev:install-worker": "cf dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.26.0"
+  }
+}

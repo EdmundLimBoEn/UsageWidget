@@ -1,4 +1,6 @@
 # Go
+node_modules/
+.cloudflare/
 server/usagewidgetd
 server/usagewidget.db
 *.db
