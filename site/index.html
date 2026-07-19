@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UsageWidget — Self-hosted usage at a glance</title>
+<meta name="description" content="A self-hosted iOS app and Home Screen widget for monitoring AI usage limits — Codex, Claude, Grok and more — with forecasts and alerts, running entirely on your own server.">
+<meta property="og:title" content="UsageWidget">
+<meta property="og:description" content="Self-hosted usage at a glance. AI usage limits, reset times, forecasts, and alerts on your iPhone Home Screen — your data never leaves your own server.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<style>
+:root{
+  --bg:#0a1024;
+  --bg2:#0f1836;
+  --panel:#141f42;
+  --border:#24325e;
+  --text:#e8edfb;
+  --muted:#9aa8cf;
+  --blue:#5b8def;
+  --cyan:#5fd4f4;
+  --green:#4ade80;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px}
+a{color:var(--cyan);text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+/* hero */
+.hero{
+  padding:96px 0 72px;
+  text-align:center;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% -10%,rgba(91,141,239,.28),transparent),
+    radial-gradient(ellipse 40% 30% at 80% 10%,rgba(95,212,244,.10),transparent);
+}
+.hero img{width:112px;height:112px;border-radius:26px;box-shadow:0 12px 40px rgba(91,141,239,.35)}
+.hero h1{font-size:clamp(2.2rem,6vw,3.4rem);letter-spacing:-.02em;margin-top:28px}
+.tagline{
+  margin-top:10px;font-size:clamp(1.1rem,3vw,1.4rem);font-weight:600;
+  background:linear-gradient(90deg,var(--blue),var(--cyan));
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.pitch{max-width:640px;margin:20px auto 0;color:var(--muted);font-size:1.05rem}
+.cta{margin-top:36px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn{
+  display:inline-block;padding:12px 26px;border-radius:10px;font-weight:600;
+  transition:transform .12s ease,box-shadow .12s ease;
+}
+.btn:hover{text-decoration:none;transform:translateY(-1px)}
+.btn-primary{background:linear-gradient(135deg,var(--blue),#3b6fe0);color:#fff;box-shadow:0 6px 20px rgba(91,141,239,.4)}
+.btn-ghost{border:1px solid var(--border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--blue)}
+
+/* sections */
+section{padding:72px 0}
+h2{font-size:1.8rem;letter-spacing:-.01em;margin-bottom:8px}
+.sub{color:var(--muted);margin-bottom:40px;max-width:600px}
+
+/* how it works */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}
+.step{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px}
+.step .n{
+  display:inline-flex;width:32px;height:32px;align-items:center;justify-content:center;
+  border-radius:50%;background:rgba(91,141,239,.18);color:var(--cyan);font-weight:700;margin-bottom:14px;
+}
+.step h3{font-size:1.05rem;margin-bottom:6px}
+.step p{color:var(--muted);font-size:.95rem}
+
+/* features */
+.features{background:var(--bg2)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px}
+.card .ico{font-size:1.5rem;margin-bottom:12px}
+.card h3{font-size:1.05rem;margin-bottom:6px}
+.card p{color:var(--muted);font-size:.95rem}
+
+/* privacy */
+.privacy{
+  border:1px solid var(--border);border-radius:16px;padding:36px;
+  background:linear-gradient(135deg,rgba(74,222,128,.06),rgba(91,141,239,.06));
+}
+.privacy h2{color:var(--green)}
+.privacy ul{list-style:none;margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 28px}
+.privacy li{color:var(--muted);padding-left:26px;position:relative}
+.privacy li::before{content:"✓";position:absolute;left:0;color:var(--green);font-weight:700}
+
+/* install */
+.install-box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;position:relative}
+.install-box pre{
+  overflow-x:auto;font-size:.9rem;color:var(--cyan);padding-right:80px;
+  white-space:pre-wrap;word-break:break-all;
+}
+.copy{
+  position:absolute;top:16px;right:16px;padding:6px 14px;border-radius:8px;
+  border:1px solid var(--border);background:var(--bg);color:var(--text);
+  font:inherit;font-size:.85rem;cursor:pointer;
+}
+.copy:hover{border-color:var(--blue)}
+.note{color:var(--muted);font-size:.9rem;margin-top:14px}
+
+/* footer */
+footer{border-top:1px solid var(--border);padding:36px 0;color:var(--muted);font-size:.9rem}
+footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+footer nav{display:flex;gap:22px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <img src="icon.png" alt="UsageWidget app icon" width="112" height="112">
+    <h1>UsageWidget</h1>
+    <p class="tagline">Self-hosted usage at a glance</p>
+    <p class="pitch">
+      Your AI usage limits — Codex, Claude, Grok, and more — as a private iPhone
+      dashboard and Home Screen widget, with reset times, burn-rate forecasts, and
+      timely alerts. Powered by your own server, not someone else's.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#install">Install the server</a>
+      <a class="btn btn-ghost" href="https://github.com/EdmundLimBoEn/UsageWidget">View on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">Three pieces, all yours. Provider credentials never leave your Linux box.</p>
+    <div class="steps">
+      <div class="step">
+        <span class="n">1</span>
+        <h3>Collector on your server</h3>
+        <p>A one-line installer sets up a small Go daemon on your Linux host. An isolated collector reads usage data from your existing CodexBar session.</p>
+      </div>
+      <div class="step">
+        <span class="n">2</span>
+        <h3>Private connection</h3>
+        <p>Your iPhone talks to the server over Tailscale HTTPS with a bearer token. Only normalized display data crosses the wire — never raw provider payloads.</p>
+      </div>
+      <div class="step">
+        <span class="n">3</span>
+        <h3>Glanceable on iPhone</h3>
+        <p>Scan a setup QR and you're done. The app and large Home Screen widget show every rate window, its reset time, and what's about to run out.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="wrap">
+    <h2>Everything on one screen</h2>
+    <p class="sub">Stop tabbing through AI services to check whether you're about to hit a limit.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico">📱</div>
+        <h3>Home Screen widget</h3>
+        <p>Check remaining capacity across all providers without opening any AI service — or even the app.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔀</div>
+        <h3>Multi-provider</h3>
+        <p>Codex, Claude, Grok, and any provider CodexBar supports. New providers show up automatically — nothing is hard-coded.</p>
+      </div>
+      <div class="card">
+        <div class="ico">📈</div>
+        <h3>Burn-rate forecasts</h3>
+        <p>Predicts whether you'll hit 100% before the window resets, once enough history has accumulated.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🔔</div>
+        <h3>Smart alerts</h3>
+        <p>Threshold crossings, scheduled and early resets, credit increases. Global, per-provider, or per-window rules — with quiet hours.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🕓</div>
+        <h3>Honest freshness</h3>
+        <p>Distinguishes collecting, current, stale, and unavailable. Cached fallback instead of pretending failed data is live.</p>
+      </div>
+      <div class="card">
+        <div class="ico">🩺</div>
+        <h3>Release readiness</h3>
+        <p>Built-in diagnostics check server, APNs, and device end to end — including an audible alert and widget-delivery test.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="privacy">
+      <h2>Private by architecture</h2>
+      <ul>
+        <li>No analytics, no ads, no third-party SDKs</li>
+        <li>No developer-operated servers — you host it</li>
+        <li>Provider credentials never leave your Linux box</li>
+        <li>Server URL and token stored in the iOS Keychain</li>
+        <li>Camera used only to scan your setup QR</li>
+        <li>Open source, end to end</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Get started</h2>
+    <p class="sub">On an Ubuntu 22.04/24.04 or Debian 12 host with a CodexBar session:</p>
+    <div class="install-box">
+      <pre><code id="cmd">curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash -s -- --collector-user YOUR_LOGIN</code></pre>
+      <button class="copy" id="copy">Copy</button>
+    </div>
+    <p class="note">
+      Replace <code>YOUR_LOGIN</code> with the Linux user that owns the CodexBar session.
+      Then build the iOS app from the
+      <a href="https://github.com/EdmundLimBoEn/UsageWidget">source repository</a>
+      and scan the setup QR the installer prints. Requires iOS 26+.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>UsageWidget · Edmund Lim</span>
+    <nav>
+      <a href="https://github.com/EdmundLimBoEn/UsageWidget">GitHub</a>
+      <a href="https://github.com/EdmundLimBoEn/UsageWidget/blob/master/PRIVACY.md">Privacy</a>
+      <a href="https://github.com/EdmundLimBoEn/UsageWidget/blob/master/SECURITY.md">Security</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+document.getElementById("copy").addEventListener("click", async () => {
+  const btn = document.getElementById("copy");
+  await navigator.clipboard.writeText(document.getElementById("cmd").textContent);
+  btn.textContent = "Copied!";
+  setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+});
+</script>
+
+</body>
+</html>
