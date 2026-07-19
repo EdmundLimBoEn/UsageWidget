@@ -1,4 +1,8 @@
 # Go
+node_modules/
+.cloudflare/
+.wrangler/
+.agents/
 server/usagewidgetd
 server/usagewidget.db
 *.db
@@ -10,10 +14,19 @@ server/usagewidget.db
 
 # Xcode / macOS
 ios/DerivedData/
+build/
+.build/
 **/xcuserdata/
 **/*.xcuserstate
 .DS_Store
 dist/
+*.xcarchive
+*.ipa
+*.dSYM
+*.dSYM.zip
+coverage/
+coverage.out
+*.profraw
 *.moved-aside
 *.pbxuser
 !default.pbxuser
@@ -43,3 +56,6 @@ ios/signing/
 *.csr
 .gstack/
 .superpowers/
+
+# Local/demo-only artifacts
+UsageWidget-QR-with-icon.jpg
