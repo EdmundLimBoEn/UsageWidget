@@ -97,6 +97,11 @@ file, SQLite data, and APNs configuration, installs versioned binaries, updates
 systemd units, starts both services, checks health, and prints the QR when
 `qrencode` is present.
 
+Demo or development hosts that intentionally run a private local daemon build
+may create `/etc/usagewidget/preserve-local-build`. Hosted installer reruns then
+preserve that daemon while still validating the collector, restarting services,
+checking health, configuring Tailscale, and printing the current setup QR.
+
 ### Install from a development Mac
 
 From the repository root:

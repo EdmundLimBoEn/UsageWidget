@@ -21,6 +21,7 @@ PURGE=false
 YES=false
 RESTORE_FILE=""
 INCLUDE_APNS=false
+PRESERVE_LOCAL_BUILD_FILE="$CONFIG_DIR/preserve-local-build"
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'usagewidget: warning: %s\n' "$*" >&2; }
@@ -238,7 +239,15 @@ do_install() {
   getent group usagewidget >/dev/null || groupadd --system usagewidget
   id usagewidget >/dev/null 2>&1 || useradd --system --gid usagewidget --home-dir "$DATA_DIR" --shell /usr/sbin/nologin usagewidget
   install -d -m 0755 "$PREFIX/releases" "$PREFIX/dependencies"
-  install_codexbar_if_needed; validate_collector; write_initial_env; configure_apns; install_release; configure_serve
+  install_codexbar_if_needed; validate_collector; write_initial_env; configure_apns
+  if [[ -f $PRESERVE_LOCAL_BUILD_FILE && -x $PREFIX/current/bin/usagewidgetd ]]; then
+    warn "preserving the server's marked local build"
+    systemctl restart usagewidget-collector usagewidget
+    wait_for_health 30 || die "preserved local build failed its health check"
+  else
+    install_release
+  fi
+  configure_serve
   say "UsageWidget is healthy at $PUBLIC_URL"
   if command -v qrencode >/dev/null; then print_qr; else warn "install qrencode, then run: sudo usagewidget-admin qr"; fi
   if ! grep -q '^APNS_KEY_PATH=' "$ENV_FILE"; then warn "APNs is not configured; installed in dashboard-only mode. Add APNS_KEY_PATH, APNS_KEY_ID, APNS_TEAM_ID, and APNS_BUNDLE_ID when ready."; fi
