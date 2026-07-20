@@ -5,11 +5,7 @@
   "compatibility_date": "2026-07-19",
   "routes": [
     {
-      "pattern": "usagewidget.edmundlim.systems/install.sh",
-      "zone_name": "edmundlim.systems"
-    },
-    {
-      "pattern": "usagewidget.edmundlim.systems/",
+      "pattern": "usagewidget.edmundlim.systems/*",
       "zone_name": "edmundlim.systems"
     }
   ]
