@@ -50,6 +50,11 @@ code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   background:linear-gradient(90deg,var(--blue),var(--cyan));
   -webkit-background-clip:text;background-clip:text;color:transparent;
 }
+.beta{
+  display:inline-block;margin-top:18px;padding:6px 12px;border-radius:999px;
+  border:1px solid rgba(95,212,244,.35);background:rgba(95,212,244,.08);
+  color:var(--cyan);font-size:.85rem;font-weight:700;letter-spacing:.02em;
+}
 .pitch{max-width:640px;margin:20px auto 0;color:var(--muted);font-size:1.05rem}
 .cta{margin-top:36px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
 .btn{
@@ -121,6 +126,7 @@ footer nav{display:flex;gap:22px}
     <img src="icon.png" alt="UsageWidget app icon" width="112" height="112">
     <h1>UsageWidget</h1>
     <p class="tagline">Self-hosted usage at a glance</p>
+    <p class="beta">The first beta is starting to roll out</p>
     <p class="pitch">
       Your AI usage limits — Codex, Claude, Grok, and more — as a private iPhone
       dashboard and Home Screen widget, with reset times, burn-rate forecasts, and
@@ -136,12 +142,12 @@ footer nav{display:flex;gap:22px}
 <section>
   <div class="wrap">
     <h2>How it works</h2>
-    <p class="sub">Three pieces, all yours. Provider credentials never leave your Linux box.</p>
+    <p class="sub">Three pieces, all yours. Provider credentials never leave your own machines.</p>
     <div class="steps">
       <div class="step">
         <span class="n">1</span>
         <h3>Collector on your server</h3>
-        <p>A one-line installer sets up a small Go daemon on your Linux host. An isolated collector reads usage data from your existing CodexBar session.</p>
+        <p>A small native Go daemon runs on Linux, macOS, or Windows. Linux uses an isolated collector; desktop builds use a local CLI or private CodexBar endpoint.</p>
       </div>
       <div class="step">
         <span class="n">2</span>
@@ -203,7 +209,7 @@ footer nav{display:flex;gap:22px}
       <ul>
         <li>No analytics, no ads, no third-party SDKs</li>
         <li>No developer-operated servers — you host it</li>
-        <li>Provider credentials never leave your Linux box</li>
+        <li>Provider credentials never leave your own machines</li>
         <li>Server URL and token stored in the iOS Keychain</li>
         <li>Camera used only to scan your setup QR</li>
         <li>Open source, end to end</li>
@@ -215,7 +221,7 @@ footer nav{display:flex;gap:22px}
 <section id="waitlist">
   <div class="wrap">
     <h2>Join the waitlist</h2>
-    <p class="sub">TestFlight and App Store builds are coming. Get notified when you can install without building from source.</p>
+    <p class="sub">The first beta is starting to roll out. Join the waitlist to be notified when a TestFlight spot is ready for you.</p>
     <a class="btn btn-primary" href="https://forms.gle/SMwnRmGNzx1uGpvE7">Join the waitlist</a>
   </div>
 </section>
@@ -229,7 +235,7 @@ footer nav{display:flex;gap:22px}
       <button class="copy" id="copy">Copy</button>
     </div>
     <p class="note">
-      Replace <code>YOUR_LOGIN</code> with the Linux user that owns the CodexBar session.
+      This one-line installer is for the recommended Linux host. Native macOS and Windows downloads are available in GitHub Releases.
       Then build the iOS app from the
       <a href="https://github.com/EdmundLimBoEn/UsageWidget">source repository</a>
       and scan the setup QR the installer prints. Requires iOS 26+.

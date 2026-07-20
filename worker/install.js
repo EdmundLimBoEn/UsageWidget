@@ -5,7 +5,7 @@ const installScript = `#!/usr/bin/env bash
 set -euo pipefail
 
 REPO="\${USAGEWIDGET_REPO:-EdmundLimBoEn/UsageWidget}"
-PUBLIC_URL="\${USAGEWIDGET_PUBLIC_URL:-https://usagewidget.edmundlim.systems}"
+SERVER_URL="\${USAGEWIDGET_SERVER_URL:-\${USAGEWIDGET_PUBLIC_URL:-}}"
 VERSION="\${USAGEWIDGET_VERSION:-latest}"
 COLLECTOR_USER=""
 EXTRA_ARGS=()
@@ -20,7 +20,7 @@ Options:
   --version VERSION       UsageWidget release version, without the leading v
 
 Environment:
-  USAGEWIDGET_PUBLIC_URL  Override the server URL passed to the installer
+  USAGEWIDGET_SERVER_URL  Override the installed server URL (normally detected through Tailscale)
   USAGEWIDGET_VERSION     Install a specific release version
 EOF
 }
@@ -37,14 +37,19 @@ done
 [[ \${EUID:-$(id -u)} -eq 0 ]] || { echo "usagewidget: run through sudo" >&2; exit 1; }
 [[ -n "$COLLECTOR_USER" ]] || { echo "usagewidget: pass --collector-user USER" >&2; usage >&2; exit 2; }
 
-need() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "usagewidget: required tool not found: $1" >&2
+missing_tools=()
+for tool in curl jq sha256sum tar uname mktemp; do
+  command -v "$tool" >/dev/null 2>&1 || missing_tools+=("$tool")
+done
+if (( \${#missing_tools[@]} )); then
+  command -v apt-get >/dev/null 2>&1 || {
+    printf 'usagewidget: missing required tools: %s\n' "\${missing_tools[*]}" >&2
     exit 1
   }
-}
-
-for tool in curl jq sha256sum tar uname mktemp; do need "$tool"; done
+  echo "usagewidget: installing download prerequisites"
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl jq coreutils tar
+fi
 
 case "$(uname -m)" in
   x86_64) ARCH=amd64 ;;
@@ -67,10 +72,10 @@ curl -fL --retry 3 -o "$TMP/$ASSET.sha256" "$BASE_URL/$ASSET.sha256"
 (cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null)
 tar -xzf "$TMP/$ASSET" -C "$TMP"
 
-exec "$TMP/usagewidget-\${VERSION}-linux-\${ARCH}/server-install.sh" install \
-  --collector-user "$COLLECTOR_USER" \
-  --public-url "$PUBLIC_URL" \
-  "\${EXTRA_ARGS[@]}"
+INSTALL_ARGS=(install --collector-user "$COLLECTOR_USER")
+if [[ -n "$SERVER_URL" ]]; then INSTALL_ARGS+=(--public-url "$SERVER_URL"); fi
+INSTALL_ARGS+=("\${EXTRA_ARGS[@]}")
+exec "$TMP/usagewidget-\${VERSION}-linux-\${ARCH}/server-install.sh" "\${INSTALL_ARGS[@]}"
 `;
 
 const installCommand = `curl -fsSL ${PUBLIC_URL}/install.sh | sudo bash -s -- --collector-user YOUR_LOGIN`;

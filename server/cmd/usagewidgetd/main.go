@@ -31,6 +31,8 @@ func main() {
 		codexbar = server.NewCodexBarCommandClient(cfg.CodexBarCmd)
 	} else if cfg.CodexBarURL != "" {
 		codexbar = server.NewCodexBarClient(cfg.CodexBarURL)
+	} else if cfg.CodexBarBin != "" {
+		codexbar = server.NewCodexBarBinaryClient(cfg.CodexBarBin)
 	} else {
 		codexbar = server.NewCodexBarUnixClient(cfg.CollectorSocket)
 	}

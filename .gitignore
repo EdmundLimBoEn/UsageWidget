@@ -60,3 +60,4 @@ ios/signing/
 
 # Local/demo-only artifacts
 UsageWidget-QR-with-icon.jpg
+demo-reset-server.sh

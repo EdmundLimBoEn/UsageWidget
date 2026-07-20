@@ -1,4 +1,4 @@
-name: Release Linux bundles
+name: Release server bundles
 
 on:
   push:
@@ -20,16 +20,108 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: go test ./...
         working-directory: server
-      - run: bash -n server-install.sh server-setup.sh demo-reset-server.sh scripts/package-release.sh cli/usagewidget demo.sh demo/mock-codexbar demo/mock-tailscale server/deploy/redeploy.sh
-      - run: tests/installer_test.sh
+      - run: npm test
+      - name: Verify native desktop builds
+        run: |
+          cd server
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o "$RUNNER_TEMP/usagewidgetd-darwin-amd64" ./cmd/usagewidgetd
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o "$RUNNER_TEMP/usagewidgetd-darwin-arm64" ./cmd/usagewidgetd
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o "$RUNNER_TEMP/usagewidgetd-windows-amd64.exe" ./cmd/usagewidgetd
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o "$RUNNER_TEMP/usagewidgetd-windows-arm64.exe" ./cmd/usagewidgetd
+      - run: bash -n server-install.sh server-setup.sh scripts/package-release.sh scripts/package-desktop-release.sh cli/usagewidget server/deploy/redeploy.sh server/deploy/start-macos.sh
+      - run: |
+          tests/installer_test.sh
+          bash tests/cli_test.sh
+
+  windows-smoke:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+      - name: Parse launcher and build native daemon
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD\deploy\start-windows.ps1",
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
+          go build -o usagewidgetd.exe ./cmd/usagewidgetd
+        working-directory: server
+      - name: Run Windows API and collection smoke test
+        shell: pwsh
+        working-directory: server
+        run: |
+          $mock = Start-Job {
+            $listener = [System.Net.HttpListener]::new()
+            $listener.Prefixes.Add("http://127.0.0.1:18765/")
+            $listener.Start()
+            while ($true) {
+              $context = $listener.GetContext()
+              $body = [Text.Encoding]::UTF8.GetBytes('[{"provider":"codex","usage":{"primary":{"usedPercent":5}}}]')
+              $context.Response.ContentType = "application/json"
+              $context.Response.ContentLength64 = $body.Length
+              $context.Response.OutputStream.Write($body, 0, $body.Length)
+              $context.Response.Close()
+            }
+          }
+          $env:USAGEWIDGET_TOKEN = "0123456789abcdef0123456789abcdef"
+          $env:CODEXBAR_URL = "http://127.0.0.1:18765/usage"
+          $env:DB_PATH = "$env:RUNNER_TEMP\usagewidget-smoke.db"
+          $env:LISTEN_ADDR = "127.0.0.1:18377"
+          $daemon = Start-Process -FilePath ".\usagewidgetd.exe" -PassThru
+          try {
+            $headers = @{ Authorization = "Bearer $env:USAGEWIDGET_TOKEN" }
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              try {
+                $health = Invoke-RestMethod -Headers $headers -Uri "http://127.0.0.1:18377/v1/health"
+                break
+              } catch { Start-Sleep -Milliseconds 200 }
+            }
+            if ($health.service -ne "ok") { throw "Windows health check failed" }
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              try {
+                $poll = Invoke-RestMethod -Method Post -Headers $headers -Uri "http://127.0.0.1:18377/v1/poll"
+                if ($poll.success) { break }
+              } catch {}
+              Start-Sleep -Milliseconds 200
+            }
+            if (-not $poll.success) { throw "Windows collection failed" }
+            $snapshot = Invoke-RestMethod -Headers $headers -Uri "http://127.0.0.1:18377/v1/snapshot"
+            if ($snapshot.providers[0].id -ne "codex") { throw "Windows snapshot normalization failed" }
+          } finally {
+            Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue
+            Stop-Job $mock -ErrorAction SilentlyContinue
+            Remove-Job $mock -Force -ErrorAction SilentlyContinue
+          }
 
   bundle:
-    needs: test
+    needs: [test, windows-smoke]
     strategy:
       matrix:
-        arch: [amd64, arm64]
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+          - os: windows
+            arch: arm64
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -43,17 +135,26 @@ jobs:
           value="${{ inputs.version }}"
           if [[ -z "$value" ]]; then value="${GITHUB_REF_NAME#v}"; fi
           echo "value=$value" >> "$GITHUB_OUTPUT"
-      - run: sudo apt-get update && sudo apt-get install -y jq
-      - run: scripts/package-release.sh "${{ steps.version.outputs.value }}" "${{ matrix.arch }}"
+      - run: sudo apt-get update && sudo apt-get install -y jq zip
+      - name: Package server
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == linux ]]; then
+            scripts/package-release.sh "${{ steps.version.outputs.value }}" "${{ matrix.arch }}"
+          else
+            scripts/package-desktop-release.sh "${{ steps.version.outputs.value }}" "${{ matrix.os }}" "${{ matrix.arch }}"
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: usagewidget-linux-${{ matrix.arch }}
+          name: usagewidget-${{ matrix.os }}-${{ matrix.arch }}
           path: |
             dist/*.tar.gz
+            dist/*.zip
             dist/*.sha256
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
+            dist/*.zip
             dist/*.sha256

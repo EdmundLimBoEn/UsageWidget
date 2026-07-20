@@ -17,16 +17,20 @@ bearer authenticated but must still remain bound to `127.0.0.1:8377` and be
 exposed only through an authenticated private-network proxy such as Tailscale
 Serve. It is not designed to be placed directly on the public Internet.
 
-The production collector runs as the unprivileged account that owns CodexBar's
+The production Linux collector runs as the unprivileged account that owns CodexBar's
 provider sessions and exposes only `GET /usage` on a group-restricted Unix
 socket. The main daemon must not run with that account's home-directory access.
+Native macOS and Windows mode instead runs under the signed-in desktop account;
+use it only on a trusted single-user machine and keep its generated config and
+SQLite database private to that account.
 
 ## Secrets and sensitive data
 
 - Generate a unique `USAGEWIDGET_TOKEN` of at least 32 characters. Token
   rotation invalidates every connected phone; distribute the replacement only
   through a newly generated private QR or another secure channel.
-- Keep `/etc/usagewidget/env`, `/etc/usagewidget/collector.env`, the APNs `.p8`,
+- Keep `/etc/usagewidget/env`, `/etc/usagewidget/collector.env`, desktop
+  `server.env`/`server.json`, the APNs `.p8`,
   SQLite database, and backups readable only by their intended service or
   administrative accounts.
 - Treat setup QRs as bearer credentials. Do not put them in screenshots, issue

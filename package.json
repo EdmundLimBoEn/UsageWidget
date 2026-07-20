@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "node tests/install_worker_test.mjs",
     "deploy:install-worker": "cf deploy",
     "dev:install-worker": "cf dev"
   },

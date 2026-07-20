@@ -89,6 +89,7 @@ Commands:
   health           GET /v1/health
   snapshot         GET /v1/snapshot
   settings         GET /v1/settings
+  qr               Print the private iPhone setup QR code
   poll             POST /v1/poll  (force CodexBar sample)
   deploy           Cross-compile + install + restart on the server
   logs [-f]        journalctl -u usagewidget on the server
@@ -99,10 +100,25 @@ Commands:
 Examples:
   usagewidget env sync
   usagewidget health
+  usagewidget qr
   usagewidget poll
   usagewidget deploy
   usagewidget logs -f
 EOF
+}
+
+cmd_qr() {
+  require_token
+  command -v jq >/dev/null 2>&1 || die "jq is required to generate a QR code"
+  command -v qrencode >/dev/null 2>&1 || die "qrencode is required to generate a QR code"
+
+  local encoded_url encoded_token payload
+  encoded_url="$(printf '%s' "$USAGEWIDGET_URL" | jq -sRr @uri)"
+  encoded_token="$(printf '%s' "$USAGEWIDGET_TOKEN" | jq -sRr @uri)"
+  payload="usagewidget://configure?v=1&server=${encoded_url}&token=${encoded_token}"
+  echo "usagewidget: This QR grants full single-operator access to the server. Keep it private." >&2
+  printf '%s' "$payload" | qrencode -t ANSIUTF8
+  unset payload encoded_token
 }
 
 cmd_env_show() {
@@ -215,6 +231,7 @@ main() {
     health) api GET /v1/health ;;
     snapshot) api GET /v1/snapshot ;;
     settings) api GET /v1/settings ;;
+    qr) cmd_qr ;;
     poll) USAGEWIDGET_OK_CODES="200 502" api POST /v1/poll ;;
     deploy|redeploy) cmd_deploy "$@" ;;
     logs) cmd_logs "$@" ;;

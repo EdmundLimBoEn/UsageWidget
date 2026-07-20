@@ -10,6 +10,7 @@ type Config struct {
 	Token           string
 	CodexBarURL     string
 	CodexBarCmd     string
+	CodexBarBin     string
 	CollectorSocket string
 	DBPath          string
 	ListenAddr      string
@@ -38,6 +39,7 @@ func LoadConfig() (Config, error) {
 		Token:           token,
 		CodexBarURL:     os.Getenv("CODEXBAR_URL"),
 		CodexBarCmd:     os.Getenv("CODEXBAR_CMD"),
+		CodexBarBin:     os.Getenv("CODEXBAR_BIN"),
 		CollectorSocket: envOr("COLLECTOR_SOCKET", "/run/usagewidget/codexbar.sock"),
 		DBPath:          envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:      envOr("LISTEN_ADDR", "127.0.0.1:8377"),

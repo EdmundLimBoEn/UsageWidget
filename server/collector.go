@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -48,14 +47,10 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.Binary, "usage", "--format", "json")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 2 * time.Second
+	configureCommandCancellation(cmd)
+	// Bound pipe cleanup even if a timed-out helper leaves a descendant holding
+	// stdout or stderr open after the process-group cancellation.
+	cmd.WaitDelay = 250 * time.Millisecond
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()

@@ -1,10 +1,13 @@
-# UsageWidget Linux deployment
+# UsageWidget server deployment
 
 `usagewidgetd` polls CodexBar through an isolated local collector, stores
 normalized snapshots and event state in SQLite, serves the private phone API,
 and sends APNs alerts and WidgetKit refreshes.
 
-## Supported deployment
+Linux is the production, always-on deployment. The same daemon also ships as a
+native macOS and Windows executable for personal desktop hosts.
+
+## Supported Linux deployment
 
 | Item | Value |
 |------|-------|
@@ -47,8 +50,23 @@ installs the normal host packages before invoking it.
 
 ## Recommended installation
 
-Download and extract the release archive matching the host architecture, then
-run from inside the extracted directory:
+Run the hosted bootstrap on the Linux server. It installs any missing standard
+download tools through `apt`, selects the latest release for the host
+architecture, verifies its checksum, and invokes the release installer. No
+repository clone or local build is required:
+
+```bash
+curl -fsSL https://usagewidget.edmundlim.systems/install.sh | \
+  sudo bash -s -- --collector-user YOUR_LOGIN
+```
+
+The download domain is not used as the phone API address. Unless you explicitly
+pass a server URL override, the release installer discovers the host's private
+Tailscale MagicDNS name, configures Tailscale Serve, and encodes that private
+URL in the setup QR.
+
+To install from an archive instead, download and extract the release bundle
+matching the host architecture, then run inside it:
 
 ```bash
 sudo ./server-install.sh install --collector-user YOUR_LOGIN
@@ -87,11 +105,69 @@ arm64, builds a checksummed local release, transfers it, installs host packages,
 and invokes the same server-side installer. It supports root SSH or an account
 with interactive sudo.
 
+## Native macOS and Windows
+
+Desktop bundles run `usagewidgetd` in the foreground as the signed-in user.
+They use native SQLite files and require no systemd, sudo, WSL, Docker, or CGO.
+Unlike the Linux service layout, desktop mode does not isolate provider-session
+access in a second OS account.
+
+### macOS
+
+Extract the matching `darwin-amd64` or `darwin-arm64` release and run:
+
+```bash
+./start-server.sh
+```
+
+The launcher discovers `codexbar` or `CodexBarCLI` and creates
+`~/Library/Application Support/UsageWidget/server.env` with mode restricted by
+the user's umask. Override discovery with `CODEXBAR_BIN=/absolute/path` or set
+`CODEXBAR_URL` before the first launch.
+
+### Windows 10/11
+
+Extract `windows-amd64` (or `windows-arm64` on Windows on Arm), open PowerShell
+in that directory, and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start-server.ps1 `
+  -CodexBarUrl http://PRIVATE-CODEXBAR-HOST:8765/usage
+```
+
+Configuration and data are created in `%LOCALAPPDATA%\UsageWidget`. A custom
+compatible CLI executable can be used instead:
+
+```powershell
+.\start-server.ps1 -CodexBarBin "C:\Program Files\CodexBar\codexbar.exe"
+```
+
+Rerun the launcher with either source flag to update an existing configuration;
+the two flags are mutually exclusive.
+
+CodexBar's official standalone CLI releases currently target macOS and Linux,
+so the URL form is the normal Windows setup. Keep that URL reachable only over
+loopback or a private network.
+
+### Connect a desktop host privately
+
+Keep `LISTEN_ADDR=127.0.0.1:8377`. With Tailscale installed and signed in, map
+the same private HTTPS route used by Linux:
+
+```text
+tailscale serve --bg --https=443 --set-path=/usagewidget http://127.0.0.1:8377
+```
+
+Use `https://<machine-magicdns-name>/usagewidget` and the generated token in the
+iPhone app. The macOS token is in `server.env`; on Windows, inspect `server.json`
+locally with `Get-Content "$env:LOCALAPPDATA\UsageWidget\server.json"`. Never
+paste either private config into logs or issue reports.
+
 ## APNs configuration
 
 An install without APNs is valid and reports dashboard-only mode. To enable
-notifications, place a dedicated Apple `.p8` key on the server and add all of
-these values to `/etc/usagewidget/env`:
+notifications on Linux, place a dedicated Apple `.p8` key on the server and add
+all of these values to `/etc/usagewidget/env`:
 
 ```bash
 APNS_KEY_PATH=/etc/usagewidget/AuthKey.p8
@@ -100,6 +176,9 @@ APNS_TEAM_ID=XXXXXXXXXX
 APNS_BUNDLE_ID=systems.edmundlim.UsageWidget
 APNS_ENV=sandbox
 ```
+
+Desktop launchers accept the same keys in macOS `server.env` or Windows
+`server.json`; use an absolute key path owned by the signed-in user.
 
 Use `APNS_ENV=production` only for a distribution-signed app that uses the
 production APNs environment. Keep the key and environment file restricted; do
@@ -136,6 +215,7 @@ Server variables:
 | `DB_PATH` | `./usagewidget.db` | SQLite path; installer sets the data-directory path |
 | `LISTEN_ADDR` | `127.0.0.1:8377` | Main API listener |
 | `CODEXBAR_URL` | unset | Development HTTP-source override |
+| `CODEXBAR_BIN` | unset | Exact CodexBar CLI path; supports spaces and is the native macOS source |
 | `CODEXBAR_CMD` | unset | Legacy command-source override |
 | `APNS_*` | unset | APNs signing configuration; all required to enable push |
 
@@ -145,6 +225,10 @@ Server variables:
 CODEXBAR_BIN=/absolute/path/to/CodexBarCLI
 COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock
 ```
+
+Source precedence is `CODEXBAR_CMD`, `CODEXBAR_URL`, `CODEXBAR_BIN`, then the
+Linux collector socket. Prefer `CODEXBAR_BIN` over the legacy command string on
+desktop systems because it safely preserves paths containing spaces.
 
 Do not point `CODEXBAR_CMD` at an account whose home must remain isolated from
 the daemon. The sidecar is the production path and exposes only `GET /usage` on

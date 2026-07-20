@@ -25,6 +25,7 @@ func TestLoadConfigRejectsWeakOrWhitespaceToken(t *testing.T) {
 func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
 	t.Setenv("CODEXBAR_URL", "")
+	t.Setenv("CODEXBAR_BIN", "")
 	t.Setenv("DB_PATH", "")
 	t.Setenv("LISTEN_ADDR", "")
 
@@ -46,6 +47,19 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 	if cfg.APNsEnabled() {
 		t.Fatalf("expected APNs disabled when APNs env vars are unset")
+	}
+}
+
+func TestLoadConfigPreservesCodexBarBinaryPath(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
+	t.Setenv("CODEXBAR_BIN", `C:\\Program Files\\CodexBar\\codexbar.exe`)
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.CodexBarBin != `C:\\Program Files\\CodexBar\\codexbar.exe` {
+		t.Fatalf("CodexBarBin was changed: %q", cfg.CodexBarBin)
 	}
 }
 

@@ -37,6 +37,16 @@ func NewCodexBarCommandClient(command string) *CodexBarClient {
 	return &CodexBarClient{Cmd: strings.Fields(command), Source: "command"}
 }
 
+// NewCodexBarBinaryClient executes one exact binary path with fixed arguments.
+// Unlike the legacy CODEXBAR_CMD form, this works with spaces in macOS and
+// Windows paths and does not involve a shell.
+func NewCodexBarBinaryClient(binary string) *CodexBarClient {
+	return &CodexBarClient{
+		Cmd:    []string{binary, "usage", "--format", "json"},
+		Source: "codexbar-cli",
+	}
+}
+
 // NewCodexBarUnixClient reads fresh CodexBar CLI output from the isolated
 // collector sidecar. The socket is never exposed over TCP.
 func NewCodexBarUnixClient(socketPath string) *CodexBarClient {
@@ -69,6 +79,8 @@ func (c *CodexBarClient) fetchCmd(ctx context.Context) ([]byte, error) {
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.Cmd[0], c.Cmd[1:]...)
+	configureCommandCancellation(cmd)
+	cmd.WaitDelay = 250 * time.Millisecond
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

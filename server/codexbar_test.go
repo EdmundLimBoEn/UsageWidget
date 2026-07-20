@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -51,5 +53,20 @@ func TestCodexBarCommandClientFetchError(t *testing.T) {
 	c := NewCodexBarCommandClient("false")
 	if _, err := c.Fetch(context.Background()); err == nil {
 		t.Fatalf("expected error for failing command")
+	}
+}
+
+func TestCodexBarBinaryClientSupportsPathsWithSpaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "CodexBar Test")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '[{\"provider\":\"codex\"}]'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	c := NewCodexBarBinaryClient(path)
+	body, err := c.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(body) != `[{"provider":"codex"}]` {
+		t.Fatalf("unexpected body: %q", body)
 	}
 }
