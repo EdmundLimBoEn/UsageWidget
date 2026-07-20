@@ -13,7 +13,7 @@ EXTRA_ARGS=()
 usage() {
   cat <<'EOF'
 Usage:
-  curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash -s -- --collector-user YOUR_LOGIN
+  curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash
 
 Options:
   --collector-user USER   Linux user that owns the CodexBar session
@@ -35,7 +35,27 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ \${EUID:-$(id -u)} -eq 0 ]] || { echo "usagewidget: run through sudo" >&2; exit 1; }
-[[ -n "$COLLECTOR_USER" ]] || { echo "usagewidget: pass --collector-user USER" >&2; usage >&2; exit 2; }
+[[ $(uname -s) == Linux ]] || {
+  echo "usagewidget: the one-command installer requires Ubuntu or Debian Linux" >&2
+  echo "usagewidget: use the native macOS or Windows bundle from GitHub Releases on this machine" >&2
+  exit 1
+}
+
+if [[ -z "$COLLECTOR_USER" ]]; then
+  [[ -r /dev/tty && -w /dev/tty ]] || {
+    echo "usagewidget: no interactive terminal; pass --collector-user USER" >&2
+    exit 2
+  }
+  default_user="\${SUDO_USER:-}"
+  if [[ -n "$default_user" && "$default_user" != root ]]; then
+    printf 'Linux user that owns the CodexBar session [%s]: ' "$default_user" >/dev/tty
+  else
+    printf 'Linux user that owns the CodexBar session: ' >/dev/tty
+  fi
+  IFS= read -r COLLECTOR_USER </dev/tty
+  COLLECTOR_USER="\${COLLECTOR_USER:-$default_user}"
+fi
+[[ -n "$COLLECTOR_USER" ]] || { echo "usagewidget: collector user is required" >&2; exit 2; }
 
 missing_tools=()
 for tool in curl jq sha256sum tar uname mktemp; do
@@ -78,7 +98,7 @@ INSTALL_ARGS+=("\${EXTRA_ARGS[@]}")
 exec "$TMP/usagewidget-\${VERSION}-linux-\${ARCH}/server-install.sh" "\${INSTALL_ARGS[@]}"
 `;
 
-const installCommand = `curl -fsSL ${PUBLIC_URL}/install.sh | sudo bash -s -- --collector-user YOUR_LOGIN`;
+const installCommand = `curl -fsSL ${PUBLIC_URL}/install.sh | sudo bash`;
 
 function text(body, status = 200, contentType = "text/plain; charset=utf-8", cacheControl = "public, max-age=300") {
   return new Response(body, {

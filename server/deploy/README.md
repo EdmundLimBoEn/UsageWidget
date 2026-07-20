@@ -56,9 +56,12 @@ architecture, verifies its checksum, and invokes the release installer. No
 repository clone or local build is required:
 
 ```bash
-curl -fsSL https://usagewidget.edmundlim.systems/install.sh | \
-  sudo bash -s -- --collector-user YOUR_LOGIN
+curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash
 ```
+
+The bootstrap prompts through the terminal for the unprivileged Linux account
+that owns the CodexBar session. `--collector-user USER` remains available for
+non-interactive automation.
 
 The download domain is not used as the phone API address. Unless you explicitly
 pass a server URL override, the release installer discovers the host's private

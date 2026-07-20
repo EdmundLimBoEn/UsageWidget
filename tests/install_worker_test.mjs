@@ -9,6 +9,8 @@ assert.match(response.headers.get("content-type"), /^text\/x-shellscript/);
 
 const script = await response.text();
 assert.match(script, /SERVER_URL="\$\{USAGEWIDGET_SERVER_URL/);
+assert.match(script, /Linux user that owns the CodexBar session/);
+assert.match(script, /IFS= read -r COLLECTOR_USER <\/dev\/tty/);
 assert.match(script, /if \[\[ -n "\$SERVER_URL" \]\]; then INSTALL_ARGS\+=\(--public-url/);
 assert.doesNotMatch(
   script,
@@ -22,7 +24,7 @@ const landing = await worker.fetch(
 );
 assert.match(
   await landing.text(),
-  /curl -fsSL https:\/\/usagewidget\.edmundlim\.systems\/install\.sh/,
+  /curl -fsSL https:\/\/usagewidget\.edmundlim\.systems\/install\.sh \| sudo bash/,
 );
 
 console.log("install worker tests passed");

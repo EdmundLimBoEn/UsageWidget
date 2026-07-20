@@ -126,15 +126,16 @@ verifies its checksum, installs both services, and prints the private iPhone
 setup QR:
 
 ```bash
-curl -fsSL https://usagewidget.edmundlim.systems/install.sh | \
-  sudo bash -s -- --collector-user YOUR_LOGIN
+curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash
 ```
 
-Replace `YOUR_LOGIN` with the unprivileged Linux account that owns the working
-CodexBar session. You do not need to clone this repository. When installation
-finishes, scan the QR in UsageWidget; the server URL and generated bearer token
-are encoded for you. The installer can be rerun safely for updates while
-preserving configuration and SQLite data.
+The installer asks which unprivileged Linux account owns the working CodexBar
+session. You do not need to clone this repository or add command-line flags.
+When installation finishes, scan the QR in UsageWidget; the server URL and
+generated bearer token are encoded for you. The installer can be rerun safely
+for updates while preserving configuration and SQLite data. This command is
+for the supported Ubuntu and Debian server hosts; use the native release bundle
+on macOS or Windows.
 
 If you already downloaded and extracted a release bundle, run the packaged
 installer directly instead:
