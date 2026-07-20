@@ -101,6 +101,7 @@ h2{font-size:1.8rem;letter-spacing:-.01em;margin-bottom:8px}
 
 /* install */
 .install-box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;position:relative}
+.install-box + .install-box{margin-top:12px}
 .install-box pre{
   overflow-x:auto;font-size:.9rem;color:var(--cyan);padding-right:80px;
   white-space:pre-wrap;word-break:break-all;
@@ -229,13 +230,17 @@ footer nav{display:flex;gap:22px}
 <section id="install">
   <div class="wrap">
     <h2>Get started</h2>
-    <p class="sub">On an Ubuntu 22.04/24.04 or Debian 12 host with a CodexBar session:</p>
+    <p class="sub">No clone and no flags. Choose the native command for your computer:</p>
     <div class="install-box">
-      <pre><code id="cmd">curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash</code></pre>
-      <button class="copy" id="copy">Copy</button>
+      <pre><code id="cmd">curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash</code></pre>
+      <button class="copy" data-copy="cmd">Copy Linux/macOS</button>
+    </div>
+    <div class="install-box">
+      <pre><code id="cmd-windows">irm https://usagewidget.edmundlim.systems/install.ps1 | iex</code></pre>
+      <button class="copy" data-copy="cmd-windows">Copy Windows</button>
     </div>
     <p class="note">
-      This one-line installer is for the recommended Linux host. Native macOS and Windows downloads are available in GitHub Releases.
+      The installer detects Linux, macOS, or Windows plus amd64/arm64, verifies the matching release, preserves existing data, and asks for required setup values.
       Then build the iOS app from the
       <a href="https://github.com/EdmundLimBoEn/UsageWidget">source repository</a>
       and scan the setup QR the installer prints. Requires iOS 26+.
@@ -255,12 +260,12 @@ footer nav{display:flex;gap:22px}
 </footer>
 
 <script>
-document.getElementById("copy").addEventListener("click", async () => {
-  const btn = document.getElementById("copy");
-  await navigator.clipboard.writeText(document.getElementById("cmd").textContent);
+document.querySelectorAll("[data-copy]").forEach((btn) => btn.addEventListener("click", async () => {
+  const original = btn.textContent;
+  await navigator.clipboard.writeText(document.getElementById(btn.dataset.copy).textContent);
   btn.textContent = "Copied!";
-  setTimeout(() => { btn.textContent = "Copy"; }, 1500);
-});
+  setTimeout(() => { btn.textContent = original; }, 1500);
+}));
 </script>
 
 </body>

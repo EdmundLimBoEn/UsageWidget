@@ -56,7 +56,7 @@ architecture, verifies its checksum, and invokes the release installer. No
 repository clone or local build is required:
 
 ```bash
-curl -fsSL https://usagewidget.edmundlim.systems/install.sh | sudo bash
+curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 ```
 
 The bootstrap prompts through the terminal for the unprivileged Linux account
@@ -110,6 +110,10 @@ with interactive sudo.
 
 ## Native macOS and Windows
 
+Both desktop platforms install from the same hosted installer service as
+Linux. The bootstrap detects the CPU architecture, verifies the release
+checksum, and keeps saved data outside the replaceable application directory.
+
 Desktop bundles run `usagewidgetd` in the foreground as the signed-in user.
 They use native SQLite files and require no systemd, sudo, WSL, Docker, or CGO.
 Unlike the Linux service layout, desktop mode does not isolate provider-session
@@ -117,7 +121,12 @@ access in a second OS account.
 
 ### macOS
 
-Extract the matching `darwin-amd64` or `darwin-arm64` release and run:
+```bash
+curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
+```
+
+For a manual archive install instead, extract the matching `darwin-amd64` or
+`darwin-arm64` release and run:
 
 ```bash
 ./start-server.sh
@@ -130,8 +139,12 @@ the user's umask. Override discovery with `CODEXBAR_BIN=/absolute/path` or set
 
 ### Windows 10/11
 
-Extract `windows-amd64` (or `windows-arm64` on Windows on Arm), open PowerShell
-in that directory, and run:
+```powershell
+irm https://usagewidget.edmundlim.systems/install.ps1 | iex
+```
+
+For a manual archive install instead, extract `windows-amd64` (or
+`windows-arm64` on Windows on Arm), open PowerShell in that directory, and run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\start-server.ps1 `

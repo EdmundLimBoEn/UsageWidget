@@ -45,6 +45,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Parse hosted Windows installer
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "install.ps1"
+          node -e "import('./worker/install.js').then(async ({default:w}) => process.stdout.write(await (await w.fetch(new Request('https://usagewidget.edmundlim.systems/install.ps1'))).text()))" |
+            Set-Content -LiteralPath $installer -Encoding UTF8
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $installer,
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
       - name: Parse launcher and build native daemon
         shell: pwsh
         run: |
