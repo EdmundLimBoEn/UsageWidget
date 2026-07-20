@@ -230,7 +230,7 @@ footer nav{display:flex;gap:22px}
 <section id="install">
   <div class="wrap">
     <h2>Get started</h2>
-    <p class="sub">No clone and no flags. Choose the native command for your computer:</p>
+    <p class="sub">Run from any computer and install to any Linux, macOS, or Windows SSH target:</p>
     <div class="install-box">
       <pre><code id="cmd">curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash</code></pre>
       <button class="copy" data-copy="cmd">Copy Linux/macOS</button>
@@ -240,7 +240,7 @@ footer nav{display:flex;gap:22px}
       <button class="copy" data-copy="cmd-windows">Copy Windows</button>
     </div>
     <p class="note">
-      The installer detects Linux, macOS, or Windows plus amd64/arm64, verifies the matching release, preserves existing data, and asks for required setup values.
+      The installer detects the remote OS and amd64/arm64 architecture, verifies the matching release on the target, preserves existing data, configures Tailscale, and prints the iPhone setup QR locally.
       Then build the iOS app from the
       <a href="https://github.com/EdmundLimBoEn/UsageWidget">source repository</a>
       and scan the setup QR the installer prints. Requires iOS 26+.

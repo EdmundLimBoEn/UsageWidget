@@ -50,18 +50,20 @@ installs the normal host packages before invoking it.
 
 ## Recommended installation
 
-Run the hosted bootstrap on the Linux server. It installs any missing standard
-download tools through `apt`, selects the latest release for the host
-architecture, verifies its checksum, and invokes the release installer. No
-repository clone or local build is required:
+Run the hosted bootstrap on any Linux or macOS controller (use the PowerShell
+equivalent on Windows). It connects to the selected target over SSH, detects
+Linux, macOS, or Windows plus its architecture, verifies the matching release
+there, and invokes the native installer. No repository clone or local build is
+required:
 
 ```bash
 curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 ```
 
-The bootstrap prompts through the terminal for the unprivileged Linux account
-that owns the CodexBar session. `--collector-user USER` remains available for
-non-interactive automation.
+The bootstrap prompts for the SSH destination and any target-specific CodexBar
+source. Linux targets additionally ask for the unprivileged collector account.
+Every target configures a private Tailscale route and prints the setup QR back
+in the controller terminal.
 
 The download domain is not used as the phone API address. Unless you explicitly
 pass a server URL override, the release installer discovers the host's private

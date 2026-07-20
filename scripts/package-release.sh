@@ -13,6 +13,7 @@ install -d "$STAGE/bin" "$STAGE/deploy"
 
 (cd "$ROOT/server" && CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -ldflags "-s -w -X usagewidget/server.Version=$VERSION" -o "$STAGE/bin/usagewidgetd" ./cmd/usagewidgetd)
 (cd "$ROOT/server" && CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -ldflags "-s -w -X usagewidget/server.Version=$VERSION" -o "$STAGE/bin/usagewidget-collector" ./cmd/usagewidget-collector)
+(cd "$ROOT/server" && CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build -trimpath -ldflags "-s -w" -o "$STAGE/bin/usagewidget-qr" ./cmd/usagewidget-qr)
 install -m 0755 "$ROOT/cli/usagewidget" "$STAGE/usagewidget"
 install -m 0755 "$ROOT/server-install.sh" "$STAGE/server-install.sh"
 install -m 0644 "$ROOT/server/deploy/usagewidget.service" "$ROOT/server/deploy/usagewidget-collector.service" "$STAGE/deploy/"

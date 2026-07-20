@@ -22,14 +22,18 @@ suffix=""
 (cd "$ROOT/server" && CGO_ENABLED=0 GOOS="$OS" GOARCH="$ARCH" go build -trimpath \
   -ldflags "-s -w -X usagewidget/server.Version=$VERSION" \
   -o "$STAGE/bin/usagewidgetd$suffix" ./cmd/usagewidgetd)
+(cd "$ROOT/server" && CGO_ENABLED=0 GOOS="$OS" GOARCH="$ARCH" go build -trimpath \
+  -ldflags "-s -w" -o "$STAGE/bin/usagewidget-qr$suffix" ./cmd/usagewidget-qr)
 
 install -m 0644 "$ROOT/README.md" "$ROOT/SECURITY.md" "$STAGE/"
 if [[ $OS == darwin ]]; then
   install -m 0755 "$ROOT/server/deploy/start-macos.sh" "$STAGE/start-server.sh"
+  install -m 0755 "$ROOT/server/deploy/install-macos.sh" "$STAGE/install-server.sh"
   (cd "$DIST" && tar -czf "$NAME.tar.gz" "$NAME")
   artifact="$DIST/$NAME.tar.gz"
 else
   install -m 0644 "$ROOT/server/deploy/start-windows.ps1" "$STAGE/start-server.ps1"
+  install -m 0644 "$ROOT/server/deploy/install-windows.ps1" "$STAGE/install-server.ps1"
   command -v zip >/dev/null 2>&1 || { echo "zip is required for Windows bundles" >&2; exit 1; }
   (cd "$DIST" && zip -qr "$NAME.zip" "$NAME")
   artifact="$DIST/$NAME.zip"

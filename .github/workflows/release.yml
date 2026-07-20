@@ -33,7 +33,7 @@ jobs:
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o "$RUNNER_TEMP/usagewidgetd-darwin-arm64" ./cmd/usagewidgetd
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o "$RUNNER_TEMP/usagewidgetd-windows-amd64.exe" ./cmd/usagewidgetd
           CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -o "$RUNNER_TEMP/usagewidgetd-windows-arm64.exe" ./cmd/usagewidgetd
-      - run: bash -n server-install.sh server-setup.sh scripts/package-release.sh scripts/package-desktop-release.sh cli/usagewidget server/deploy/redeploy.sh server/deploy/start-macos.sh
+      - run: bash -n server-install.sh server-setup.sh scripts/package-release.sh scripts/package-desktop-release.sh cli/usagewidget server/deploy/redeploy.sh server/deploy/start-macos.sh server/deploy/install-macos.sh
       - run: |
           tests/installer_test.sh
           bash tests/cli_test.sh
@@ -73,7 +73,15 @@ jobs:
             [ref]$parseErrors
           ) | Out-Null
           if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD\deploy\install-windows.ps1",
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw ($parseErrors | Out-String) }
           go build -o usagewidgetd.exe ./cmd/usagewidgetd
+          go build -o usagewidget-qr.exe ./cmd/usagewidget-qr
         working-directory: server
       - name: Run Windows API and collection smoke test
         shell: pwsh

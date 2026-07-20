@@ -155,11 +155,18 @@ configure_apns() {
 }
 
 validate_collector() {
-  local home; home="$(getent passwd "$COLLECTOR_USER" | cut -d: -f6)"
+  local home output; home="$(getent passwd "$COLLECTOR_USER" | cut -d: -f6)"
   if ! runuser -u "$COLLECTOR_USER" -- env HOME="$home" "$CODEXBAR_BIN" config validate >/dev/null; then die "CodexBar configuration is invalid for $COLLECTOR_USER"; fi
-  if ! runuser -u "$COLLECTOR_USER" -- env HOME="$home" "$CODEXBAR_BIN" usage --format json >/dev/null; then
-    die "CodexBar found no usable provider session. Log in to Codex/Claude as '$COLLECTOR_USER', then rerun the installer; credentials are never collected here"
+  output="$(mktemp /tmp/usagewidget-codexbar-validation.XXXXXX)"
+  if ! runuser -u "$COLLECTOR_USER" -- env HOME="$home" "$CODEXBAR_BIN" usage --format json >"$output"; then
+    if jq -e 'type == "array" and any(.[]; .usage? != null)' "$output" >/dev/null 2>&1; then
+      warn "CodexBar returned usable usage data but one or more enabled providers failed; continuing with the working providers"
+    else
+      rm -f -- "$output"
+      die "CodexBar found no usable provider session. Log in to Codex/Claude as '$COLLECTOR_USER', then rerun the installer; credentials are never collected here"
+    fi
   fi
+  rm -f -- "$output"
 }
 
 write_initial_env() {
