@@ -153,3 +153,61 @@ func TestOpenUsageLaterAuthDoesNotPoisonHealthyAccount(t *testing.T) {
 		t.Fatalf("healthy cursor poisoned: %+v", snap.Providers[0])
 	}
 }
+
+func TestBillingResetFallbackDoesNotApplyToUsageWindows(t *testing.T) {
+	body := `{
+		"schema_version":"1",
+		"snapshots":[{
+			"provider_id":"claude_code",
+			"status":"OK",
+			"metrics":{
+				"usage_five_hour":{"used":22,"limit":100,"unit":"%","window":"5h"},
+				"plan_percent_used":{"used":40,"limit":100,"unit":"%","window":"30d"}
+			},
+			"resets":{"billing_cycle_end":"2026-09-10T00:00:00Z"}
+		}]
+	}`
+	snap, err := Normalize([]byte(body), 5, time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := snap.Providers[0]
+	var fiveHour, plan Window
+	for _, w := range p.Windows {
+		switch w.Title {
+		case "5h":
+			fiveHour = w
+		case "Plan":
+			plan = w
+		}
+	}
+	if fiveHour.ResetsAt != nil {
+		t.Fatalf("5h window incorrectly inherited billing reset: %+v", fiveHour)
+	}
+	if plan.ResetsAt == nil {
+		t.Fatalf("plan window missing billing reset: %+v", plan)
+	}
+}
+
+func TestWhitespaceOpenUsageCmdIsIgnored(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
+	t.Setenv("OPENUSAGE_CMD", "   ")
+	t.Setenv("OPENUSAGE_BIN", "")
+	t.Setenv("OPENUSAGE_URL", "")
+	t.Setenv("OPENUSAGE_SOCKET", "")
+	t.Setenv("CODEXBAR_URL", "")
+	t.Setenv("CODEXBAR_BIN", "")
+	t.Setenv("CODEXBAR_CMD", "")
+	t.Setenv("USAGE_SOURCE", "auto")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OpenUsageCmd != "" {
+		t.Fatalf("expected trimmed empty OpenUsageCmd, got %q", cfg.OpenUsageCmd)
+	}
+	src := NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "openusage-collector" {
+		t.Fatalf("got %s", src.SourceName())
+	}
+}

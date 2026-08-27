@@ -30,14 +30,27 @@ func NewCollector(binary string) *Collector {
 
 func NewCollectorWithArgs(binary string, args []string) *Collector {
 	if len(args) == 0 {
-		args = defaultCollectorArgs(binary)
+		args = defaultCollectorArgs(binary, "")
 	}
 	return &Collector{Binary: binary, Args: args, Timeout: 90 * time.Second}
 }
 
-func defaultCollectorArgs(binary string) []string {
-	base := strings.ToLower(binary)
-	if strings.Contains(base, "openusage") {
+func NewCollectorForSource(binary, source string, args []string) *Collector {
+	if len(args) == 0 {
+		args = defaultCollectorArgs(binary, source)
+	}
+	return &Collector{Binary: binary, Args: args, Timeout: 90 * time.Second}
+}
+
+func defaultCollectorArgs(binary, source string) []string {
+	src := strings.ToLower(strings.TrimSpace(source))
+	switch src {
+	case "openusage":
+		return []string{"export", "--format", "json"}
+	case "codexbar":
+		return []string{"usage", "--format", "json"}
+	}
+	if strings.Contains(strings.ToLower(binary), "openusage") {
 		return []string{"export", "--format", "json"}
 	}
 	return []string{"usage", "--format", "json"}
@@ -62,7 +75,7 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	args := c.Args
 	if len(args) == 0 {
-		args = defaultCollectorArgs(c.Binary)
+		args = defaultCollectorArgs(c.Binary, "")
 	}
 
 	var stdout, stderr bytes.Buffer

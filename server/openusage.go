@@ -72,6 +72,9 @@ func (c *OpenUsageClient) Fetch(ctx context.Context) ([]byte, error) {
 	if len(c.Cmd) > 0 {
 		return c.fetchCmd(ctx)
 	}
+	if c.httpClient == nil || c.URL == "" {
+		return nil, fmt.Errorf("openusage: no command or HTTP transport configured")
+	}
 	return c.fetchHTTP(ctx)
 }
 

@@ -2,8 +2,8 @@
 
 UsageWidget is a self-hosted iOS 26+ app and large Home Screen widget for
 monitoring AI coding capacity. A small Go service runs on Linux, macOS, or
-Windows, normalizes OpenUsage (preferred) or CodexBar snapshots into
-quota-style windows, stores history in SQLite, and sends APNs alerts and
+Windows, normalizes OpenUsage (preferred on Linux/macOS) or CodexBar snapshots
+into quota-style windows, stores history in SQLite, and sends APNs alerts and
 WidgetKit refreshes to the phone.
 
 ```text
@@ -13,9 +13,10 @@ WidgetKit refreshes to the phone.
 └──────────────┘                      └──────────────────┘                 └─────────────────┘
 ```
 
-Linux uses the isolated Unix-socket collector shown above. Native macOS and
-Windows runs can point at `openusage export`, an OpenUsage hub URL, or a
-legacy CodexBar CLI/HTTP source.
+Linux uses the isolated Unix-socket collector shown above. Native macOS runs
+can point at `openusage export`, an OpenUsage hub URL, or a legacy CodexBar
+CLI/HTTP source. Native Windows installs currently use CodexBar
+(`CODEXBAR_BIN` / `CODEXBAR_URL`) only.
 
 ## What it does
 
@@ -144,7 +145,8 @@ the controller terminal. Existing configuration and databases are retained.
 
 The supported release hosts are Ubuntu 22.04, Ubuntu 24.04, and Debian 12 on
 amd64 or arm64. The host needs systemd, Tailscale, an unprivileged account with
-a working CodexBar session, and root or sudo access for installation.
+a working OpenUsage install (preferred) or CodexBar session, and root or sudo
+access for installation.
 
 The fastest setup downloads the latest release for the host architecture,
 verifies its checksum, installs both services, and prints the private iPhone
@@ -155,7 +157,7 @@ curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 ```
 
 The installer first asks for the SSH destination, then which unprivileged Linux
-account owns the working CodexBar session. It invokes `sudo` only for remote
+account owns the working OpenUsage/CodexBar session. It invokes `sudo` only for remote
 system installation steps. You do not
 need to clone this repository or add command-line flags.
 When installation finishes, scan the QR in UsageWidget; the server URL and
@@ -172,7 +174,7 @@ sudo usagewidget-admin doctor
 sudo usagewidget-admin qr
 ```
 
-The installer verifies the release contents, installs CodexBar when needed,
+The installer verifies the release contents, installs OpenUsage or CodexBar when needed,
 preserves configuration and SQLite data on reruns, binds the API to
 `127.0.0.1:8377`, configures the Tailscale Serve `/usagewidget` route, and
 prints a setup QR when `qrencode` is available.
@@ -234,21 +236,28 @@ Go 1.26.5 or newer is required by `server/go.mod`.
 ```bash
 cd server
 export USAGEWIDGET_TOKEN="$(openssl rand -hex 32)"
-export CODEXBAR_URL=http://127.0.0.1:8765/usage
+export USAGE_SOURCE=auto
+# Preferred: OpenUsage CLI or hub
+export OPENUSAGE_BIN="$(command -v openusage)"
+# Legacy fallback: CodexBar HTTP
+# export USAGE_SOURCE=codexbar
+# export CODEXBAR_URL=http://127.0.0.1:8765/usage
 go run ./cmd/usagewidgetd
 ```
 
 The data source is selected in this order:
 
-1. `CODEXBAR_CMD`, a legacy command override for an account that owns the
-   provider sessions.
-2. `CODEXBAR_URL`, an HTTP development override.
-3. `CODEXBAR_BIN`, an exact CLI path used by native desktop installs.
-4. `COLLECTOR_SOCKET`, the Linux production default
-   (`/run/usagewidget/collector.sock`) served by the isolated collector.
+1. `OPENUSAGE_CMD`, a full OpenUsage command override.
+2. `OPENUSAGE_URL`, an OpenUsage hub `/v1/snapshots` URL.
+3. `OPENUSAGE_BIN`, an exact `openusage` path (`export --format json`).
+4. `OPENUSAGE_SOCKET`, an OpenUsage daemon UDS for `/v1/read-model`.
+5. Collector socket (Linux production default
+   `/run/usagewidget/collector.sock`) when `USAGE_SOURCE` is `auto`/`openusage`.
+6. Legacy CodexBar: `CODEXBAR_CMD`, `CODEXBAR_URL`, `CODEXBAR_BIN`, then the
+   same collector socket in CodexBar mode.
 
-Disabled CodexBar providers remain absent instead of becoming permanent error
-rows.
+Providers without usage-limit gauges are omitted instead of becoming permanent
+noise rows.
 
 ## Connect the iPhone
 

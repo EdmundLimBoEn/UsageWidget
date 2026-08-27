@@ -82,7 +82,7 @@ func normalizeOpenUsage(body []byte, pollIntervalMinutes int, fetchedAt time.Tim
 		}
 
 		status := strings.ToUpper(strings.TrimSpace(raw.Status))
-		windows := openUsageGaugeWindows(id, raw)
+		windows := openUsageGaugeWindows(id, raw, fetchedAt)
 		hadWindows := len(p.Windows) > 0
 
 		switch status {
@@ -176,7 +176,7 @@ func extractOpenUsageSnapshots(body []byte) ([]openUsageSnapshot, error) {
 	return nil, fmt.Errorf("normalize openusage: unrecognized payload")
 }
 
-func openUsageGaugeWindows(providerID string, snap openUsageSnapshot) []Window {
+func openUsageGaugeWindows(providerID string, snap openUsageSnapshot, now time.Time) []Window {
 	if len(snap.Metrics) == 0 {
 		return nil
 	}
@@ -219,7 +219,7 @@ func openUsageGaugeWindows(providerID string, snap openUsageSnapshot) []Window {
 			WindowLabel:      windowLabel,
 		}
 		if resetsAt != nil && windowLabel != "" {
-			w.PaceForecast = paceProjection(used, *resetsAt, windowLabel, time.Now().UTC())
+			w.PaceForecast = paceProjection(used, *resetsAt, windowLabel, now)
 		}
 		out = append(out, w)
 	}
@@ -378,17 +378,17 @@ func resolveReset(resets map[string]time.Time, key string) (time.Time, bool) {
 	if t, ok := resets[key]; ok && !t.IsZero() {
 		return t, true
 	}
-	// Cursor often keys resets as billing_cycle_end while gauges use plan_* keys.
-	fallbacks := []string{
-		key + "_reset",
-		"billing_cycle_end",
-		"billing_cycle",
-		"plan_reset",
-		"rate_limit_primary",
-		"rate_limit_secondary",
-		"usage_five_hour",
-		"usage_seven_day",
-		"codex_credit_limit",
+	// Equivalent metric aliases only — never borrow an unrelated window's clock.
+	fallbacks := []string{key + "_reset"}
+	switch {
+	case strings.HasPrefix(key, "plan_") || strings.Contains(key, "billing") || key == "spend_limit" || key == "individual_spend" || key == "team_budget" || key == "plan_spend":
+		fallbacks = append(fallbacks, "billing_cycle_end", "billing_cycle", "plan_reset")
+	case key == "codex_credit_percent_used":
+		fallbacks = append(fallbacks, "codex_credit_limit")
+	case strings.HasPrefix(key, "rate_limit_"):
+		fallbacks = append(fallbacks, "rate_limit_primary", "rate_limit_secondary")
+	case strings.HasPrefix(key, "usage_"):
+		// Keep usage_* gauges on their own reset keys only.
 	}
 	for _, fb := range fallbacks {
 		if t, ok := resets[fb]; ok && !t.IsZero() {

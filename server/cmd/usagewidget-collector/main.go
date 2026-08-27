@@ -15,11 +15,22 @@ import (
 )
 
 func main() {
-	binary := firstNonEmpty(
-		os.Getenv("OPENUSAGE_BIN"),
-		os.Getenv("CODEXBAR_BIN"),
-		"openusage",
-	)
+	openusageBin := strings.TrimSpace(os.Getenv("OPENUSAGE_BIN"))
+	codexbarBin := strings.TrimSpace(os.Getenv("CODEXBAR_BIN"))
+	sourceHint := strings.ToLower(strings.TrimSpace(os.Getenv("COLLECTOR_SOURCE")))
+
+	binary := firstNonEmpty(openusageBin, codexbarBin, "openusage")
+	if sourceHint == "" {
+		switch {
+		case openusageBin != "":
+			sourceHint = "openusage"
+		case codexbarBin != "":
+			sourceHint = "codexbar"
+		default:
+			sourceHint = "openusage"
+		}
+	}
+
 	socketPath := os.Getenv("COLLECTOR_SOCKET")
 	if socketPath == "" {
 		socketPath = "/run/usagewidget/collector.sock"
@@ -42,7 +53,7 @@ func main() {
 		log.Fatalf("chmod socket: %v", err)
 	}
 
-	collector := server.NewCollectorWithArgs(binary, args)
+	collector := server.NewCollectorForSource(binary, sourceHint, args)
 	srv := &http.Server{
 		Handler:           collector.Handler(),
 		ReadHeaderTimeout: 2 * time.Second,
@@ -59,7 +70,7 @@ func main() {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
-	log.Printf("collector listening on %s (%s %v)", socketPath, binary, collectorArgs(collector))
+	log.Printf("collector listening on %s (%s %v)", socketPath, binary, collector.Args)
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve: %v", err)
 	}
@@ -72,11 +83,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func collectorArgs(c *server.Collector) []string {
-	if c == nil {
-		return nil
-	}
-	return c.Args
 }

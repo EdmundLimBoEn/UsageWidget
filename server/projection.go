@@ -170,7 +170,11 @@ func paceAnnotationFromHistory(f *WindowForecast) string {
 		return ""
 	}
 	if f.ExhaustsBeforeReset && !f.EstimatedExhaustionAt.IsZero() {
-		return "100% in " + formatDurationShort(time.Until(f.EstimatedExhaustionAt))
+		base := f.ComputedAt
+		if base.IsZero() {
+			base = time.Now().UTC()
+		}
+		return "100% in " + formatDurationShort(f.EstimatedExhaustionAt.Sub(base))
 	}
 	if f.ProjectedPercentAtReset != nil {
 		return fmt.Sprintf("~%.0f%% by reset", *f.ProjectedPercentAtReset)
