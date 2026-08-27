@@ -22,7 +22,7 @@ type ForcePoller interface {
 type API struct {
 	cfg      Config
 	store    *Store
-	codexbar *CodexBarClient
+	source   UsageSource
 	poller   ForcePoller
 	notifier Notifier
 
@@ -39,8 +39,8 @@ type API struct {
 	readinessTestAt     map[string]time.Time
 }
 
-func NewAPI(cfg Config, store *Store, codexbar *CodexBarClient) *API {
-	api := &API{cfg: cfg, store: store, codexbar: codexbar, readinessTestAt: make(map[string]time.Time)}
+func NewAPI(cfg Config, store *Store, source UsageSource) *API {
+	api := &API{cfg: cfg, store: store, source: source, readinessTestAt: make(map[string]time.Time)}
 	if results, err := store.RecentPollOutcomes(50); err == nil {
 		for _, result := range results {
 			api.RecordPollOutcome(result)
@@ -358,7 +358,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 type healthResponse struct {
 	Service        string               `json:"service"`
-	CodexBar       bool                 `json:"codexbar"`
+	CodexBar       bool                 `json:"codexbar"` // legacy alias for upstream OK
+	Upstream       bool                 `json:"upstream"`
 	Database       bool                 `json:"database"`
 	Polling        bool                 `json:"polling"`
 	APNs           bool                 `json:"apns"`
@@ -401,7 +402,7 @@ func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	polling, lastPollAt, lastSuccessAt := a.polling, a.lastPollAt, a.lastSuccessAt
 	collector := collectorHealth{
-		Source: a.codexbar.Source, LastAttemptAt: a.lastPollAt, LastSuccessAt: a.lastSuccessAt,
+		Source: a.source.SourceName(), LastAttemptAt: a.lastPollAt, LastSuccessAt: a.lastSuccessAt,
 		LastChangedAt: a.lastChangedAt, NextAttemptAt: a.nextPollAt, DurationMS: a.lastPollDurationMS,
 		ConsecutiveFailures: a.consecutiveFailures, LastError: a.lastPollError,
 	}
@@ -425,6 +426,7 @@ func (a *API) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{
 		Service:        "ok",
 		CodexBar:       codexbarOK,
+		Upstream:       codexbarOK,
 		Database:       dbErr == nil,
 		Polling:        polling,
 		APNs:           a.apnsOperational(),

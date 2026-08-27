@@ -165,7 +165,7 @@ struct ProviderCapacityCard: View {
             }
 
             if provider.windows.isEmpty && provider.error?.isEmpty != false {
-                Text("No rate windows reported")
+                Text("No usage limits reported")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {

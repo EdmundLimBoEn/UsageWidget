@@ -3,12 +3,14 @@ import SwiftUI
 enum ProviderLogoAsset {
     static func name(for providerID: String) -> String? {
         switch providerID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "codex":
+        case "codex", "codex_cli":
             "ProviderCodex"
-        case "claude":
+        case "claude", "claude_code":
             "ProviderClaude"
-        case "grok":
+        case "grok", "xai":
             "ProviderGrok"
+        case "cursor":
+            "ProviderCursor"
         default:
             nil
         }

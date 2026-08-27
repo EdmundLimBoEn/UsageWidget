@@ -24,8 +24,12 @@ func TestLoadConfigRejectsWeakOrWhitespaceToken(t *testing.T) {
 
 func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
+	t.Setenv("USAGE_SOURCE", "")
+	t.Setenv("OPENUSAGE_URL", "")
+	t.Setenv("OPENUSAGE_BIN", "")
 	t.Setenv("CODEXBAR_URL", "")
 	t.Setenv("CODEXBAR_BIN", "")
+	t.Setenv("COLLECTOR_SOCKET", "")
 	t.Setenv("DB_PATH", "")
 	t.Setenv("LISTEN_ADDR", "")
 
@@ -36,8 +40,11 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.CodexBarURL != "" {
 		t.Fatalf("unexpected default CodexBarURL: %s", cfg.CodexBarURL)
 	}
-	if cfg.CollectorSocket != "/run/usagewidget/codexbar.sock" {
+	if cfg.CollectorSocket != "/run/usagewidget/collector.sock" {
 		t.Fatalf("unexpected collector socket: %s", cfg.CollectorSocket)
+	}
+	if cfg.UsageSource != "auto" {
+		t.Fatalf("unexpected usage source: %s", cfg.UsageSource)
 	}
 	if cfg.DBPath != "./usagewidget.db" {
 		t.Fatalf("unexpected default DBPath: %s", cfg.DBPath)
@@ -76,5 +83,28 @@ func TestLoadConfigAPNsEnabledWhenAllVarsPresent(t *testing.T) {
 	}
 	if !cfg.APNsEnabled() {
 		t.Fatalf("expected APNs enabled when all vars present")
+	}
+}
+
+func TestNewUsageSourceFromConfigPrefersOpenUsage(t *testing.T) {
+	cfg := Config{UsageSource: "auto", CollectorSocket: "/tmp/collector.sock"}
+	src := NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "openusage-collector" {
+		t.Fatalf("expected openusage-collector, got %s", src.SourceName())
+	}
+	cfg.CodexBarURL = "http://127.0.0.1:8765/usage"
+	src = NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "http" {
+		t.Fatalf("expected codexbar http when CODEXBAR_URL set, got %s", src.SourceName())
+	}
+	cfg = Config{UsageSource: "openusage", OpenUsageBin: "/usr/bin/openusage"}
+	src = NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "openusage-cli" {
+		t.Fatalf("expected openusage-cli, got %s", src.SourceName())
+	}
+	cfg = Config{UsageSource: "openusage", OpenUsageSocket: "/tmp/openusage.sock"}
+	src = NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "openusage-daemon" {
+		t.Fatalf("expected openusage-daemon, got %s", src.SourceName())
 	}
 }

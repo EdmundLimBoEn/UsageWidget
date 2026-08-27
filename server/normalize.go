@@ -12,6 +12,8 @@ type Snapshot struct {
 	Stale               bool       `json:"stale"`
 	Providers           []Provider `json:"providers"`
 	PollIntervalMinutes int        `json:"pollIntervalMinutes"`
+	// SourceKind is "openusage" or "codexbar". Empty means legacy/unknown.
+	SourceKind string `json:"sourceKind,omitempty"`
 }
 
 type Provider struct {
@@ -31,6 +33,8 @@ type Window struct {
 	UsedPercent      float64         `json:"usedPercent"`
 	RemainingPercent float64         `json:"remainingPercent"`
 	ResetsAt         *time.Time      `json:"resetsAt,omitempty"`
+	WindowLabel      string          `json:"windowLabel,omitempty"`
+	PaceForecast     *WindowForecast `json:"-"` // filled during normalize; merged into Forecast on save
 	Forecast         *WindowForecast `json:"forecast,omitempty"`
 }
 
@@ -47,6 +51,13 @@ type Credits struct {
 //
 //	provider, usage.{primary,secondary,tertiary}, credits.remaining, error.message
 func Normalize(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snapshot, error) {
+	if looksLikeOpenUsage(body) {
+		return normalizeOpenUsage(body, pollIntervalMinutes, fetchedAt)
+	}
+	return normalizeCodexBar(body, pollIntervalMinutes, fetchedAt)
+}
+
+func normalizeCodexBar(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snapshot, error) {
 	rawProviders, err := extractProviderRaw(body)
 	if err != nil {
 		return Snapshot{}, err
@@ -58,7 +69,24 @@ func Normalize(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snaps
 		if err != nil {
 			return Snapshot{}, err
 		}
+		// CodexBar/ccusage defaults can surface providers with no rate windows.
+		// Keep erroring/stale providers; drop empty no-limit rows.
+		if len(p.Windows) == 0 && p.Error == "" && !p.Stale {
+			continue
+		}
 		providers = append(providers, p)
+	}
+
+	for pi := range providers {
+		for wi := range providers[pi].Windows {
+			w := &providers[pi].Windows[wi]
+			if w.WindowLabel == "" {
+				w.WindowLabel = inferWindowLabel(w.Title, w.Key)
+			}
+			if w.ResetsAt != nil && w.WindowLabel != "" {
+				w.PaceForecast = paceProjection(w.UsedPercent, *w.ResetsAt, w.WindowLabel, fetchedAt)
+			}
+		}
 	}
 
 	return Snapshot{
@@ -66,7 +94,24 @@ func Normalize(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snaps
 		Stale:               false,
 		Providers:           providers,
 		PollIntervalMinutes: pollIntervalMinutes,
+		SourceKind:          "codexbar",
 	}, nil
+}
+
+func inferWindowLabel(title, key string) string {
+	lower := strings.ToLower(title + " " + key)
+	switch {
+	case strings.Contains(lower, "5h") || strings.Contains(lower, "5 h") || strings.Contains(lower, "primary"):
+		return "5h"
+	case strings.Contains(lower, "weekly") || strings.Contains(lower, "7d") || strings.Contains(lower, "secondary"):
+		return "7d"
+	case strings.Contains(lower, "monthly") || strings.Contains(lower, "30d"):
+		return "30d"
+	case strings.Contains(lower, "daily") || strings.Contains(lower, "1d") || strings.Contains(lower, "24h"):
+		return "1d"
+	default:
+		return ""
+	}
 }
 
 func extractProviderRaw(body []byte) ([]json.RawMessage, error) {
@@ -256,10 +301,18 @@ func decodeErrorMessage(raw json.RawMessage) string {
 }
 
 func displayName(id string) string {
+	id = strings.TrimSpace(id)
 	if id == "" {
 		return "Unknown"
 	}
-	return strings.ToUpper(id[:1]) + id[1:]
+	parts := strings.Fields(id)
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func windowTitle(key string, minutes *float64) string {

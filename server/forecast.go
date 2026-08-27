@@ -8,12 +8,16 @@ import (
 )
 
 type WindowForecast struct {
-	ComputedAt             time.Time `json:"computedAt"`
-	BurnRatePercentPerHour float64   `json:"burnRatePercentPerHour"`
-	EstimatedExhaustionAt  time.Time `json:"estimatedExhaustionAt"`
-	ExhaustsBeforeReset    bool      `json:"exhaustsBeforeReset"`
-	SampleCount            int       `json:"sampleCount"`
-	BasedOnHours           float64   `json:"basedOnHours"`
+	ComputedAt              time.Time `json:"computedAt"`
+	BurnRatePercentPerHour  float64   `json:"burnRatePercentPerHour"`
+	EstimatedExhaustionAt   time.Time `json:"estimatedExhaustionAt"`
+	ExhaustsBeforeReset     bool      `json:"exhaustsBeforeReset"`
+	SampleCount             int       `json:"sampleCount"`
+	BasedOnHours            float64   `json:"basedOnHours"`
+	Source                  string    `json:"source,omitempty"` // pace | history
+	WindowLabel             string    `json:"windowLabel,omitempty"`
+	ProjectedPercentAtReset *float64  `json:"projectedPercentAtReset,omitempty"`
+	Annotation              string    `json:"annotation,omitempty"`
 }
 
 type usageSample struct {
@@ -76,5 +80,6 @@ func forecastWindowTx(tx *sql.Tx, windowID, epoch string, resetsAt time.Time, cu
 	return &WindowForecast{
 		ComputedAt: now.UTC(), BurnRatePercentPerHour: slope, EstimatedExhaustionAt: estimated.UTC(),
 		ExhaustsBeforeReset: estimated.Before(resetsAt), SampleCount: len(samples), BasedOnHours: span.Hours(),
+		Source: "history",
 	}, nil
 }

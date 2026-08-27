@@ -1,26 +1,32 @@
 # UsageWidget
 
 UsageWidget is a self-hosted iOS 26+ app and large Home Screen widget for
-monitoring CodexBar usage. A small Go service runs on Linux, macOS, or Windows,
-normalizes every enabled provider, stores history in SQLite, and
-sends APNs alerts and WidgetKit refreshes to the phone.
+monitoring AI coding capacity. A small Go service runs on Linux, macOS, or
+Windows, normalizes OpenUsage (preferred on Linux/macOS) or CodexBar snapshots
+into quota-style windows, stores history in SQLite, and sends APNs alerts and
+WidgetKit refreshes to the phone.
 
 ```text
 ┌──────────────┐   Tailscale HTTPS    ┌──────────────────┐   Unix socket   ┌─────────────────┐
 │ iPhone app   │ ───────────────────► │ usagewidgetd     │ ──────────────► │ CLI collector   │
-│ + widget     │ ◄── APNs/WidgetKit ─ │ Go API + SQLite  │                 │ CodexBar session│
+│ + widget     │ ◄── APNs/WidgetKit ─ │ Go API + SQLite  │                 │ OpenUsage export│
 └──────────────┘                      └──────────────────┘                 └─────────────────┘
 ```
 
-Linux uses the isolated Unix-socket collector shown above. Native macOS and
-Windows runs use an exact CodexBar CLI path or a configured CodexBar HTTP URL.
+Linux uses the isolated Unix-socket collector shown above. Native macOS runs
+can point at `openusage export`, an OpenUsage hub URL, or a legacy CodexBar
+CLI/HTTP source. Native Windows installs currently use CodexBar
+(`CODEXBAR_BIN` / `CODEXBAR_URL`) only.
 
 ## What it does
 
-- Discovers Codex, Claude, Grok, and other providers from CodexBar instead of
-  hard-coding a provider list.
-- Shows every rate window, reset time, remaining capacity, freshness state, and
-  a burn-rate forecast after enough history has accumulated.
+- Prefers OpenUsage-shaped capacity gauges (plan %, 5h/7d windows, Cursor
+  billing) and drops providers that only report telemetry without usage limits.
+- Includes Cursor alongside Codex, Claude Code, Copilot, Gemini, and Grok in
+  the default provider order.
+- Shows remaining capacity, reset time, and OpenUsage-style projected runouts
+  (`100% in …` / `~N% by reset`) as soon as a window + reset clock exist;
+  history-based burn rates still enrich forecasts after enough samples.
 - Supports global, per-provider, and per-window alert rules, quiet hours, and
   optional danger reminders.
 - Detects threshold crossings, scheduled resets, early “Tibo” resets, and
@@ -36,11 +42,11 @@ Windows runs use an exact CodexBar CLI path or a configured CodexBar HTTP URL.
 - Includes redacted health and device-readiness checks plus a targeted APNs and
   WidgetKit delivery test.
 
-Provider credentials never leave the machine running CodexBar. On Linux they
-remain isolated in the collector account; desktop mode runs as the signed-in
-user. The phone API does not return raw CodexBar payloads. The app and widget
-share the bearer token through a Keychain access group; App Group defaults
-contain only cached display data and preferences.
+Provider credentials never leave the machine running OpenUsage/CodexBar. On
+Linux they remain isolated in the collector account; desktop mode runs as the
+signed-in user. The phone API does not return raw upstream payloads. The app
+and widget share the bearer token through a Keychain access group; App Group
+defaults contain only cached display data and preferences.
 
 ## Built with Codex and GPT-5.6
 
@@ -82,7 +88,8 @@ that interacted poorly with rate limits; Codex helped trace it across the
 collection path and replace it with the current design.
 
 Codex and GPT-5.6 were development tools, not runtime dependencies. UsageWidget
-does not send requests to GPT-5.6: it reads usage data from CodexBar and serves
+does not send requests to GPT-5.6: it reads usage data from OpenUsage (or
+legacy CodexBar) and serves
 that data through the self-hosted system described below. Without Codex and
 GPT-5.6, UsageWidget would not have existed.
 
@@ -106,8 +113,8 @@ For Build Week verification, the primary Codex `/feedback` session is
 
 | Host | Support | Upstream source |
 |------|---------|-----------------|
-| Ubuntu 22.04/24.04, Debian 12 | Production service install (amd64/arm64) | Isolated CodexBar CLI collector |
-| macOS | Native foreground server (Intel/Apple silicon) | Local CodexBar CLI or `CODEXBAR_URL` |
+| Ubuntu 22.04/24.04, Debian 12 | Production service install (amd64/arm64) | Isolated OpenUsage/CodexBar collector |
+| macOS | Native foreground server (Intel/Apple silicon) | Local OpenUsage CLI, CodexBar CLI, or hub URL |
 | Windows 10/11 | Native foreground server (amd64/arm64) | `CODEXBAR_URL` or a compatible CLI build |
 
 The managed Linux service remains the recommended always-on deployment because it
@@ -138,7 +145,8 @@ the controller terminal. Existing configuration and databases are retained.
 
 The supported release hosts are Ubuntu 22.04, Ubuntu 24.04, and Debian 12 on
 amd64 or arm64. The host needs systemd, Tailscale, an unprivileged account with
-a working CodexBar session, and root or sudo access for installation.
+a working OpenUsage install (preferred) or CodexBar session, and root or sudo
+access for installation.
 
 The fastest setup downloads the latest release for the host architecture,
 verifies its checksum, installs both services, and prints the private iPhone
@@ -149,7 +157,7 @@ curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 ```
 
 The installer first asks for the SSH destination, then which unprivileged Linux
-account owns the working CodexBar session. It invokes `sudo` only for remote
+account owns the working OpenUsage/CodexBar session. It invokes `sudo` only for remote
 system installation steps. You do not
 need to clone this repository or add command-line flags.
 When installation finishes, scan the QR in UsageWidget; the server URL and
@@ -166,7 +174,7 @@ sudo usagewidget-admin doctor
 sudo usagewidget-admin qr
 ```
 
-The installer verifies the release contents, installs CodexBar when needed,
+The installer verifies the release contents, installs OpenUsage or CodexBar when needed,
 preserves configuration and SQLite data on reruns, binds the API to
 `127.0.0.1:8377`, configures the Tailscale Serve `/usagewidget` route, and
 prints a setup QR when `qrencode` is available.
@@ -228,21 +236,28 @@ Go 1.26.5 or newer is required by `server/go.mod`.
 ```bash
 cd server
 export USAGEWIDGET_TOKEN="$(openssl rand -hex 32)"
-export CODEXBAR_URL=http://127.0.0.1:8765/usage
+export USAGE_SOURCE=auto
+# Preferred: OpenUsage CLI or hub
+export OPENUSAGE_BIN="$(command -v openusage)"
+# Legacy fallback: CodexBar HTTP
+# export USAGE_SOURCE=codexbar
+# export CODEXBAR_URL=http://127.0.0.1:8765/usage
 go run ./cmd/usagewidgetd
 ```
 
 The data source is selected in this order:
 
-1. `CODEXBAR_CMD`, a legacy command override for an account that owns the
-   provider sessions.
-2. `CODEXBAR_URL`, an HTTP development override.
-3. `CODEXBAR_BIN`, an exact CLI path used by native desktop installs.
-4. `COLLECTOR_SOCKET`, the Linux production default
-   (`/run/usagewidget/codexbar.sock`) served by the isolated collector.
+1. `OPENUSAGE_CMD`, a full OpenUsage command override.
+2. `OPENUSAGE_URL`, an OpenUsage hub `/v1/snapshots` URL.
+3. `OPENUSAGE_BIN`, an exact `openusage` path (`export --format json`).
+4. `OPENUSAGE_SOCKET`, an OpenUsage daemon UDS for `/v1/read-model`.
+5. Collector socket (Linux production default
+   `/run/usagewidget/collector.sock`) when `USAGE_SOURCE` is `auto`/`openusage`.
+6. Legacy CodexBar: `CODEXBAR_CMD`, `CODEXBAR_URL`, `CODEXBAR_BIN`, then the
+   same collector socket in CodexBar mode.
 
-Disabled CodexBar providers remain absent instead of becoming permanent error
-rows.
+Providers without usage-limit gauges are omitted instead of becoming permanent
+noise rows.
 
 ## Connect the iPhone
 

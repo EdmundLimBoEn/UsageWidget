@@ -140,7 +140,7 @@ func TestGetSettingsDefaults(t *testing.T) {
 	if got.PollIntervalMinutes != 5 {
 		t.Fatalf("expected default poll interval 5, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 3 || got.ProviderOrder[0] != "codex" {
+	if len(got.ProviderOrder) != 7 || got.ProviderOrder[0] != "cursor" {
 		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
 	}
 	if !got.NotificationsEnabled {

@@ -14,18 +14,46 @@ import (
 
 const collectorMaxResponseBytes = 4 << 20
 
-// Collector executes exactly one configured binary with fixed CodexBar usage
-// arguments. Requests serialize so browser/app refreshes cannot fan out into
-// concurrent provider scrapes.
+// Collector executes one configured binary with fixed usage/export arguments.
+// Requests serialize so browser/app refreshes cannot fan out into concurrent scrapes.
 type Collector struct {
 	Binary  string
+	Args    []string
 	Timeout time.Duration
 
 	mu sync.Mutex
 }
 
 func NewCollector(binary string) *Collector {
-	return &Collector{Binary: binary, Timeout: 90 * time.Second}
+	return NewCollectorWithArgs(binary, nil)
+}
+
+func NewCollectorWithArgs(binary string, args []string) *Collector {
+	if len(args) == 0 {
+		args = defaultCollectorArgs(binary, "")
+	}
+	return &Collector{Binary: binary, Args: args, Timeout: 90 * time.Second}
+}
+
+func NewCollectorForSource(binary, source string, args []string) *Collector {
+	if len(args) == 0 {
+		args = defaultCollectorArgs(binary, source)
+	}
+	return &Collector{Binary: binary, Args: args, Timeout: 90 * time.Second}
+}
+
+func defaultCollectorArgs(binary, source string) []string {
+	src := strings.ToLower(strings.TrimSpace(source))
+	switch src {
+	case "openusage":
+		return []string{"export", "--format", "json"}
+	case "codexbar":
+		return []string{"usage", "--format", "json"}
+	}
+	if strings.Contains(strings.ToLower(binary), "openusage") {
+		return []string{"export", "--format", "json"}
+	}
+	return []string{"usage", "--format", "json"}
 }
 
 func (c *Collector) Handler() http.Handler {
@@ -45,11 +73,14 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
+	args := c.Args
+	if len(args) == 0 {
+		args = defaultCollectorArgs(c.Binary, "")
+	}
+
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, c.Binary, "usage", "--format", "json")
+	cmd := exec.CommandContext(ctx, c.Binary, args...)
 	configureCommandCancellation(cmd)
-	// Bound pipe cleanup even if a timed-out helper leaves a descendant holding
-	// stdout or stderr open after the process-group cancellation.
 	cmd.WaitDelay = 250 * time.Millisecond
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

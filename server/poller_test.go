@@ -36,7 +36,7 @@ const codexBarBody = `{
   ]
 }`
 
-func newPollerHarness(t *testing.T) (*Poller, *Store, *atomic.Bool) {
+func newPollerHarness(t *testing.T) (*Poller, *Store, *atomic.Bool, *CodexBarClient) {
 	t.Helper()
 	store := openTestStore(t)
 	healthy := &atomic.Bool{}
@@ -54,7 +54,7 @@ func newPollerHarness(t *testing.T) (*Poller, *Store, *atomic.Bool) {
 	codexbar := NewCodexBarClient(server.URL)
 	api := NewAPI(Config{Token: "x"}, store, codexbar)
 	poller := NewPoller(store, codexbar, noopNotifier{}, api)
-	return poller, store, healthy
+	return poller, store, healthy, codexbar
 }
 
 func latestSnap(t *testing.T, store *Store) Snapshot {
@@ -71,7 +71,7 @@ func latestSnap(t *testing.T, store *Store) Snapshot {
 }
 
 func TestPollerSavesSnapshot(t *testing.T) {
-	poller, store, _ := newPollerHarness(t)
+	poller, store, _, _ := newPollerHarness(t)
 	result := poller.PollNow(context.Background())
 	if !result.Success {
 		t.Fatalf("poll failed: %+v", result)
@@ -83,7 +83,7 @@ func TestPollerSavesSnapshot(t *testing.T) {
 }
 
 func TestPollerStaleFallback(t *testing.T) {
-	poller, store, healthy := newPollerHarness(t)
+	poller, store, healthy, _ := newPollerHarness(t)
 	if result := poller.PollNow(context.Background()); !result.Success {
 		t.Fatalf("seed poll failed: %+v", result)
 	}
@@ -101,13 +101,13 @@ func TestPollerStaleFallback(t *testing.T) {
 }
 
 func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
-	poller, store, _ := newPollerHarness(t)
+	poller, store, _, codexbar := newPollerHarness(t)
 	responses := []string{
 		`[{"provider":"claude","usage":{"primary":{"usedPercent":25,"windowMinutes":300}}},{"provider":"codex","usage":{"primary":{"usedPercent":10,"windowMinutes":300}}}]`,
 		`[{"provider":"claude","error":{"message":"rate limited"}},{"provider":"codex","usage":{"primary":{"usedPercent":20,"windowMinutes":300}}}]`,
 	}
 	request := 0
-	poller.codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+	codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		body := responses[request]
 		request++
 		return testHTTPResponse(http.StatusOK, body), nil
@@ -132,7 +132,7 @@ func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
 }
 
 func TestPollerNoRepeatEventsOnDuplicate(t *testing.T) {
-	poller, store, _ := newPollerHarness(t)
+	poller, store, _, _ := newPollerHarness(t)
 	seedWindow(t, store, "codex.primary", 5, nil)
 
 	first := poller.PollNow(context.Background())
