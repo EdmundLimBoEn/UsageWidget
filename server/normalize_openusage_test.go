@@ -122,3 +122,34 @@ func TestCodexBarDropsProvidersWithoutWindows(t *testing.T) {
 		t.Fatalf("got %+v", snap.Providers)
 	}
 }
+
+func TestOpenUsageLaterAuthDoesNotPoisonHealthyAccount(t *testing.T) {
+	body := `{
+		"schema_version":"1",
+		"snapshots":[
+			{
+				"provider_id":"cursor",
+				"account_id":"good",
+				"status":"OK",
+				"metrics":{"plan_percent_used":{"used":10,"limit":100,"unit":"%","window":"30d"}},
+				"resets":{"billing_cycle_end":"2026-09-10T00:00:00Z"}
+			},
+			{
+				"provider_id":"cursor",
+				"account_id":"bad",
+				"status":"AUTH_REQUIRED",
+				"message":"login again"
+			}
+		]
+	}`
+	snap, err := Normalize([]byte(body), 5, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Providers) != 1 {
+		t.Fatalf("providers=%+v", snap.Providers)
+	}
+	if snap.Providers[0].Error != "" || len(snap.Providers[0].Windows) == 0 {
+		t.Fatalf("healthy cursor poisoned: %+v", snap.Providers[0])
+	}
+}

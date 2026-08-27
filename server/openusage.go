@@ -40,6 +40,16 @@ func NewOpenUsageCommandClient(command string) *OpenUsageClient {
 }
 
 func NewOpenUsageUnixClient(socketPath string) *OpenUsageClient {
+	return newOpenUsageUnixClient(socketPath, "http://openusage/v1/read-model", "openusage-daemon")
+}
+
+// NewOpenUsageCollectorClient talks to UsageWidget's collector sidecar, which
+// exposes OpenUsage export JSON (or CodexBar JSON) at GET /usage.
+func NewOpenUsageCollectorClient(socketPath string) *OpenUsageClient {
+	return newOpenUsageUnixClient(socketPath, "http://collector/usage", "openusage-collector")
+}
+
+func newOpenUsageUnixClient(socketPath, url, source string) *OpenUsageClient {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -47,8 +57,8 @@ func NewOpenUsageUnixClient(socketPath string) *OpenUsageClient {
 		},
 	}
 	return &OpenUsageClient{
-		URL:    "http://openusage/v1/read-model",
-		Source: "openusage-daemon",
+		URL:    url,
+		Source: source,
 		httpClient: &http.Client{
 			Transport: transport,
 			Timeout:   95 * time.Second,

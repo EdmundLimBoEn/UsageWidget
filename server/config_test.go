@@ -89,8 +89,8 @@ func TestLoadConfigAPNsEnabledWhenAllVarsPresent(t *testing.T) {
 func TestNewUsageSourceFromConfigPrefersOpenUsage(t *testing.T) {
 	cfg := Config{UsageSource: "auto", CollectorSocket: "/tmp/collector.sock"}
 	src := NewUsageSourceFromConfig(cfg)
-	if src.SourceName() != "openusage-daemon" {
-		t.Fatalf("expected openusage-daemon, got %s", src.SourceName())
+	if src.SourceName() != "openusage-collector" {
+		t.Fatalf("expected openusage-collector, got %s", src.SourceName())
 	}
 	cfg.CodexBarURL = "http://127.0.0.1:8765/usage"
 	src = NewUsageSourceFromConfig(cfg)
@@ -101,5 +101,10 @@ func TestNewUsageSourceFromConfigPrefersOpenUsage(t *testing.T) {
 	src = NewUsageSourceFromConfig(cfg)
 	if src.SourceName() != "openusage-cli" {
 		t.Fatalf("expected openusage-cli, got %s", src.SourceName())
+	}
+	cfg = Config{UsageSource: "openusage", OpenUsageSocket: "/tmp/openusage.sock"}
+	src = NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "openusage-daemon" {
+		t.Fatalf("expected openusage-daemon, got %s", src.SourceName())
 	}
 }

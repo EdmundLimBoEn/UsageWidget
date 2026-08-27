@@ -82,22 +82,24 @@ func normalizeOpenUsage(body []byte, pollIntervalMinutes int, fetchedAt time.Tim
 		}
 
 		status := strings.ToUpper(strings.TrimSpace(raw.Status))
+		windows := openUsageGaugeWindows(id, raw)
+		hadWindows := len(p.Windows) > 0
+
 		switch status {
 		case "AUTH", "AUTH_REQUIRED":
-			if p.Error == "" {
+			if p.Error == "" && !hadWindows && len(windows) == 0 {
 				p.Error = firstNonEmpty(raw.Message, "authentication required")
 			}
 		case "ERROR", "ERR":
-			if p.Error == "" {
+			if p.Error == "" && !hadWindows && len(windows) == 0 {
 				p.Error = firstNonEmpty(raw.Message, "provider fetch failed")
 			}
 		case "UNSUPPORTED":
-			if p.Error == "" {
+			if p.Error == "" && !hadWindows && len(windows) == 0 {
 				p.Error = firstNonEmpty(raw.Message, "unsupported on this machine")
 			}
 		}
 
-		windows := openUsageGaugeWindows(id, raw)
 		if len(windows) == 0 {
 			continue
 		}

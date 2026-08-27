@@ -95,8 +95,8 @@ func NewUsageSourceFromConfig(cfg Config) UsageSource {
 			return NewOpenUsageUnixClient(cfg.OpenUsageSocket)
 		}
 		if cfg.UsageSource == "openusage" || (cfg.UsageSource == "auto" && cfg.CodexBarURL == "" && cfg.CodexBarCmd == "" && cfg.CodexBarBin == "") {
-			// Default production path: collector sidecar speaking OpenUsage export JSON.
-			return NewOpenUsageUnixClient(cfg.CollectorSocket)
+			// Default production path: collector sidecar speaking OpenUsage export JSON at /usage.
+			return NewOpenUsageCollectorClient(cfg.CollectorSocket)
 		}
 	}
 
@@ -113,5 +113,5 @@ func NewUsageSourceFromConfig(cfg Config) UsageSource {
 		return NewCodexBarUnixClient(cfg.CollectorSocket)
 	}
 
-	return NewOpenUsageUnixClient(cfg.CollectorSocket)
+	return NewOpenUsageCollectorClient(cfg.CollectorSocket)
 }

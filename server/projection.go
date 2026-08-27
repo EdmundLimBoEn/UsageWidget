@@ -141,18 +141,23 @@ func preferForecast(pace, history *WindowForecast) *WindowForecast {
 	case history == nil:
 		return pace
 	case history.SampleCount >= 3 && history.BasedOnHours >= 0.5:
-		history.Annotation = pace.Annotation
-		if history.Annotation == "" {
-			history.Annotation = paceAnnotationFromHistory(history)
-		}
-		if pace.ProjectedPercentAtReset != nil {
-			history.ProjectedPercentAtReset = pace.ProjectedPercentAtReset
-		}
+		// Keep history exhaustion semantics authoritative. Only borrow pace
+		// annotation when both agree on exhausts-before-reset.
 		if history.WindowLabel == "" {
 			history.WindowLabel = pace.WindowLabel
 		}
 		if history.Source == "" {
 			history.Source = "history"
+		}
+		if history.ExhaustsBeforeReset == pace.ExhaustsBeforeReset {
+			if pace.Annotation != "" {
+				history.Annotation = pace.Annotation
+			}
+			if pace.ProjectedPercentAtReset != nil {
+				history.ProjectedPercentAtReset = pace.ProjectedPercentAtReset
+			}
+		} else if history.Annotation == "" {
+			history.Annotation = paceAnnotationFromHistory(history)
 		}
 		return history
 	default:
