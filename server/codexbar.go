@@ -66,6 +66,13 @@ func NewCodexBarUnixClient(socketPath string) *CodexBarClient {
 	}
 }
 
+func (c *CodexBarClient) SourceName() string {
+	if c.Source != "" {
+		return c.Source
+	}
+	return "codexbar"
+}
+
 func (c *CodexBarClient) Fetch(ctx context.Context) ([]byte, error) {
 	if len(c.Cmd) > 0 {
 		return c.fetchCmd(ctx)

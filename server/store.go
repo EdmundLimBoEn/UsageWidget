@@ -93,7 +93,7 @@ const CurrentSchemaVersion = 1
 
 var defaultSettings = map[string]string{
 	"poll_interval_minutes":           "5",
-	"provider_order":                  `["codex","claude","grok"]`,
+	"provider_order":                  `["cursor","codex","claude_code","claude","copilot","gemini_cli","grok"]`,
 	"hidden_providers":                `[]`,
 	"notifications_enabled":           "true",
 	"early_threshold_pct":             "10",
@@ -326,7 +326,12 @@ func (s *Store) SaveSnapshotWithForecasts(snap *Snapshot) error {
 			}
 			for wi := range p.Windows {
 				w := &p.Windows[wi]
+				pace := w.PaceForecast
+				if pace == nil && w.ResetsAt != nil && w.WindowLabel != "" {
+					pace = paceProjection(w.UsedPercent, *w.ResetsAt, w.WindowLabel, snap.FetchedAt)
+				}
 				if w.ResetsAt == nil {
+					w.Forecast = pace
 					continue
 				}
 				epoch := w.ResetsAt.UTC().Format(time.RFC3339)
@@ -334,11 +339,12 @@ func (s *Store) SaveSnapshotWithForecasts(snap *Snapshot) error {
 					p.ID, w.ID, epoch, snap.FetchedAt.UTC().Format(time.RFC3339Nano), w.UsedPercent); err != nil {
 					return fmt.Errorf("store: insert window sample: %w", err)
 				}
-				forecast, err := forecastWindowTx(tx, w.ID, epoch, *w.ResetsAt, w.UsedPercent, snap.FetchedAt)
+				history, err := forecastWindowTx(tx, w.ID, epoch, *w.ResetsAt, w.UsedPercent, snap.FetchedAt)
 				if err != nil {
 					return err
 				}
-				w.Forecast = forecast
+				w.Forecast = preferForecast(pace, history)
+				w.PaceForecast = nil
 				if _, err := tx.Exec(`DELETE FROM window_samples WHERE window_id=? AND id NOT IN (SELECT id FROM window_samples WHERE window_id=? ORDER BY sampled_at DESC, id DESC LIMIT 500)`, w.ID, w.ID); err != nil {
 					return fmt.Errorf("store: cap window samples: %w", err)
 				}

@@ -180,10 +180,18 @@ write_initial_env() {
       printf 'USAGEWIDGET_PUBLIC_URL=%s\n' "$PUBLIC_URL"
       printf 'DB_PATH=%s/usagewidget.db\n' "$DATA_DIR"
       printf 'LISTEN_ADDR=127.0.0.1:8377\n'
-      printf 'COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock\n'
+      printf 'USAGE_SOURCE=auto\n'
+      printf 'COLLECTOR_SOCKET=/run/usagewidget/collector.sock\n'
     } >>"$ENV_FILE"
   elif ! grep -q '^USAGEWIDGET_PUBLIC_URL=' "$ENV_FILE"; then printf 'USAGEWIDGET_PUBLIC_URL=%s\n' "$PUBLIC_URL" >>"$ENV_FILE"; fi
-  if [[ ! -e $COLLECTOR_ENV ]]; then printf 'CODEXBAR_BIN=%s\nCOLLECTOR_SOCKET=/run/usagewidget/codexbar.sock\n' "$CODEXBAR_BIN" >"$COLLECTOR_ENV"; chmod 0640 "$COLLECTOR_ENV"; chown root:usagewidget "$COLLECTOR_ENV"; fi
+  if [[ ! -e $COLLECTOR_ENV ]]; then
+    if command -v openusage >/dev/null 2>&1; then
+      printf 'OPENUSAGE_BIN=%s\nCOLLECTOR_SOCKET=/run/usagewidget/collector.sock\n' "$(command -v openusage)" >"$COLLECTOR_ENV"
+    else
+      printf 'CODEXBAR_BIN=%s\nCOLLECTOR_SOCKET=/run/usagewidget/collector.sock\n' "$CODEXBAR_BIN" >"$COLLECTOR_ENV"
+    fi
+    chmod 0640 "$COLLECTOR_ENV"; chown root:usagewidget "$COLLECTOR_ENV"
+  fi
 }
 
 install_release() {

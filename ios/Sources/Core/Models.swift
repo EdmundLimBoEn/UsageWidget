@@ -5,12 +5,14 @@ public struct Snapshot: Codable, Equatable, Sendable {
     public var stale: Bool
     public var providers: [Provider]
     public var pollIntervalMinutes: Int
+    public var sourceKind: String?
 
-    public init(fetchedAt: Date, stale: Bool, providers: [Provider], pollIntervalMinutes: Int) {
+    public init(fetchedAt: Date, stale: Bool, providers: [Provider], pollIntervalMinutes: Int, sourceKind: String? = nil) {
         self.fetchedAt = fetchedAt
         self.stale = stale
         self.providers = providers
         self.pollIntervalMinutes = pollIntervalMinutes
+        self.sourceKind = sourceKind
     }
 }
 
@@ -70,6 +72,7 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
     public var usedPercent: Double
     public var remainingPercent: Double
     public var resetsAt: Date?
+    public var windowLabel: String?
     public var forecast: WindowForecast?
 
     public init(
@@ -79,6 +82,7 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
         usedPercent: Double,
         remainingPercent: Double,
         resetsAt: Date? = nil,
+        windowLabel: String? = nil,
         forecast: WindowForecast? = nil
     ) {
         self.id = id
@@ -87,6 +91,7 @@ public struct UsageWindow: Codable, Equatable, Identifiable, Sendable {
         self.usedPercent = usedPercent
         self.remainingPercent = remainingPercent
         self.resetsAt = resetsAt
+        self.windowLabel = windowLabel
         self.forecast = forecast
     }
 }
@@ -98,6 +103,10 @@ public struct WindowForecast: Codable, Equatable, Sendable {
     public var exhaustsBeforeReset: Bool
     public var sampleCount: Int
     public var basedOnHours: Double
+    public var source: String?
+    public var windowLabel: String?
+    public var projectedPercentAtReset: Double?
+    public var annotation: String?
 }
 
 public struct Credits: Codable, Equatable, Sendable {
@@ -111,6 +120,7 @@ public struct Credits: Codable, Equatable, Sendable {
 public struct Health: Codable, Equatable, Sendable {
     public var service: String
     public var codexbar: Bool
+    public var upstream: Bool?
     public var database: Bool
     public var polling: Bool
     public var apns: Bool
@@ -124,6 +134,7 @@ public struct Health: Codable, Equatable, Sendable {
     public init(
         service: String,
         codexbar: Bool,
+        upstream: Bool? = nil,
         database: Bool,
         polling: Bool,
         apns: Bool,
@@ -136,6 +147,7 @@ public struct Health: Codable, Equatable, Sendable {
     ) {
         self.service = service
         self.codexbar = codexbar
+        self.upstream = upstream
         self.database = database
         self.polling = polling
         self.apns = apns
@@ -146,6 +158,8 @@ public struct Health: Codable, Equatable, Sendable {
         self.version = version
         self.schemaVersion = schemaVersion
     }
+
+    public var upstreamOK: Bool { upstream ?? codexbar }
 }
 
 public struct CollectorHealth: Codable, Equatable, Sendable {
@@ -189,7 +203,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
 
     public init(
         pollIntervalMinutes: Int = 5,
-        providerOrder: [String] = ["codex", "claude", "grok"],
+        providerOrder: [String] = ["cursor", "codex", "claude_code", "claude", "copilot", "gemini_cli", "grok"],
         hiddenProviders: [String] = [],
         notificationsEnabled: Bool = true,
         earlyThresholdPct: Double = 10,
@@ -218,7 +232,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         pollIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .pollIntervalMinutes) ?? 5
-        providerOrder = try c.decodeIfPresent([String].self, forKey: .providerOrder) ?? ["codex", "claude", "grok"]
+        providerOrder = try c.decodeIfPresent([String].self, forKey: .providerOrder) ?? ["cursor", "codex", "claude_code", "claude", "copilot", "gemini_cli", "grok"]
         hiddenProviders = try c.decodeIfPresent([String].self, forKey: .hiddenProviders) ?? []
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         earlyThresholdPct = try c.decodeIfPresent(Double.self, forKey: .earlyThresholdPct) ?? 10
@@ -453,6 +467,20 @@ public enum RelativeTime {
 public enum ForecastText {
     public static func string(for window: UsageWindow, now: Date = Date()) -> String? {
         guard let forecast = window.forecast else { return nil }
+        if let annotation = forecast.annotation, !annotation.isEmpty {
+            // Prefer OpenUsage-style compact annotation when present.
+            if let resetPart = annotation.split(separator: "·").map({ $0.trimmingCharacters(in: .whitespaces) }).last,
+               annotation.contains("·") {
+                return String(resetPart)
+            }
+            if annotation.hasPrefix("resets ") {
+                return nil
+            }
+            return annotation
+        }
+        if let projected = forecast.projectedPercentAtReset, !forecast.exhaustsBeforeReset {
+            return String(format: "~%.0f%% by reset", projected)
+        }
         if forecast.exhaustsBeforeReset {
             return "Likely out \(RelativeTime.string(for: forecast.estimatedExhaustionAt, relativeTo: now))"
         }

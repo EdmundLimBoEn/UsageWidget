@@ -8,6 +8,11 @@ import (
 
 type Config struct {
 	Token           string
+	UsageSource     string // openusage | codexbar | auto
+	OpenUsageURL    string
+	OpenUsageCmd    string
+	OpenUsageBin    string
+	OpenUsageSocket string
 	CodexBarURL     string
 	CodexBarCmd     string
 	CodexBarBin     string
@@ -35,12 +40,24 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("USAGEWIDGET_TOKEN must not have surrounding whitespace")
 	}
 
+	source := strings.ToLower(strings.TrimSpace(envOr("USAGE_SOURCE", "auto")))
+	switch source {
+	case "auto", "openusage", "codexbar":
+	default:
+		return Config{}, fmt.Errorf("USAGE_SOURCE must be auto, openusage, or codexbar")
+	}
+
 	return Config{
 		Token:           token,
+		UsageSource:     source,
+		OpenUsageURL:    os.Getenv("OPENUSAGE_URL"),
+		OpenUsageCmd:    os.Getenv("OPENUSAGE_CMD"),
+		OpenUsageBin:    os.Getenv("OPENUSAGE_BIN"),
+		OpenUsageSocket: os.Getenv("OPENUSAGE_SOCKET"),
 		CodexBarURL:     os.Getenv("CODEXBAR_URL"),
 		CodexBarCmd:     os.Getenv("CODEXBAR_CMD"),
 		CodexBarBin:     os.Getenv("CODEXBAR_BIN"),
-		CollectorSocket: envOr("COLLECTOR_SOCKET", "/run/usagewidget/codexbar.sock"),
+		CollectorSocket: envOr("COLLECTOR_SOCKET", "/run/usagewidget/collector.sock"),
 		DBPath:          envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:      envOr("LISTEN_ADDR", "127.0.0.1:8377"),
 
@@ -57,4 +74,44 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// NewUsageSourceFromConfig picks OpenUsage first (quota gauges + Cursor), then CodexBar.
+func NewUsageSourceFromConfig(cfg Config) UsageSource {
+	wantOpen := cfg.UsageSource == "openusage" || cfg.UsageSource == "auto"
+	wantCodex := cfg.UsageSource == "codexbar" || cfg.UsageSource == "auto"
+
+	if wantOpen {
+		if cfg.OpenUsageCmd != "" {
+			return NewOpenUsageCommandClient(cfg.OpenUsageCmd)
+		}
+		if cfg.OpenUsageURL != "" {
+			return NewOpenUsageHTTPClient(cfg.OpenUsageURL)
+		}
+		if cfg.OpenUsageBin != "" {
+			return NewOpenUsageBinaryClient(cfg.OpenUsageBin)
+		}
+		if cfg.OpenUsageSocket != "" {
+			return NewOpenUsageUnixClient(cfg.OpenUsageSocket)
+		}
+		if cfg.UsageSource == "openusage" || (cfg.UsageSource == "auto" && cfg.CodexBarURL == "" && cfg.CodexBarCmd == "" && cfg.CodexBarBin == "") {
+			// Default production path: collector sidecar speaking OpenUsage export JSON.
+			return NewOpenUsageUnixClient(cfg.CollectorSocket)
+		}
+	}
+
+	if wantCodex {
+		if cfg.CodexBarCmd != "" {
+			return NewCodexBarCommandClient(cfg.CodexBarCmd)
+		}
+		if cfg.CodexBarURL != "" {
+			return NewCodexBarClient(cfg.CodexBarURL)
+		}
+		if cfg.CodexBarBin != "" {
+			return NewCodexBarBinaryClient(cfg.CodexBarBin)
+		}
+		return NewCodexBarUnixClient(cfg.CollectorSocket)
+	}
+
+	return NewOpenUsageUnixClient(cfg.CollectorSocket)
 }

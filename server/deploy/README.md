@@ -223,7 +223,8 @@ The installer owns `/etc/usagewidget/env`. Its core values are:
 
 ```bash
 USAGEWIDGET_TOKEN=replace-with-at-least-32-random-characters
-COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock
+USAGE_SOURCE=auto
+COLLECTOR_SOCKET=/run/usagewidget/collector.sock
 DB_PATH=/var/lib/usagewidget/usagewidget.db
 LISTEN_ADDR=127.0.0.1:8377
 USAGEWIDGET_PUBLIC_URL=https://your-host.your-tailnet.ts.net/usagewidget
@@ -234,28 +235,38 @@ Server variables:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `USAGEWIDGET_TOKEN` | required | Main API bearer token, minimum 32 characters |
-| `COLLECTOR_SOCKET` | `/run/usagewidget/codexbar.sock` | Production collector socket |
+| `USAGE_SOURCE` | `auto` | `auto`, `openusage`, or `codexbar` |
+| `COLLECTOR_SOCKET` | `/run/usagewidget/collector.sock` | Production collector socket |
 | `DB_PATH` | `./usagewidget.db` | SQLite path; installer sets the data-directory path |
 | `LISTEN_ADDR` | `127.0.0.1:8377` | Main API listener |
-| `CODEXBAR_URL` | unset | Development HTTP-source override |
-| `CODEXBAR_BIN` | unset | Exact CodexBar CLI path; supports spaces and is the native macOS source |
-| `CODEXBAR_CMD` | unset | Legacy command-source override |
+| `OPENUSAGE_URL` | unset | OpenUsage hub `/v1/snapshots` URL |
+| `OPENUSAGE_BIN` | unset | Exact `openusage` binary path (`export --format json`) |
+| `OPENUSAGE_CMD` | unset | Full OpenUsage command override |
+| `OPENUSAGE_SOCKET` | unset | OpenUsage daemon UDS for `/v1/read-model` |
+| `CODEXBAR_URL` | unset | Legacy CodexBar HTTP-source override |
+| `CODEXBAR_BIN` | unset | Exact CodexBar CLI path; supports spaces |
+| `CODEXBAR_CMD` | unset | Legacy CodexBar command-source override |
 | `APNS_*` | unset | APNs signing configuration; all required to enable push |
 
 `/etc/usagewidget/collector.env` normally contains:
 
 ```bash
-CODEXBAR_BIN=/absolute/path/to/CodexBarCLI
-COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock
+OPENUSAGE_BIN=/usr/local/bin/openusage
+COLLECTOR_SOCKET=/run/usagewidget/collector.sock
+# Optional legacy fallback:
+# CODEXBAR_BIN=/absolute/path/to/CodexBarCLI
+# COLLECTOR_ARGS=usage --format json
 ```
 
-Source precedence is `CODEXBAR_CMD`, `CODEXBAR_URL`, `CODEXBAR_BIN`, then the
-Linux collector socket. Prefer `CODEXBAR_BIN` over the legacy command string on
-desktop systems because it safely preserves paths containing spaces.
+Source precedence prefers OpenUsage (`OPENUSAGE_CMD`, `OPENUSAGE_URL`,
+`OPENUSAGE_BIN`, `OPENUSAGE_SOCKET`, then the collector socket) and falls back
+to CodexBar when `USAGE_SOURCE=codexbar` or an explicit CodexBar endpoint is
+configured. The collector auto-selects `openusage export --format json` when
+the binary name contains `openusage`, otherwise `usage --format json`.
 
-Do not point `CODEXBAR_CMD` at an account whose home must remain isolated from
-the daemon. The sidecar is the production path and exposes only `GET /usage` on
-its Unix socket.
+Do not point collector binaries at an account whose home must remain isolated
+from the daemon. The sidecar is the production path and exposes only
+`GET /usage` on its Unix socket.
 
 ## Tailscale Serve
 

@@ -26,16 +26,8 @@ func main() {
 	}
 	defer store.Close()
 
-	var codexbar *server.CodexBarClient
-	if cfg.CodexBarCmd != "" {
-		codexbar = server.NewCodexBarCommandClient(cfg.CodexBarCmd)
-	} else if cfg.CodexBarURL != "" {
-		codexbar = server.NewCodexBarClient(cfg.CodexBarURL)
-	} else if cfg.CodexBarBin != "" {
-		codexbar = server.NewCodexBarBinaryClient(cfg.CodexBarBin)
-	} else {
-		codexbar = server.NewCodexBarUnixClient(cfg.CollectorSocket)
-	}
+	source := server.NewUsageSourceFromConfig(cfg)
+	log.Printf("usage source: %s", source.SourceName())
 
 	notifier, err := server.NewNotifier(cfg)
 	if err != nil {
@@ -43,8 +35,8 @@ func main() {
 		notifier, _ = server.NewNotifier(server.Config{})
 	}
 
-	api := server.NewAPI(cfg, store, codexbar)
-	poller := server.NewPoller(store, codexbar, notifier, api)
+	api := server.NewAPI(cfg, store, source)
+	poller := server.NewPoller(store, source, notifier, api)
 	api.SetPoller(poller)
 	api.SetNotifier(notifier)
 

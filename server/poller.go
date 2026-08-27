@@ -40,19 +40,19 @@ type DeliveryResult struct {
 }
 
 type Poller struct {
-	store    *Store
-	codexbar *CodexBarClient
-	engine   *EventEngine
+	store  *Store
+	source UsageSource
+	engine *EventEngine
 	notifier Notifier
 	api      *API
 
 	mu sync.Mutex
 }
 
-func NewPoller(store *Store, codexbar *CodexBarClient, notifier Notifier, api *API) *Poller {
+func NewPoller(store *Store, source UsageSource, notifier Notifier, api *API) *Poller {
 	return &Poller{
 		store:    store,
-		codexbar: codexbar,
+		source:   source,
 		engine:   NewEventEngine(store),
 		notifier: notifier,
 		api:      api,
@@ -144,7 +144,7 @@ func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
 		return result
 	}
 
-	body, err := p.codexbar.Fetch(ctx)
+	body, err := p.source.Fetch(ctx)
 	if err != nil {
 		log.Printf("poller: fetch failed, keeping last snapshot: %v", err)
 		p.markStale()
