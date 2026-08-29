@@ -21,11 +21,21 @@ func TestNormalizeOpenUsageCursorAndFiltersNoise(t *testing.T) {
 				"metrics": {
 					"plan_percent_used": {"used": 45, "limit": 100, "unit": "%", "window": "30d"},
 					"plan_auto_percent_used": {"used": 12.5, "limit": 100, "unit": "%", "window": "30d"},
+					"plan_api_percent_used": {"used": 80, "limit": 100, "unit": "%", "window": "30d"},
 					"requests_today": {"used": 40, "unit": "requests", "window": "1d"},
 					"model_claude-4.5-opus_input_tokens": {"used": 1200, "unit": "tokens"}
 				},
 				"resets": {
 					"billing_cycle_end": "2026-09-10T00:00:00Z"
+				}
+			},
+			{
+				"provider_id": "openai",
+				"account_id": "org",
+				"timestamp": "2026-08-27T12:00:00Z",
+				"status": "OK",
+				"metrics": {
+					"plan_percent_used": {"used": 9, "limit": 100, "unit": "%", "window": "30d"}
 				}
 			},
 			{
@@ -74,6 +84,11 @@ func TestNormalizeOpenUsageCursorAndFiltersNoise(t *testing.T) {
 	if plan.Title != "Plan" || plan.UsedPercent != 45 || plan.ResetsAt == nil {
 		t.Fatalf("plan window: %+v", plan)
 	}
+	for _, w := range snap.Providers[0].Windows {
+		if w.Title == "API" || strings.Contains(strings.ToLower(w.Key), "api") {
+			t.Fatalf("API window leaked through: %+v", w)
+		}
+	}
 	if plan.WindowLabel != "30d" {
 		t.Fatalf("window label=%q", plan.WindowLabel)
 	}
@@ -120,6 +135,45 @@ func TestCodexBarDropsProvidersWithoutWindows(t *testing.T) {
 	}
 	if len(snap.Providers) != 1 || snap.Providers[0].ID != "codex" {
 		t.Fatalf("got %+v", snap.Providers)
+	}
+}
+
+func TestCodexBarKeepsCursorPlanDropsAPI(t *testing.T) {
+	body := `[
+		{
+			"provider": "cursor",
+			"usage": {
+				"primary": {"usedPercent": 41, "windowMinutes": 43200, "resetsAt": "2026-09-10T00:00:00Z"},
+				"secondary": {"usedPercent": 12, "windowMinutes": 43200, "resetsAt": "2026-09-10T00:00:00Z"},
+				"tertiary": {"title": "Third Party", "usedPercent": 7, "windowMinutes": 43200, "resetsAt": "2026-09-10T00:00:00Z"}
+			}
+		},
+		{
+			"provider": "openai",
+			"usage": {
+				"primary": {"usedPercent": 88, "resetDescription": "$12 available"}
+			}
+		}
+	]`
+	snap, err := Normalize([]byte(body), 5, time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Providers) != 1 {
+		t.Fatalf("expected cursor only, got %+v", snap.Providers)
+	}
+	p := snap.Providers[0]
+	if p.ID != "cursor" || p.Name != "Cursor" {
+		t.Fatalf("cursor: %+v", p)
+	}
+	if len(p.Windows) != 2 {
+		t.Fatalf("expected Plan+Auto, got %+v", p.Windows)
+	}
+	if p.Windows[0].Title != "Plan" || p.Windows[0].UsedPercent != 41 {
+		t.Fatalf("plan: %+v", p.Windows[0])
+	}
+	if p.Windows[1].Title != "Auto" || p.Windows[1].UsedPercent != 12 {
+		t.Fatalf("auto: %+v", p.Windows[1])
 	}
 }
 

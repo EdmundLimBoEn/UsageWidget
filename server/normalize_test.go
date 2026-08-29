@@ -1,7 +1,6 @@
 package server
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -239,8 +238,8 @@ func TestNormalize(t *testing.T) {
 				}
 			]`,
 			check: func(t *testing.T, snap Snapshot) {
-				if len(snap.Providers) != 2 {
-					t.Fatalf("expected 2 providers, got %d", len(snap.Providers))
+				if len(snap.Providers) != 1 {
+					t.Fatalf("expected 1 provider (openai API noise dropped), got %d", len(snap.Providers))
 				}
 				codex := snap.Providers[0]
 				if codex.ID != "codex" || codex.Name != "Codex" {
@@ -254,10 +253,6 @@ func TestNormalize(t *testing.T) {
 				}
 				if codex.Credits != nil {
 					t.Fatalf("float remaining credits should not map to availableCount: %+v", codex.Credits)
-				}
-				openai := snap.Providers[1]
-				if openai.Error == "" || !strings.Contains(openai.Error, "No available fetch strategy") {
-					t.Fatalf("expected object error message, got %q", openai.Error)
 				}
 			},
 		},
@@ -288,7 +283,7 @@ func TestNormalize(t *testing.T) {
 
 func TestNormalizeProviderScopedStale(t *testing.T) {
 	fetchedAt := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	snapshot, err := Normalize([]byte(`{"provider":"test","name":"Test","stale":true,"usage":{}}`), 5, fetchedAt)
+	snapshot, err := Normalize([]byte(`{"provider":"codex","name":"Codex","stale":true,"usage":{}}`), 5, fetchedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
