@@ -14,7 +14,8 @@ upgrade, use [the Linux deployment guide](server/deploy/README.md).
   the remote host and cross-compiles the matching binaries.
 - UsageWidget has already created `/etc/usagewidget/env`, its service account,
   data directory, and systemd units.
-- The selected collector user has a valid CodexBar session.
+- The selected collector user has a working OpenUsage install (preferred) or a
+  valid CodexBar session.
 
 Do not print or commit `/etc/usagewidget/env`,
 `/etc/usagewidget/collector.env`, the SQLite database, a backup, or an APNs

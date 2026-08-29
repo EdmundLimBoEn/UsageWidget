@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UsageWidget — Self-hosted usage at a glance</title>
-<meta name="description" content="A self-hosted iOS app and Home Screen widget for monitoring AI usage limits — Codex, Claude, Grok and more — with forecasts and alerts, running entirely on your own server.">
+<title>UsageWidget. Self-hosted usage at a glance</title>
+<meta name="description" content="A self-hosted iOS app and Home Screen widget for monitoring AI usage limits. Cursor, Codex, Claude, Grok and more, with forecasts and alerts, running on your own server.">
 <meta property="og:title" content="UsageWidget">
-<meta property="og:description" content="Self-hosted usage at a glance. AI usage limits, reset times, forecasts, and alerts on your iPhone Home Screen — your data never leaves your own server.">
+<meta property="og:description" content="Self-hosted usage at a glance. AI usage limits, reset times, forecasts, and alerts on your iPhone Home Screen. Your data stays on your server.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
@@ -50,11 +50,6 @@ code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   background:linear-gradient(90deg,var(--blue),var(--cyan));
   -webkit-background-clip:text;background-clip:text;color:transparent;
 }
-.beta{
-  display:inline-block;margin-top:18px;padding:6px 12px;border-radius:999px;
-  border:1px solid rgba(95,212,244,.35);background:rgba(95,212,244,.08);
-  color:var(--cyan);font-size:.85rem;font-weight:700;letter-spacing:.02em;
-}
 .pitch{max-width:640px;margin:20px auto 0;color:var(--muted);font-size:1.05rem}
 .cta{margin-top:36px;display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
 .btn{
@@ -85,7 +80,6 @@ h2{font-size:1.8rem;letter-spacing:-.01em;margin-bottom:8px}
 .features{background:var(--bg2)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px}
-.card .ico{font-size:1.5rem;margin-bottom:12px}
 .card h3{font-size:1.05rem;margin-bottom:6px}
 .card p{color:var(--muted);font-size:.95rem}
 
@@ -127,11 +121,10 @@ footer nav{display:flex;gap:22px}
     <img src="icon.png" alt="UsageWidget app icon" width="112" height="112">
     <h1>UsageWidget</h1>
     <p class="tagline">Self-hosted usage at a glance</p>
-    <p class="beta">The first beta is starting to roll out</p>
     <p class="pitch">
-      Your AI usage limits — Codex, Claude, Grok, and more — as a private iPhone
-      dashboard and Home Screen widget, with reset times, burn-rate forecasts, and
-      timely alerts. Powered by your own server, not someone else's.
+      Your AI usage limits — Cursor, Codex, Claude, Grok, and more — as a private iPhone
+      dashboard and Home Screen widget, with reset times, forecasts, and
+      alerts. It runs on your server.
     </p>
     <div class="cta">
       <a class="btn btn-primary" href="#install">Install the server</a>
@@ -148,17 +141,17 @@ footer nav{display:flex;gap:22px}
       <div class="step">
         <span class="n">1</span>
         <h3>Collector on your server</h3>
-        <p>A small native Go daemon runs on Linux, macOS, or Windows. Linux uses an isolated collector; desktop builds use a local CLI or private CodexBar endpoint.</p>
+        <p>A small Go daemon runs on Linux, macOS, or Windows. Linux isolates collection; desktop builds use a local OpenUsage CLI, or CodexBar where that is what you have.</p>
       </div>
       <div class="step">
         <span class="n">2</span>
         <h3>Private connection</h3>
-        <p>Your iPhone talks to the server over Tailscale HTTPS with a bearer token. Only normalized display data crosses the wire — never raw provider payloads.</p>
+        <p>Your iPhone talks to the server over Tailscale HTTPS with a bearer token. Only normalized display data crosses the wire, never raw provider payloads.</p>
       </div>
       <div class="step">
         <span class="n">3</span>
         <h3>Glanceable on iPhone</h3>
-        <p>Scan a setup QR and you're done. The app and large Home Screen widget show every rate window, its reset time, and what's about to run out.</p>
+        <p>Scan a setup QR and you are done. The app and large Home Screen widget show every rate window, its reset time, and what is about to run out.</p>
       </div>
     </div>
   </div>
@@ -167,37 +160,27 @@ footer nav{display:flex;gap:22px}
 <section class="features">
   <div class="wrap">
     <h2>Everything on one screen</h2>
-    <p class="sub">Stop tabbing through AI services to check whether you're about to hit a limit.</p>
+    <p class="sub">Stop tabbing through AI services to check whether you are about to hit a limit.</p>
     <div class="grid">
       <div class="card">
-        <div class="ico">📱</div>
         <h3>Home Screen widget</h3>
-        <p>Check remaining capacity across all providers without opening any AI service — or even the app.</p>
+        <p>Check remaining capacity across providers without opening any AI service, or even the app.</p>
       </div>
       <div class="card">
-        <div class="ico">🔀</div>
         <h3>Multi-provider</h3>
-        <p>Codex, Claude, Grok, and any provider CodexBar supports. New providers show up automatically — nothing is hard-coded.</p>
+        <p>Cursor, Codex, Claude, Grok, Copilot, Gemini, and anything else OpenUsage (or CodexBar) reports as a usage limit.</p>
       </div>
       <div class="card">
-        <div class="ico">📈</div>
         <h3>Burn-rate forecasts</h3>
-        <p>Predicts whether you'll hit 100% before the window resets, once enough history has accumulated.</p>
+        <p>Predicts whether you will hit 100% before the window resets, once enough history has accumulated.</p>
       </div>
       <div class="card">
-        <div class="ico">🔔</div>
         <h3>Smart alerts</h3>
-        <p>Threshold crossings, scheduled and early resets, credit increases. Global, per-provider, or per-window rules — with quiet hours.</p>
+        <p>Threshold crossings, scheduled and early resets, credit increases. Global or per-provider rules, with quiet hours.</p>
       </div>
       <div class="card">
-        <div class="ico">🕓</div>
         <h3>Honest freshness</h3>
         <p>Distinguishes collecting, current, stale, and unavailable. Cached fallback instead of pretending failed data is live.</p>
-      </div>
-      <div class="card">
-        <div class="ico">🩺</div>
-        <h3>Release readiness</h3>
-        <p>Built-in diagnostics check server, APNs, and device end to end — including an audible alert and widget-delivery test.</p>
       </div>
     </div>
   </div>
@@ -219,14 +202,6 @@ footer nav{display:flex;gap:22px}
   </div>
 </section>
 
-<section id="waitlist">
-  <div class="wrap">
-    <h2>Join the waitlist</h2>
-    <p class="sub">The first beta is starting to roll out. Join the waitlist to be notified when a TestFlight spot is ready for you.</p>
-    <a class="btn btn-primary" href="https://forms.gle/SMwnRmGNzx1uGpvE7">Join the waitlist</a>
-  </div>
-</section>
-
 <section id="install">
   <div class="wrap">
     <h2>Get started</h2>
@@ -245,6 +220,14 @@ footer nav{display:flex;gap:22px}
       <a href="https://github.com/EdmundLimBoEn/UsageWidget">source repository</a>
       and scan the setup QR the installer prints. Requires iOS 26+.
     </p>
+  </div>
+</section>
+
+<section id="waitlist">
+  <div class="wrap">
+    <h2>TestFlight waitlist</h2>
+    <p class="sub">If you want the iPhone app without building it in Xcode, join the waitlist for a TestFlight spot.</p>
+    <a class="btn btn-primary" href="https://forms.gle/SMwnRmGNzx1uGpvE7">Join the waitlist</a>
   </div>
 </section>
 

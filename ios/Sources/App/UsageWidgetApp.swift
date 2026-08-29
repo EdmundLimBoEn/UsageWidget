@@ -45,7 +45,7 @@ struct RootView: View {
                     NavigationStack {
                         DashboardView()
                     }
-                    .tabItem { Label("Dashboard", systemImage: "chart.bar.fill") }
+                    .tabItem { Label("Capacity", systemImage: "chart.bar.fill") }
 
                     NavigationStack {
                         SettingsView()

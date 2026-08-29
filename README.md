@@ -49,55 +49,6 @@ signed-in user. The phone API does not return raw upstream payloads. The app
 and widget share the bearer token through a Keychain access group; App Group
 defaults contain only cached display data and preferences.
 
-## Built with Codex and GPT-5.6
-
-UsageWidget began with a personal frustration. I first used Codex models
-through Claude Code, where I could not reliably see my usage, and I had to keep
-checking X to learn when limits might reset. CodexBar made the data available
-on my Mac, but it did not provide the mobile experience I wanted: a quick look
-at my phone while away from my desk, without opening my Mac and navigating
-through several menus. That led to the iOS app, Home Screen widget, reset
-timings, forecasts, and alerts in this repository.
-
-Codex was part of the project from its beginning. I used it to plan and
-implement work across the SwiftUI and WidgetKit frontend, Go server, Linux
-deployment, Cloudflare-hosted installer endpoint, landing page, tests, and
-TestFlight release preparation. It was particularly valuable near release,
-when it could inspect the repository as a whole for integration, security, and
-packaging problems that were difficult to spot one file at a time.
-
-The clearest example of work completed with GPT-5.6 is the installation and
-onboarding flow. An initially manual sequence of server commands became a
-single `curl`-based installation path followed by QR-code setup in the iOS app.
-This required coordinated changes to the installer, server configuration,
-Cloudflare Worker routing on the project domain, QR payload, and iOS
-registration flow. GPT-5.6's ability to plan and carry a long task across those
-boundaries made that integration practical.
-
-I remained responsible for the product direction and final decisions. I chose
-the problem, the self-hosted Linux architecture, the privacy boundary, the UI
-and visual preferences, and the behavior I wanted from resets and alerts. My
-workflow was iterative: use each working version, identify what felt wrong,
-then direct Codex to revise it. I accepted, changed, or rejected its suggestions
-based on how the complete system behaved rather than treating generated code as
-finished work.
-
-Verification combined automated Go, installer, CLI, and iOS build checks with
-hands-on testing on physical iPhones running iOS 26 and iOS 27. That process
-also uncovered a server data-fetching approach from an earlier implementation
-that interacted poorly with rate limits; Codex helped trace it across the
-collection path and replace it with the current design.
-
-Codex and GPT-5.6 were development tools, not runtime dependencies. UsageWidget
-does not send requests to GPT-5.6: it reads usage data from OpenUsage (or
-legacy CodexBar) and serves
-that data through the self-hosted system described below. Without Codex and
-GPT-5.6, UsageWidget would not have existed.
-
-For Build Week verification, the primary Codex `/feedback` session is
-`019f74b0-fe97-7dc3-bb40-0e7b5c0274a7`. The public source repository is
-[github.com/EdmundLimBoEn/UsageWidget](https://github.com/EdmundLimBoEn/UsageWidget).
-
 ## Repository map
 
 | Path | Purpose |
@@ -108,7 +59,7 @@ For Build Week verification, the primary Codex `/feedback` session is
 | `server-install.sh` | Linux release installer and `usagewidget-admin` lifecycle commands |
 | `server-setup.sh` | Interactive Mac-to-Linux source installation |
 | `server/deploy/start-*` | Native macOS and Windows foreground launchers |
-| `docs/` | Historical implementation plans and design records |
+| `docs/` | Technical brief for maintainers |
 
 ## Install a server
 
@@ -344,7 +295,7 @@ percentage point. Forecasts are omitted from stale snapshots.
 
 ## Release verification
 
-Use **Release readiness** in the iOS app to inspect server, APNs, and device
+Use **Delivery** in the iOS app to inspect server, APNs, and device
 registration state and to send a targeted audible alert and widget refresh.
 Run `go test ./...` in `server/`, `bash tests/installer_test.sh`, and the
 unsigned Xcode build above before producing a distribution archive.
@@ -372,3 +323,9 @@ build Linux, macOS, and Windows amd64/arm64 bundles through GitHub Actions.
 Read [SECURITY.md](SECURITY.md) before exposing a service or publishing the
 repository. Apple signing, APNs, private networking, release publication, and
 device verification steps are tracked in [HUMANS.md](HUMANS.md).
+
+The public source is
+[github.com/EdmundLimBoEn/UsageWidget](https://github.com/EdmundLimBoEn/UsageWidget).
+Codex and GPT-5.6 were used to build the project. They are not runtime
+dependencies. The running app reads OpenUsage or CodexBar usage data on your
+server.

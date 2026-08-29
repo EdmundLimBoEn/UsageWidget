@@ -16,6 +16,19 @@ final class AppModel {
     var errorMessage: String?
     var statusMessage: String?
     var notificationStatus: String = "unknown"
+
+    var notificationStatusLabel: String {
+        switch notificationStatus {
+        case "authorized": "On"
+        case "denied": "Off"
+        case "not determined": "Not asked"
+        case "provisional": "Quiet delivery"
+        case "ephemeral": "Temporary"
+        case "registration failed": "Registration failed"
+        default: notificationStatus
+        }
+    }
+
     var readiness: Readiness?
 
     private let keychain: KeychainStore
@@ -168,7 +181,6 @@ final class AppModel {
 
     func moveProvider(from source: IndexSet, to destination: Int) {
         var order = preferences.providerOrder
-        // Ensure all known providers are in order list
         if let providers = snapshot?.providers {
             for p in providers where !order.contains(p.id) {
                 order.append(p.id)
