@@ -15,9 +15,6 @@ struct UsageWidgetApp: App {
                 .environment(model)
                 .onAppear {
                     appDelegate.model = model
-                    // Registration is separate from alert authorization. Do
-                    // this after wiring the model so a fast token callback can
-                    // always be uploaded to the server.
                     UIApplication.shared.registerForRemoteNotifications()
                     Task {
                         await model.refresh()

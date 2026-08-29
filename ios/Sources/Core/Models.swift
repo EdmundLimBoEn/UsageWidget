@@ -417,7 +417,6 @@ public enum ForecastText {
     public static func string(for window: UsageWindow, now: Date = Date()) -> String? {
         guard let forecast = window.forecast else { return nil }
         if let annotation = forecast.annotation, !annotation.isEmpty {
-            // Prefer OpenUsage-style compact annotation when present.
             if let resetPart = annotation.split(separator: "·").map({ $0.trimmingCharacters(in: .whitespaces) }).last,
                annotation.contains("·") {
                 return String(resetPart)

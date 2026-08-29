@@ -214,7 +214,6 @@ final class AppModel {
             }
             errorMessage = nil
         } catch {
-            // Soft-fail — connection may not be configured yet.
             if isConfigured {
                 errorMessage = "Device registration failed: \(error)"
             }

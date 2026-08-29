@@ -69,7 +69,6 @@ public struct APIClient: Sendable {
             throw APIError.transport(error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        // 502 still returns a structured PollResult body when collection fails.
         guard (200..<300).contains(http.statusCode) || http.statusCode == 502 else {
             throw APIError.httpStatus(http.statusCode, String(data: data, encoding: .utf8))
         }
@@ -87,8 +86,6 @@ public struct APIClient: Sendable {
     public func testReadiness(deviceID: String) async throws -> ReadinessTestResult {
         try await sendEmpty(path: "/v1/readiness/\(deviceID)/test", method: "POST")
     }
-
-    // MARK: - Internals
 
     private func get<T: Decodable>(path: String) async throws -> T {
         let request = try makeRequest(path: path, method: "GET")
