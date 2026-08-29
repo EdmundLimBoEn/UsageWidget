@@ -67,15 +67,6 @@ func (a *API) apnsOperational() bool {
 	return a.notifier != nil
 }
 
-func (a *API) RecordPollResult(at time.Time, success bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.lastPollAt = &at
-	if success {
-		a.lastSuccessAt = &at
-	}
-}
-
 func (a *API) RecordPollOutcome(result PollResult) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -582,25 +573,6 @@ func loadSettings(store *Store) (Settings, error) {
 		return Settings{}, err
 	}
 	return s, nil
-}
-
-func removeString(values []string, target string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value != target {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {

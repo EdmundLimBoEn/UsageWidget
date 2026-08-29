@@ -16,19 +16,3 @@ support contact details, and a clean-device installation test.
 
 **Effort:** L
 **Priority:** P2
-
-## Completed
-
-- Generic, rerunnable Linux installation for Ubuntu 22.04/24.04 and Debian 12
-  on amd64 and arm64.
-- Diagnostics, release updates, checksummed bundles, backup/restore, token
-  rotation, setup QR generation, and preserving or purging uninstall paths.
-- Interactive source installation, installer verification, and GitHub Actions
-  release packaging.
-- Shared app/widget Keychain access group with one-time migration from App Group
-  defaults.
-- Raw upstream provider payloads removed from phone-facing snapshot responses.
-- CLI collector sidecar, passive collection health, bounded poll history, and
-  widget delivery diagnostics.
-- Per-provider/per-window alert rules, quiet hours, danger reminders, usage
-  forecasts, QR onboarding, and device-readiness tests.

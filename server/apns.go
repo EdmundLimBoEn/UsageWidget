@@ -107,7 +107,6 @@ func (c *apnsClient) SendAlert(ctx context.Context, deviceToken string, ev Event
 }
 
 func (c *apnsClient) SendWidgetRefresh(ctx context.Context, widgetToken string) error {
-	// ponytail: minimal widgets payload; tune content keys if WidgetKit needs more.
 	body := []byte(`{"aps":{"content-changed":true}}`)
 	return c.push(ctx, widgetToken, "widgets", c.bundleID+".push-type.widgets", "5", body)
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -206,7 +207,7 @@ func detectWindowEvents(prev WindowState, w Window, p Provider, rule AlertRule, 
 				evs = append(evs, mkEvent("reset", "Limit reset", providerEventKey("reset", p.ID, w.ID, prev.ResetsAt), p, w))
 			}
 		} else if isSurpriseReset(prev.UsedPercent, w.UsedPercent) {
-			evs = append(evs, mkEvent("tibo_reset", surpriseResetTitle(p.ID), providerEventKey("tibo", p.ID, w.ID, prev.ResetsAt), p, w))
+			evs = append(evs, mkEvent("tibo_reset", surpriseResetTitle(p.Name), providerEventKey("tibo", p.ID, w.ID, prev.ResetsAt), p, w))
 		}
 	}
 
@@ -220,15 +221,12 @@ func resetEpoch(resetsAt *time.Time) string {
 	return resetsAt.UTC().Format(time.RFC3339)
 }
 
-func surpriseResetTitle(providerID string) string {
-	switch providerID {
-	case "claude":
-		return "Tibo has struck again! Claude limits reset"
-	case "codex":
-		return "Saint Tibo has blessed you with tokens, Codex limits reset"
-	default:
-		return "Surprise reset"
+func surpriseResetTitle(providerName string) string {
+	name := strings.TrimSpace(providerName)
+	if name == "" {
+		return "Usage reset early"
 	}
+	return name + " usage reset early"
 }
 
 func isSurpriseReset(prevUsed, curUsed float64) bool {

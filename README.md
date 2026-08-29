@@ -28,9 +28,9 @@ CLI/HTTP source. Native Windows installs currently use CodexBar
 - Shows remaining capacity, reset time, and OpenUsage-style projected runouts
   (`100% in …` / `~N% by reset`) as soon as a window + reset clock exist;
   history-based burn rates still enrich forecasts after enough samples.
-- Supports global, per-provider, and per-window alert rules, quiet hours, and
-  optional danger reminders.
-- Detects threshold crossings, scheduled resets, early “Tibo” resets, and
+- Supports global and per-provider alert rules, quiet hours, and optional
+  danger reminders.
+- Detects threshold crossings, scheduled resets, early usage drops, and
   reset-credit increases without alerting on a first-seen baseline.
 - Keeps provider visibility and ordering on the server, so hidden providers are
   omitted from phone-facing snapshots and alerts.
@@ -40,8 +40,8 @@ CLI/HTTP source. Native Windows installs currently use CodexBar
   macOS, or Windows SSH target—no repository clone or local build required.
 - Detects amd64/arm64 automatically and preserves configuration and SQLite data
   when the installer is rerun for an update.
-- Includes redacted health and device-readiness checks plus a targeted APNs and
-  WidgetKit delivery test.
+- Includes redacted health checks plus a targeted APNs and WidgetKit delivery
+  test.
 
 Provider credentials never leave the machine running OpenUsage/CodexBar. On
 Linux they remain isolated in the collector account; desktop mode runs as the

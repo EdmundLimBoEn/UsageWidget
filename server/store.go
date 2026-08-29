@@ -394,25 +394,6 @@ func (s *Store) SavePollOutcome(result PollResult) error {
 	return tx.Commit()
 }
 
-func (s *Store) LatestPollOutcome() (PollResult, bool, error) {
-	var result PollResult
-	var polledAt string
-	err := s.db.QueryRow(
-		`SELECT polled_at, success, snapshot_changed, duration_ms, error FROM poll_runs ORDER BY id DESC LIMIT 1`,
-	).Scan(&polledAt, &result.Success, &result.SnapshotChanged, &result.DurationMS, &result.Error)
-	if err == sql.ErrNoRows {
-		return PollResult{}, false, nil
-	}
-	if err != nil {
-		return PollResult{}, false, fmt.Errorf("store: latest poll outcome: %w", err)
-	}
-	result.PolledAt, err = time.Parse(time.RFC3339Nano, polledAt)
-	if err != nil {
-		return PollResult{}, false, fmt.Errorf("store: parse poll outcome: %w", err)
-	}
-	return result, true, nil
-}
-
 func (s *Store) RecentPollOutcomes(limit int) ([]PollResult, error) {
 	if limit < 1 || limit > 50 {
 		limit = 50

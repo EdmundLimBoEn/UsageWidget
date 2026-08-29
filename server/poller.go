@@ -117,13 +117,6 @@ func (p *Poller) PollNow(ctx context.Context) PollResult {
 	return p.pollOnceUnlocked(ctx)
 }
 
-// pollOnce is retained for package-internal tests and shares PollNow's lock.
-func (p *Poller) pollOnce(ctx context.Context) PollResult {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.pollOnceUnlocked(ctx)
-}
-
 func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
 	started := time.Now()
 	result.PolledAt = time.Now().UTC()

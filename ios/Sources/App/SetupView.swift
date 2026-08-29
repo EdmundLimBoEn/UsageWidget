@@ -35,7 +35,7 @@ struct SetupView: View {
                     } else {
                         statusOK = false; statusText = "QR scanning is unavailable. Check camera permission or use manual entry."
                     }
-                } label: { Label("Scan installer QR", systemImage: "qrcode.viewfinder") }
+                } label: { Label("Scan QR", systemImage: "qrcode.viewfinder") }
 
                 Button {
                     Task { await testAndSave() }

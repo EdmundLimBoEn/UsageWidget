@@ -21,7 +21,6 @@ public final class SnapshotStore: @unchecked Sendable {
     private enum Key {
         static let snapshot = "snapshot.json"
         static let prefs = "displayPreferences.json"
-        static let lastRefresh = "lastRefresh"
         static let deviceID = "deviceID"
         static let pendingWidgetToken = "pendingWidgetToken"
         static let mirroredURL = "mirroredServerURL"
@@ -46,16 +45,11 @@ public final class SnapshotStore: @unchecked Sendable {
     public func saveSnapshot(_ snapshot: Snapshot) throws {
         let data = try JSONCoding.encoder.encode(snapshot)
         defaults.set(data, forKey: Key.snapshot)
-        defaults.set(snapshot.fetchedAt, forKey: Key.lastRefresh)
     }
 
     public func loadSnapshot() -> Snapshot? {
         guard let data = defaults.data(forKey: Key.snapshot) else { return nil }
         return try? JSONCoding.decoder.decode(Snapshot.self, from: data)
-    }
-
-    public var lastRefresh: Date? {
-        defaults.object(forKey: Key.lastRefresh) as? Date
     }
 
     public func savePreferences(_ prefs: DisplayPreferences) throws {
