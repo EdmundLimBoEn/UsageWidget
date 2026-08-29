@@ -69,9 +69,7 @@ func normalizeCodexBar(body []byte, pollIntervalMinutes int, fetchedAt time.Time
 		if err != nil {
 			return Snapshot{}, err
 		}
-		// CodexBar/ccusage defaults can surface providers with no rate windows.
-		// Keep erroring/stale providers; drop empty no-limit rows.
-		if len(p.Windows) == 0 && p.Error == "" && !p.Stale {
+		if !keepPlanProvider(p) {
 			continue
 		}
 		providers = append(providers, p)
@@ -209,7 +207,7 @@ func normalizeOne(raw json.RawMessage) (Provider, error) {
 
 	name := up.Name
 	if name == "" {
-		name = displayName(id)
+		name = displayNameForProvider(id)
 	}
 
 	p := Provider{
@@ -233,9 +231,9 @@ func normalizeOne(raw json.RawMessage) (Provider, error) {
 		if w == nil {
 			return
 		}
-		title := w.Title
-		if title == "" {
-			title = windowTitle(key, w.WindowMinutes)
+		title := planWindowTitle(id, key, w.Title, w.WindowMinutes)
+		if isAPINoiseWindow(id, key, title) {
+			return
 		}
 		p.Windows = append(p.Windows, Window{
 			ID:               id + "." + key,
@@ -265,9 +263,9 @@ func normalizeOne(raw json.RawMessage) (Provider, error) {
 			key = slugify(extra.Title)
 		}
 		key = uniqueKey(key, usedKeys)
-		title := extra.Title
-		if title == "" {
-			title = windowTitle(key, extra.WindowMinutes)
+		title := planWindowTitle(id, key, extra.Title, extra.WindowMinutes)
+		if isAPINoiseWindow(id, key, title) {
+			continue
 		}
 		p.Windows = append(p.Windows, Window{
 			ID:               id + "." + key,

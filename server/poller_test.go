@@ -131,6 +131,34 @@ func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
 	}
 }
 
+func TestPollerDoesNotRestoreDroppedAPIProviders(t *testing.T) {
+	poller, store, _, codexbar := newPollerHarness(t)
+	responses := []string{
+		`[{"provider":"cursor","usage":{"primary":{"usedPercent":10,"windowMinutes":43200}}},{"provider":"openai","usage":{"primary":{"usedPercent":99}}}]`,
+		`[{"provider":"cursor","usage":{"primary":{"usedPercent":11,"windowMinutes":43200}}},{"provider":"openai","error":{"message":"No available fetch strategy for openai."}}]`,
+	}
+	request := 0
+	codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		body := responses[request]
+		request++
+		return testHTTPResponse(http.StatusOK, body), nil
+	})}
+
+	if result := poller.PollNow(context.Background()); !result.Success {
+		t.Fatalf("first poll failed: %+v", result)
+	}
+	if got := latestSnap(t, store); len(got.Providers) != 1 || got.Providers[0].ID != "cursor" {
+		t.Fatalf("first snapshot leaked API provider: %+v", got.Providers)
+	}
+	if result := poller.PollNow(context.Background()); !result.Success {
+		t.Fatalf("second poll failed: %+v", result)
+	}
+	got := latestSnap(t, store)
+	if len(got.Providers) != 1 || got.Providers[0].ID != "cursor" || got.Providers[0].Windows[0].UsedPercent != 11 {
+		t.Fatalf("openai came back or cursor broke: %+v", got.Providers)
+	}
+}
+
 func TestPollerNoRepeatEventsOnDuplicate(t *testing.T) {
 	poller, store, _, _ := newPollerHarness(t)
 	seedWindow(t, store, "codex.primary", 5, nil)

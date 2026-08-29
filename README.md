@@ -20,8 +20,9 @@ CLI/HTTP source. Native Windows installs currently use CodexBar
 
 ## What it does
 
-- Prefers OpenUsage-shaped capacity gauges (plan %, 5h/7d windows, Cursor
-  billing) and drops providers that only report telemetry without usage limits.
+- Prefers plan/quota gauges (Cursor Plan + Auto, Codex/Claude 5h/7d windows)
+  and drops API spend dashboards (OpenAI Admin API, OpenRouter, and similar)
+  plus telemetry-only providers.
 - Includes Cursor alongside Codex, Claude Code, Copilot, Gemini, and Grok in
   the default provider order.
 - Shows remaining capacity, reset time, and OpenUsage-style projected runouts

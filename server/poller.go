@@ -40,9 +40,9 @@ type DeliveryResult struct {
 }
 
 type Poller struct {
-	store  *Store
-	source UsageSource
-	engine *EventEngine
+	store    *Store
+	source   UsageSource
+	engine   *EventEngine
 	notifier Notifier
 	api      *API
 
@@ -208,8 +208,10 @@ func (p *Poller) preserveLastKnownProviderUsage(snapshot *Snapshot) {
 	for _, provider := range previous.Providers {
 		byID[provider.ID] = provider
 	}
+	seen := make(map[string]bool, len(snapshot.Providers))
 	for i := range snapshot.Providers {
 		current := &snapshot.Providers[i]
+		seen[current.ID] = true
 		if current.Error == "" || len(current.Windows) != 0 {
 			continue
 		}
@@ -221,6 +223,14 @@ func (p *Poller) preserveLastKnownProviderUsage(snapshot *Snapshot) {
 		current.Credits = prior.Credits
 		current.Stale = true
 		current.Error = ""
+	}
+	for _, prior := range previous.Providers {
+		if seen[prior.ID] || len(prior.Windows) == 0 || !keepPlanProvider(prior) {
+			continue
+		}
+		prior.Stale = true
+		prior.Error = ""
+		snapshot.Providers = append(snapshot.Providers, prior)
 	}
 }
 

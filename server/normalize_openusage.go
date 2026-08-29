@@ -17,15 +17,15 @@ type openUsageEnvelope struct {
 }
 
 type openUsageSnapshot struct {
-	ProviderID  string                      `json:"provider_id"`
-	AccountID   string                      `json:"account_id"`
-	Timestamp   time.Time                   `json:"timestamp"`
-	Status      string                      `json:"status"`
-	Metrics     map[string]openUsageMetric  `json:"metrics"`
-	Resets      map[string]time.Time        `json:"resets"`
-	Message     string                      `json:"message"`
-	Attributes  map[string]string           `json:"attributes"`
-	Diagnostics map[string]string           `json:"diagnostics"`
+	ProviderID  string                     `json:"provider_id"`
+	AccountID   string                     `json:"account_id"`
+	Timestamp   time.Time                  `json:"timestamp"`
+	Status      string                     `json:"status"`
+	Metrics     map[string]openUsageMetric `json:"metrics"`
+	Resets      map[string]time.Time       `json:"resets"`
+	Message     string                     `json:"message"`
+	Attributes  map[string]string          `json:"attributes"`
+	Diagnostics map[string]string          `json:"diagnostics"`
 }
 
 type openUsageMetric struct {
@@ -65,7 +65,7 @@ func normalizeOpenUsage(body []byte, pollIntervalMinutes int, fetchedAt time.Tim
 
 	for _, raw := range snaps {
 		id := strings.TrimSpace(raw.ProviderID)
-		if id == "" {
+		if id == "" || isSpendOrAPIProvider(id) {
 			continue
 		}
 		p, ok := byProvider[id]
@@ -121,9 +121,7 @@ func normalizeOpenUsage(body []byte, pollIntervalMinutes int, fetchedAt time.Tim
 	providers := make([]Provider, 0, len(order))
 	for _, id := range order {
 		p := byProvider[id]
-		// Drop providers that never reported a usage-limit gauge and have no error.
-		// This is the OpenUsage-shaped filter: capacity only, not spend/telemetry noise.
-		if len(p.Windows) == 0 && p.Error == "" {
+		if !keepPlanProvider(*p) {
 			continue
 		}
 		providers = append(providers, *p)
@@ -268,34 +266,42 @@ func isCapacityGaugeKey(key string) bool {
 		return false
 	}
 
+	if strings.Contains(k, "spend") || strings.Contains(k, "budget") || strings.Contains(k, "cost") {
+		return false
+	}
+	if strings.Contains(k, "plan_api") || k == "plan_api_percent_used" {
+		return false
+	}
 	switch k {
 	case "rpm", "tpm", "rpd", "tpd", "cache_hit_ratio", "context_window",
-		"today_cost", "billing_total_cost", "composer_cost", "requests_today",
-		"total_ai_requests", "composer_sessions", "messages_today", "sessions_today":
+		"requests_today", "total_ai_requests", "composer_sessions",
+		"messages_today", "sessions_today", "billing_cycle_progress",
+		"composer_context_pct":
 		return false
 	}
 
-	if strings.Contains(k, "percent_used") || strings.Contains(k, "percent") && strings.Contains(k, "used") {
-		return true
-	}
-	if strings.HasPrefix(k, "usage_") || strings.HasPrefix(k, "rate_limit_") {
-		return true
-	}
 	switch k {
-	case "plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used",
-		"spend_limit", "individual_spend", "team_budget", "plan_spend",
-		"codex_credit_percent_used", "billing_cycle_progress", "composer_context_pct":
+	case "plan_percent_used", "plan_auto_percent_used", "codex_credit_percent_used":
 		return true
+	}
+	if strings.HasPrefix(k, "rate_limit_") {
+		return true
+	}
+	if strings.HasPrefix(k, "usage_") && (strings.Contains(k, "hour") || strings.Contains(k, "day") || strings.Contains(k, "week") || strings.Contains(k, "sonnet") || strings.Contains(k, "opus") || strings.Contains(k, "cowork")) {
+		return true
+	}
+	if strings.HasPrefix(k, "plan_") && strings.Contains(k, "percent") {
+		return !isAPINoiseWindow("", k, "")
 	}
 	return false
 }
 
 func prioritizeGaugeKeys(keys []string) []string {
 	priority := []string{
-		"plan_percent_used", "plan_auto_percent_used", "plan_api_percent_used",
+		"plan_percent_used", "plan_auto_percent_used",
 		"usage_five_hour", "usage_seven_day", "usage_seven_day_sonnet", "usage_seven_day_opus", "usage_seven_day_cowork",
 		"codex_credit_percent_used", "rate_limit_primary", "rate_limit_secondary",
-		"rate_limit_5h", "rate_limit_7d", "spend_limit", "billing_cycle_progress",
+		"rate_limit_5h", "rate_limit_7d",
 	}
 	rank := make(map[string]int, len(priority))
 	for i, k := range priority {
@@ -320,23 +326,16 @@ func prioritizeGaugeKeys(keys []string) []string {
 
 func gaugeTitle(key, window string) string {
 	labels := map[string]string{
-		"plan_percent_used":            "Plan",
-		"plan_auto_percent_used":       "Auto",
-		"plan_api_percent_used":        "API",
-		"usage_five_hour":              "5h",
-		"usage_seven_day":              "7d",
-		"usage_seven_day_sonnet":       "7d Sonnet",
-		"usage_seven_day_opus":         "7d Opus",
-		"usage_seven_day_cowork":       "7d Team",
-		"codex_credit_percent_used":    "Credits",
-		"rate_limit_primary":           "Primary",
-		"rate_limit_secondary":         "Weekly",
-		"spend_limit":                  "Spend limit",
-		"billing_cycle_progress":       "Billing cycle",
-		"individual_spend":             "Individual spend",
-		"team_budget":                  "Team budget",
-		"plan_spend":                   "Plan spend",
-		"composer_context_pct":         "Context",
+		"plan_percent_used":         "Plan",
+		"plan_auto_percent_used":    "Auto",
+		"usage_five_hour":           "5h",
+		"usage_seven_day":           "7d",
+		"usage_seven_day_sonnet":    "7d Sonnet",
+		"usage_seven_day_opus":      "7d Opus",
+		"usage_seven_day_cowork":    "7d Team",
+		"codex_credit_percent_used": "Credits",
+		"rate_limit_primary":        "Primary",
+		"rate_limit_secondary":      "Weekly",
 	}
 	if label, ok := labels[key]; ok {
 		return label
@@ -381,7 +380,7 @@ func resolveReset(resets map[string]time.Time, key string) (time.Time, bool) {
 	// Equivalent metric aliases only — never borrow an unrelated window's clock.
 	fallbacks := []string{key + "_reset"}
 	switch {
-	case strings.HasPrefix(key, "plan_") || strings.Contains(key, "billing") || key == "spend_limit" || key == "individual_spend" || key == "team_budget" || key == "plan_spend":
+	case strings.HasPrefix(key, "plan_") || strings.Contains(key, "billing"):
 		fallbacks = append(fallbacks, "billing_cycle_end", "billing_cycle", "plan_reset")
 	case key == "codex_credit_percent_used":
 		fallbacks = append(fallbacks, "codex_credit_limit")
