@@ -25,7 +25,7 @@ struct SetupView: View {
             } header: {
                 Text("Server connection")
             } footer: {
-                Text("Use the Tailscale HTTPS URL and the USAGEWIDGET_TOKEN from the server env file. CodexBar credentials never leave the Linux host.")
+                Text("Scan the installer QR, or paste the Tailscale HTTPS URL and bearer token. Provider logins stay on the machine that collects usage.")
             }
 
             Section {
@@ -35,7 +35,7 @@ struct SetupView: View {
                     } else {
                         statusOK = false; statusText = "QR scanning is unavailable. Check camera permission or use manual entry."
                     }
-                } label: { Label("Scan installer QR", systemImage: "qrcode.viewfinder") }
+                } label: { Label("Scan QR", systemImage: "qrcode.viewfinder") }
 
                 Button {
                     Task { await testAndSave() }
@@ -93,8 +93,8 @@ struct SetupView: View {
         do {
             try await model.saveConnection(url: serverURL, token: token)
             statusOK = true
-            if let health = model.health {
-                statusText = "OK — codexbar=\(health.codexbar) db=\(health.database) polling=\(health.polling) apns=\(health.apns)"
+            if let health = model.health, !health.upstreamOK {
+                statusText = "Connected, but the collector is not returning usage yet."
             } else {
                 statusText = "Connected"
             }

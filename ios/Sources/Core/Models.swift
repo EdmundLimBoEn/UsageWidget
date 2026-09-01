@@ -23,7 +23,6 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     public var stale: Bool
     public var windows: [UsageWindow]
     public var credits: Credits?
-    public var raw: Data?
 
     public init(
         id: String,
@@ -31,8 +30,7 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
         error: String? = nil,
         stale: Bool = false,
         windows: [UsageWindow] = [],
-        credits: Credits? = nil,
-        raw: Data? = nil
+        credits: Credits? = nil
     ) {
         self.id = id
         self.name = name
@@ -40,11 +38,10 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
         self.stale = stale
         self.windows = windows
         self.credits = credits
-        self.raw = raw
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, error, stale, windows, credits, raw
+        case id, name, error, stale, windows, credits
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,13 +52,6 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
         stale = try c.decodeIfPresent(Bool.self, forKey: .stale) ?? false
         windows = try c.decodeIfPresent([UsageWindow].self, forKey: .windows) ?? []
         credits = try c.decodeIfPresent(Credits.self, forKey: .credits)
-        if let rawMessage = try? c.decodeIfPresent(Data.self, forKey: .raw) {
-            raw = rawMessage
-        } else if let rawObject = try? c.decodeIfPresent([String: JSONValue].self, forKey: .raw) {
-            raw = try? JSONEncoder().encode(rawObject)
-        } else {
-            raw = nil
-        }
     }
 }
 
@@ -386,47 +376,6 @@ public enum AppConstants {
     public static let validPollIntervals = [1, 5, 15, 30, 60]
 }
 
-// Lightweight JSON passthrough for unknown nested objects.
-public enum JSONValue: Codable, Equatable, Sendable {
-    case string(String)
-    case number(Double)
-    case bool(Bool)
-    case object([String: JSONValue])
-    case array([JSONValue])
-    case null
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if c.decodeNil() {
-            self = .null
-        } else if let v = try? c.decode(Bool.self) {
-            self = .bool(v)
-        } else if let v = try? c.decode(Double.self) {
-            self = .number(v)
-        } else if let v = try? c.decode(String.self) {
-            self = .string(v)
-        } else if let v = try? c.decode([String: JSONValue].self) {
-            self = .object(v)
-        } else if let v = try? c.decode([JSONValue].self) {
-            self = .array(v)
-        } else {
-            self = .null
-        }
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.singleValueContainer()
-        switch self {
-        case .string(let v): try c.encode(v)
-        case .number(let v): try c.encode(v)
-        case .bool(let v): try c.encode(v)
-        case .object(let v): try c.encode(v)
-        case .array(let v): try c.encode(v)
-        case .null: try c.encodeNil()
-        }
-    }
-}
-
 public enum JSONCoding {
     public static let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -468,7 +417,6 @@ public enum ForecastText {
     public static func string(for window: UsageWindow, now: Date = Date()) -> String? {
         guard let forecast = window.forecast else { return nil }
         if let annotation = forecast.annotation, !annotation.isEmpty {
-            // Prefer OpenUsage-style compact annotation when present.
             if let resetPart = annotation.split(separator: "·").map({ $0.trimmingCharacters(in: .whitespaces) }).last,
                annotation.contains("·") {
                 return String(resetPart)

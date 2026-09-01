@@ -218,17 +218,18 @@ func TestTiboTitleByProvider(t *testing.T) {
 
 	for _, tc := range []struct {
 		providerID string
+		name       string
 		wantTitle  string
 	}{
-		{"claude", "Tibo has struck again! Claude limits reset"},
-		{"codex", "Saint Tibo has blessed you with tokens, Codex limits reset"},
-		{"grok", "Surprise reset"},
+		{"claude", "Claude", "Claude usage reset early"},
+		{"codex", "Codex", "Codex usage reset early"},
+		{"grok", "Grok", "Grok usage reset early"},
 	} {
 		t.Run(tc.providerID, func(t *testing.T) {
 			s := openTestStore(t)
 			e := NewEventEngine(s)
 			seedWindow(t, s, tc.providerID+".primary", 60, &future)
-			snap := oneWindowSnap(tc.providerID, "Name", "primary", "5h limit", 5, &future, now)
+			snap := oneWindowSnap(tc.providerID, tc.name, "primary", "5h limit", 5, &future, now)
 			evs, err := e.Process(snap, testSettings(), now)
 			if err != nil {
 				t.Fatalf("Process: %v", err)

@@ -202,9 +202,9 @@ struct CapacityWindowRow: View {
             ProgressView(value: min(max(window.usedPercent / 100, 0), 1))
                 .tint(capacityTint(window.remainingPercent))
             HStack {
-                Text(String(format: "%.1f%% used", window.usedPercent))
+                Text(String(format: "%.0f%% used", window.usedPercent))
                 Spacer()
-                Text(String(format: "%.1f%% left", window.remainingPercent))
+                Text(String(format: "%.0f%% left", window.remainingPercent))
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -264,10 +264,10 @@ struct HealthDiagnosticsView: View {
                 }
             }
             Section {
-                Button("Refresh diagnostics") { Task { await model.refresh() } }
+                Button("Refresh") { Task { await model.refresh() } }
             }
         }
-        .navigationTitle("Update health")
+        .navigationTitle("Collection")
     }
 
     private func relative(_ date: Date?) -> String {

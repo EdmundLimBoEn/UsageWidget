@@ -59,15 +59,6 @@ public struct APIClient: Sendable {
         try await send(path: "/v1/devices", method: "POST", body: device)
     }
 
-    public func deleteDevice(id: String) async throws {
-        let request = try makeRequest(path: "/v1/devices/\(id)", method: "DELETE")
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError.httpStatus(http.statusCode, nil)
-        }
-    }
-
     public func forcePoll() async throws -> PollResult {
         let request = try makeRequest(path: "/v1/poll", method: "POST")
         let data: Data
@@ -78,7 +69,6 @@ public struct APIClient: Sendable {
             throw APIError.transport(error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        // 502 still returns a structured PollResult body when CodexBar/normalize fails.
         guard (200..<300).contains(http.statusCode) || http.statusCode == 502 else {
             throw APIError.httpStatus(http.statusCode, String(data: data, encoding: .utf8))
         }
@@ -96,8 +86,6 @@ public struct APIClient: Sendable {
     public func testReadiness(deviceID: String) async throws -> ReadinessTestResult {
         try await sendEmpty(path: "/v1/readiness/\(deviceID)/test", method: "POST")
     }
-
-    // MARK: - Internals
 
     private func get<T: Decodable>(path: String) async throws -> T {
         let request = try makeRequest(path: path, method: "GET")

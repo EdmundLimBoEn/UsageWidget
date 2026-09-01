@@ -15,9 +15,6 @@ struct UsageWidgetApp: App {
                 .environment(model)
                 .onAppear {
                     appDelegate.model = model
-                    // Registration is separate from alert authorization. Do
-                    // this after wiring the model so a fast token callback can
-                    // always be uploaded to the server.
                     UIApplication.shared.registerForRemoteNotifications()
                     Task {
                         await model.refresh()
@@ -45,7 +42,7 @@ struct RootView: View {
                     NavigationStack {
                         DashboardView()
                     }
-                    .tabItem { Label("Dashboard", systemImage: "chart.bar.fill") }
+                    .tabItem { Label("Capacity", systemImage: "chart.bar.fill") }
 
                     NavigationStack {
                         SettingsView()

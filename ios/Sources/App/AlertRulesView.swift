@@ -18,22 +18,14 @@ struct AlertRulesView: View {
                 DatePicker("End", selection: minuteBinding(\.endMinute), displayedComponents: .hourAndMinute)
                 LabeledContent("Time zone", value: draft.quietHours.timeZone)
             } header: { Text("Quiet hours") } footer: {
-                Text("During quiet hours, automatic alerts are delivered passively without sound. Device readiness tests remain audible.")
+                Text("During quiet hours, automatic alerts arrive without sound. Test alerts stay audible.")
             }
 
             ForEach(providerIDs, id: \.self) { providerID in
                 Section(providerName(providerID)) {
-                    Toggle("Use global defaults", isOn: inheritanceBinding(providerID: providerID, windowID: nil))
+                    Toggle("Use global defaults", isOn: inheritanceBinding(providerID: providerID))
                     if providerOverride(providerID) != nil {
-                        AlertRuleEditor(rule: overrideBinding(providerID: providerID, windowID: nil))
-                    }
-                    ForEach(windows(providerID)) { window in
-                        DisclosureGroup(window.title) {
-                            Toggle("Use provider settings", isOn: inheritanceBinding(providerID: providerID, windowID: window.id))
-                            if windowOverride(providerID, window.id) != nil {
-                                AlertRuleEditor(rule: overrideBinding(providerID: providerID, windowID: window.id))
-                            }
-                        }
+                        AlertRuleEditor(rule: overrideBinding(providerID: providerID))
                     }
                 }
             }
@@ -58,37 +50,27 @@ struct AlertRulesView: View {
     }
 
     private var providerIDs: [String] {
-        var ids = model.preferences.providerOrder + draft.alertOverrides.map(\.providerID)
-        ids += model.snapshot?.providers.map(\.id) ?? []
-        var seen = Set<String>(); return ids.filter { seen.insert($0).inserted }
+        var ids = (model.snapshot?.providers.map(\.id) ?? []) + draft.alertOverrides.map(\.providerID)
+        var seen = Set<String>()
+        return ids.filter { seen.insert($0).inserted }
     }
 
     private func providerName(_ id: String) -> String { model.snapshot?.providers.first(where: { $0.id == id })?.name ?? id }
-    private func windows(_ providerID: String) -> [UsageWindow] {
-        var values = model.snapshot?.providers.first(where: { $0.id == providerID })?.windows ?? []
-        for override in draft.alertOverrides where override.providerID == providerID && override.windowID != nil {
-            if !values.contains(where: { $0.id == override.windowID! }) {
-                values.append(UsageWindow(id: override.windowID!, key: override.windowID!, title: override.windowID!, usedPercent: 0, remainingPercent: 100))
-            }
-        }
-        return values
-    }
     private func providerOverride(_ id: String) -> AlertOverride? { draft.alertOverrides.first { $0.providerID == id && $0.windowID == nil } }
-    private func windowOverride(_ providerID: String, _ windowID: String) -> AlertOverride? { draft.alertOverrides.first { $0.providerID == providerID && $0.windowID == windowID } }
 
-    private func inheritanceBinding(providerID: String, windowID: String?) -> Binding<Bool> {
-        Binding(get: { !draft.alertOverrides.contains { $0.providerID == providerID && $0.windowID == windowID } }, set: { inherited in
-            draft.alertOverrides.removeAll { $0.providerID == providerID && $0.windowID == windowID }
+    private func inheritanceBinding(providerID: String) -> Binding<Bool> {
+        Binding(get: { !draft.alertOverrides.contains { $0.providerID == providerID && $0.windowID == nil } }, set: { inherited in
+            draft.alertOverrides.removeAll { $0.providerID == providerID && $0.windowID == nil }
             if !inherited {
-                let effective = draft.effectiveRule(providerID: providerID, windowID: windowID)
-                draft.alertOverrides.append(AlertOverride(providerID: providerID, windowID: windowID, rule: effective))
+                let effective = draft.effectiveRule(providerID: providerID)
+                draft.alertOverrides.append(AlertOverride(providerID: providerID, windowID: nil, rule: effective))
             }
         })
     }
 
-    private func overrideBinding(providerID: String, windowID: String?) -> Binding<AlertRule> {
-        Binding(get: { draft.alertOverrides.first { $0.providerID == providerID && $0.windowID == windowID }?.rule ?? draft.effectiveRule(providerID: providerID, windowID: windowID) }, set: { value in
-            if let index = draft.alertOverrides.firstIndex(where: { $0.providerID == providerID && $0.windowID == windowID }) { draft.alertOverrides[index].rule = value }
+    private func overrideBinding(providerID: String) -> Binding<AlertRule> {
+        Binding(get: { draft.alertOverrides.first { $0.providerID == providerID && $0.windowID == nil }?.rule ?? draft.effectiveRule(providerID: providerID) }, set: { value in
+            if let index = draft.alertOverrides.firstIndex(where: { $0.providerID == providerID && $0.windowID == nil }) { draft.alertOverrides[index].rule = value }
         })
     }
 

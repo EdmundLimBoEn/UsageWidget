@@ -90,7 +90,7 @@ Commands:
   snapshot         GET /v1/snapshot
   settings         GET /v1/settings
   qr               Print the private iPhone setup QR code
-  poll             POST /v1/poll  (force CodexBar sample)
+  poll             POST /v1/poll  (force one collection cycle)
   deploy           Cross-compile + install + restart on the server
   logs [-f]        journalctl -u usagewidget on the server
   status           systemd status on the server

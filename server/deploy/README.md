@@ -1,8 +1,8 @@
 # UsageWidget server deployment
 
-`usagewidgetd` polls CodexBar through an isolated local collector, stores
-normalized snapshots and event state in SQLite, serves the private phone API,
-and sends APNs alerts and WidgetKit refreshes.
+`usagewidgetd` polls OpenUsage (preferred) or CodexBar through an isolated
+local collector, stores normalized snapshots and event state in SQLite, serves
+the private phone API, and sends APNs alerts and WidgetKit refreshes.
 
 Linux is the production, always-on deployment. The same daemon also ships as a
 native macOS and Windows executable for personal desktop hosts.
@@ -17,7 +17,7 @@ native macOS and Windows executable for personal desktop hosts.
 | Main listener | `127.0.0.1:8377` |
 | Private route | Tailscale Serve path `/usagewidget` |
 | Main service | `usagewidget.service` as user `usagewidget` |
-| Collector | `usagewidget-collector.service` as the CodexBar login account |
+| Collector | `usagewidget-collector.service` as the OpenUsage/CodexBar login account |
 | Configuration | `/etc/usagewidget/env` and `/etc/usagewidget/collector.env` |
 | Data | `/var/lib/usagewidget/usagewidget.db` |
 | Releases | `/opt/usagewidget/releases` |
@@ -33,8 +33,14 @@ receives only fresh usage JSON over a group-restricted Unix socket.
 Before installation:
 
 1. Log Tailscale into the intended tailnet.
-2. Create or select an unprivileged login account for CodexBar.
-3. As that account, authenticate the desired providers and verify:
+2. Create or select an unprivileged login account for OpenUsage (preferred) or CodexBar.
+3. As that account, authenticate the desired providers and verify collection:
+
+   ```bash
+   openusage export --format json
+   ```
+
+   Or, for a CodexBar fallback:
 
    ```bash
    CodexBarCLI config validate

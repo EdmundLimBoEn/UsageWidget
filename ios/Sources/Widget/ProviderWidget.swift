@@ -91,8 +91,8 @@ struct ProviderUsageWidget: Widget {
             ProviderWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
-        .configurationDisplayName("Usage")
-        .description("Remaining AI capacity, reset horizons, and update freshness.")
+        .configurationDisplayName("Capacity")
+        .description("Remaining AI capacity and when it resets.")
         .supportedFamilies([.systemLarge])
         .pushHandler(UsageWidgetPushHandler.self)
     }

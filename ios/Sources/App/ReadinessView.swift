@@ -11,29 +11,35 @@ struct ReadinessView: View {
     var body: some View {
         List {
             Section {
-                Label(ready ? "Ready" : "Needs attention", systemImage: ready ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                Label(ready ? "Ready" : "Needs attention", systemImage: ready ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                     .font(.title2.weight(.semibold)).foregroundStyle(ready ? .green : .orange)
-                Text("Ready requires every core server check, local notification authorization, and an APNs-accepted device test in the last 15 minutes.")
+                Text("Alerts and the widget need notification permission, a working collector, and a recent APNs test.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("This iPhone") {
-                readinessRow(title: "Notification permission", status: locallyAuthorized ? "pass" : "fail", detail: model.notificationStatus)
+                readinessRow(title: "Notification permission", status: locallyAuthorized ? "pass" : "fail", detail: model.notificationStatusLabel)
                 Button("Request notification permission") { Task { await requestPermission() } }
             }
-            Section("Server checks") {
+            Section("Server") {
                 if let checks = model.readiness?.checks {
                     ForEach(checks) { check in readinessRow(title: check.title, status: check.status, detail: check.detail) }
                 } else { ProgressView("Loading checks…") }
             }
             Section {
                 Button("Refresh checks") { Task { await model.refreshReadiness() } }
-                Button("Poll server now") { Task { await model.forcePoll(); await model.refreshReadiness() } }
-                Button("Send device test") { Task { await model.runReadinessTest() } }
+                Button("Collect now") { Task { await model.forcePoll(); await model.refreshReadiness() } }
+                Button("Send a test alert") { Task { await model.runReadinessTest() } }
                     .disabled(model.isTestingAction)
+                if model.isTestingAction {
+                    ProgressView()
+                }
+                if let status = model.statusMessage {
+                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                }
                 if let note = model.readiness?.latestTest?.acceptanceNote { Text(note).font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .navigationTitle("Release readiness")
+        .navigationTitle("Delivery")
         .task { await model.registerTokensIfNeeded(); await model.refreshReadiness() }
         .refreshable { await model.refreshReadiness() }
     }

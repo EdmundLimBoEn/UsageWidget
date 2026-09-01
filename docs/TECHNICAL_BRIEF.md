@@ -6,16 +6,16 @@ write-up.
 
 ## The product in one sentence
 
-UsageWidget turns usage-limit data from CodexBar into a private, self-hosted
-iPhone dashboard, Home Screen widget, forecasts, and timely capacity/reset
-notifications across multiple AI providers.
+UsageWidget turns usage-limit data from OpenUsage (preferred) or CodexBar into a
+private, self-hosted iPhone dashboard, Home Screen widget, forecasts, and timely
+capacity/reset notifications across multiple AI providers.
 
 ## Problem and user
 
 - AI tools expose several rate windows with different reset times; checking
   them individually interrupts work and makes it hard to plan capacity.
-- The primary user is a person who actively uses Codex, Claude, Grok, or other
-  CodexBar-supported providers and wants one glanceable view on their phone.
+- The primary user is a person who actively uses Cursor, Codex, Claude, Grok, or
+  other quota-backed providers and wants one glanceable view on their phone.
 - The value is not merely displaying a percentage. UsageWidget preserves the
   last known state, explains freshness, predicts likely exhaustion, and alerts
   on meaningful changes without moving provider credentials onto the phone.
@@ -23,7 +23,7 @@ notifications across multiple AI providers.
 ## System shape
 
 ```text
-CodexBar sessions
+OpenUsage (or CodexBar)
       │
       ▼
 isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
@@ -115,29 +115,29 @@ isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
   fresh while failed providers can show their last known values as stale.
 - The iOS interface distinguishes collecting, current, stale, and unavailable
   states. This is part of the product experience, not just diagnostics.
-- The Release Readiness screen checks database, polling, collector freshness,
+- The Delivery screen checks database, polling, collector freshness,
   snapshot freshness, APNs configuration, device registration, and alert/widget
-  tokens. A targeted test reports APNs acceptance without falsely claiming that
-  iOS displayed the notification.
+  tokens. A targeted test reports APNs acceptance without claiming that iOS
+  displayed the notification.
 
 ## Security and privacy model
 
-- Provider credentials remain on the machine running CodexBar and never move
-  to the iPhone. Linux keeps them in the isolated collector account; desktop
-  mode runs the daemon as the trusted signed-in user.
+- Provider credentials remain on the machine running OpenUsage or CodexBar and
+  never move to the iPhone. Linux keeps them in the isolated collector account;
+  desktop mode runs the daemon as the trusted signed-in user.
 - The phone API uses a bearer token and exposes normalized display data, not raw
-  CodexBar payloads.
+  upstream payloads.
 - The app and widget share the bearer token through a Keychain access group.
   App Group storage contains cached display data and preferences, not the
   credential.
 - The service is designed for one operator on a private network. Tailscale Serve
   provides the HTTPS path; the raw Go port should remain loopback-only.
-- Setup QR codes are credentials. They must never appear in the demo recording,
-  screenshots, logs, or repository.
+- Setup QR codes are credentials. They must never appear in screenshots, logs,
+  or the repository.
 
 ## Main code areas
 
-- `server/collector.go`: restricted CodexBar CLI bridge.
+- `server/collector.go`: restricted usage CLI bridge.
 - `server/normalize.go`: upstream JSON to stable provider/window model.
 - `server/poller.go`: polling lifecycle, partial-failure preservation, event
   processing, and notification/widget dispatch.
@@ -169,49 +169,8 @@ These are independent beats to choose from, not a prescribed order or script.
   fallback rather than pretending a failed collection is live data.
 - The control value: show provider ordering/visibility and an alert override or
   quiet-hours setting.
-- The end-to-end proof: trigger the readiness test or a safe demo notification,
+- The end-to-end proof: trigger the delivery test or a safe demo notification,
   then show the server/device checks.
 - The trust value: explain the collector/daemon separation and why credentials
   never need to be placed in the phone app.
 
-## Judge-aligned key points
-
-- **Technological implementation:** a working cross-platform system spanning
-  SwiftUI/WidgetKit, Go, SQLite, APNs, a Unix-socket privilege boundary,
-  Tailscale, installers, operational tooling, and automated tests.
-- **Design:** the dashboard, widget, setup flow, settings, alert rules, cached
-  states, and readiness diagnostics form a coherent product rather than a
-  single API proof of concept.
-- **Potential impact:** it reduces context switching and helps heavy AI-tool
-  users decide when to work, switch providers, or wait for a reset.
-- **Quality of idea:** it treats AI usage capacity as an ambient personal signal
-  with forecasts and transition-aware alerts, not merely another usage page.
-
-## Codex and GPT-5.6: keep the claim precise
-
-- UsageWidget does **not** call GPT-5.6 at runtime based on the current code.
-  CodexBar is a usage-data source; it is not an inference dependency.
-- The Build Week requirement concerns how the project was built with Codex and
-  GPT-5.6. Describe only work you personally verified in the relevant Codex
-  task: for example planning, cross-language implementation, test generation,
-  debugging, security review, or release hardening.
-- Be ready to name one concrete piece built with GPT-5.6, the constraint or
-  tradeoff involved, what you changed or rejected, and how you verified the
-  result. The `/feedback` Session ID should point to the task containing most of
-  that core work.
-- Keep authorship clear: Codex accelerated implementation and review; you chose
-  the product problem, accepted or changed the design decisions, tested the
-  physical system, and own the final behavior.
-
-## Current verification snapshot
-
-Verified locally on 20 July 2026 SGT:
-
-- Go server tests pass.
-- Native macOS and Windows daemon cross-builds pass.
-- Installer tests pass.
-- The unsigned iOS generic-device build succeeds.
-
-Still human-dependent: signed physical-device behavior, production APNs,
-Tailscale deployment, fresh-install onboarding, GitHub Actions after correcting
-its archived-demo references, and the final public video and Devpost links.

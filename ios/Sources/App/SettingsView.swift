@@ -13,11 +13,6 @@ struct SettingsView: View {
                 LabeledContent("Server", value: model.credentials?.serverURL ?? "—")
                     .lineLimit(2)
                 Button("Edit connection…") { showSetup = true }
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    Label("Refresh now", systemImage: "arrow.clockwise")
-                }
             }
 
             Section("Polling") {
@@ -36,11 +31,11 @@ struct SettingsView: View {
                 Button("Request notification permission") {
                     Task { await requestNotifications() }
                 }
-                LabeledContent("Permission", value: model.notificationStatus)
+                LabeledContent("Permission", value: model.notificationStatusLabel)
             } header: {
                 Text("Alerts")
             } footer: {
-                Text("Alerts apply to every visible provider and every rate window. Hiding a provider disables its widget row and alerts.")
+                Text("Hiding a provider removes it from the widget and stops its alerts.")
             }
 
             Section("Providers") {
@@ -48,12 +43,7 @@ struct SettingsView: View {
                     ForEach(providerRows(providers), id: \.id) { row in
                         HStack {
                             ProviderMark(providerID: row.id, providerName: row.name, size: 28, cornerRadius: 8)
-                            VStack(alignment: .leading) {
-                                Text(row.name)
-                                Text(row.id)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(row.name)
                             Spacer()
                             Toggle(
                                 "Visible",
@@ -75,50 +65,13 @@ struct SettingsView: View {
             }
 
             Section {
-                NavigationLink { ReadinessView() } label: { Label("Release readiness", systemImage: "checkmark.seal") }
-                Button {
-                    Task { await model.forcePoll() }
-                } label: {
-                    Label("Poll server now", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .disabled(model.isTestingAction || !model.isConfigured)
-
-                if model.isTestingAction {
-                    ProgressView()
-                }
-                if let status = model.statusMessage {
-                    Text(status)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                NavigationLink { ReadinessView() } label: {
+                    Label("Delivery", systemImage: "iphone.radiowaves.left.and.right")
                 }
             } header: {
-                Text("Developer tools")
+                Text("This iPhone")
             } footer: {
-                Text("Poll collects through the configured server source. Release readiness verifies device delivery separately.")
-            }
-
-            Section("Server health") {
-                if let h = model.health {
-                    LabeledContent("Service", value: h.service)
-                    LabeledContent("CodexBar", value: h.codexbar ? "ok" : "down")
-                    LabeledContent("Database", value: h.database ? "ok" : "error")
-                    LabeledContent("Polling", value: h.polling ? "running" : "stopped")
-                    LabeledContent("APNs", value: h.apns ? "configured" : "noop")
-                    if let last = h.lastSuccessAt {
-                        LabeledContent("Last success", value: last.formatted())
-                    }
-                    if let last = h.lastPollAt {
-                        LabeledContent("Last poll", value: last.formatted())
-                    }
-                } else {
-                    Text("Unknown — refresh to load health")
-                        .foregroundStyle(.secondary)
-                }
-                LabeledContent("Local data", value: model.dataAgeText)
-                if model.snapshot?.stale == true {
-                    Label("Stale snapshot", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
-                }
+                Text("Checks that alerts and the widget can reach this phone.")
             }
 
             if let err = model.errorMessage {
@@ -162,7 +115,6 @@ struct SettingsView: View {
         for p in providers where !seen.contains(p.id) {
             rows.append(Row(id: p.id, name: p.name))
         }
-        // Include hidden/order-only entries without live data (server omits hidden providers)
         for id in model.preferences.providerOrder + model.preferences.hiddenProviders
         where !rows.contains(where: { $0.id == id }) {
             rows.append(Row(id: id, name: id))
