@@ -56,12 +56,12 @@ func (e *EventEngine) Process(snap Snapshot, s Settings, now time.Time) ([]Event
 func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) (EventProcessResult, error) {
 	hidden := make(map[string]bool, len(s.HiddenProviders))
 	for _, id := range s.HiddenProviders {
-		hidden[id] = true
+		hidden[canonicalProviderID(id)] = true
 	}
 
 	var result EventProcessResult
 	for _, p := range snap.Providers {
-		if hidden[p.ID] || p.Stale || p.Error != "" {
+		if hidden[canonicalProviderID(p.ID)] || p.Stale || p.Error != "" {
 			continue
 		}
 		providerRule := s.EffectiveRule(p.ID, "")

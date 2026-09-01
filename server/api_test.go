@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,14 +109,20 @@ func TestSnapshotReturnsStoredData(t *testing.T) {
 	if !got.Stale {
 		t.Fatalf("expected stale flag preserved from stored data")
 	}
-	if len(got.Providers) != 1 || got.Providers[0].ID != "codex" {
-		t.Fatalf("unexpected providers: %+v", got.Providers)
-	}
-	if got.Providers[0].Raw != nil || strings.Contains(rec.Body.String(), `"private"`) {
-		t.Fatalf("phone snapshot leaked raw upstream payload: %s", rec.Body.String())
-	}
 	if got.PollIntervalMinutes != 5 {
 		t.Fatalf("expected pollIntervalMinutes from settings default 5, got %d", got.PollIntervalMinutes)
+	}
+	var foundCodex bool
+	for _, p := range got.Providers {
+		if p.ID == "codex" {
+			foundCodex = true
+		}
+	}
+	if !foundCodex {
+		t.Fatalf("stored codex missing: %+v", got.Providers)
+	}
+	if strings.Contains(rec.Body.String(), `"private"`) {
+		t.Fatalf("phone snapshot leaked raw upstream payload: %s", rec.Body.String())
 	}
 }
 
@@ -140,7 +147,11 @@ func TestGetSettingsDefaults(t *testing.T) {
 	if got.PollIntervalMinutes != 5 {
 		t.Fatalf("expected default poll interval 5, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 7 || got.ProviderOrder[0] != "cursor" {
+	if len(got.ProviderOrder) != 4 || got.ProviderOrder[0] != "cursor" {
+		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
+	}
+	wantOrder := []string{"cursor", "codex", "claude_code", "grok"}
+	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
 	}
 	if !got.NotificationsEnabled {
@@ -163,7 +174,8 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	if got.PollIntervalMinutes != 15 {
 		t.Fatalf("expected updated poll interval 15, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 2 || got.ProviderOrder[0] != "claude" {
+	wantOrder := []string{"cursor", "claude_code", "codex"}
+	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unexpected provider order: %+v", got.ProviderOrder)
 	}
 	if got.EarlyThresholdPct != 20 {
@@ -378,6 +390,169 @@ func TestFilterHidden(t *testing.T) {
 	if len(filterHidden(providers, nil)) != 3 {
 		t.Fatalf("nil hidden list should keep all providers")
 	}
+	if len(filterHidden([]Provider{{ID: "claude_code"}}, []string{"claude"})) != 0 {
+		t.Fatal("hidden aliases must match canonical snapshot IDs")
+	}
+}
+
+func TestSnapshotFillsMissingCatalogSlots(t *testing.T) {
+	api, store := newTestAPI(t)
+	if err := store.SetSetting("provider_order", `["cursor","codex","grok"]`); err != nil {
+		t.Fatal(err)
+	}
+	fetchedAt := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	snap := Snapshot{
+		FetchedAt: fetchedAt,
+		Providers: []Provider{
+			{ID: "codex", Name: "Codex", Windows: []Window{{ID: "codex.primary", Key: "primary", Title: "5h"}}},
+			{ID: "grok", Name: "Grok", Windows: []Window{{ID: "grok.primary", Key: "primary", Title: "5h"}}},
+		},
+	}
+	payload, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSnapshot(fetchedAt, payload); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doRequest(t, api, http.MethodGet, "/v1/snapshot", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got Snapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	var cursor *Provider
+	ids := make([]string, 0, len(got.Providers))
+	for i := range got.Providers {
+		p := &got.Providers[i]
+		ids = append(ids, p.ID)
+		if p.ID == "cursor" {
+			cursor = p
+		}
+	}
+	if cursor == nil {
+		t.Fatalf("missing cursor placeholder: %v", ids)
+	}
+	if cursor.Name != "Cursor" || cursor.Error != "Not in the latest collection" {
+		t.Fatalf("cursor placeholder: %+v", cursor)
+	}
+
+	_, storedPayload, ok, err := store.LatestSnapshot()
+	if err != nil || !ok {
+		t.Fatalf("stored snapshot ok=%v err=%v", ok, err)
+	}
+	var stored Snapshot
+	if err := json.Unmarshal(storedPayload, &stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range stored.Providers {
+		if p.ID == "cursor" {
+			t.Fatal("placeholder must not be persisted")
+		}
+	}
+}
+
+func TestSnapshotDropsStoredAPINoiseAndCanonicalizes(t *testing.T) {
+	api, store := newTestAPI(t)
+	fetchedAt := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
+	snap := Snapshot{
+		FetchedAt: fetchedAt,
+		Providers: []Provider{
+			{ID: "openai", Name: "OpenAI", Windows: []Window{{Title: "API"}}},
+			{ID: "claude", Name: "Claude", Windows: []Window{{Title: "5h"}}},
+			{ID: "codex", Name: "Codex", Windows: []Window{{Title: "5h"}}},
+		},
+	}
+	payload, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSnapshot(fetchedAt, payload); err != nil {
+		t.Fatal(err)
+	}
+	rec := doRequest(t, api, http.MethodGet, "/v1/snapshot", "secret-token", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var got Snapshot
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(got.Providers))
+	for _, p := range got.Providers {
+		ids = append(ids, p.ID)
+		if p.ID == "openai" || p.ID == "claude" {
+			t.Fatalf("leaked %+v", p)
+		}
+		if p.ID == "claude_code" && p.Name != "Claude Code" {
+			t.Fatalf("canonical name: %+v", p)
+		}
+	}
+	joined := strings.Join(ids, ",")
+	if !strings.Contains(joined, "claude_code") || !strings.Contains(joined, "codex") || !strings.Contains(joined, "cursor") {
+		t.Fatalf("ids=%v", ids)
+	}
+}
+
+func TestLoadSettingsPrunesHiddenAndPrependsCursor(t *testing.T) {
+	store := openTestStore(t)
+	hidden := make([]string, 0, 58)
+	for i := 0; i < 57; i++ {
+		hidden = append(hidden, fmt.Sprintf("ghost_%d", i))
+	}
+	hidden = append(hidden, "claude")
+	hiddenJSON, err := json.Marshal(hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting("hidden_providers", string(hiddenJSON)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSetting("provider_order", `["demo","codex"]`); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := loadSettings(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.HiddenProviders) != 1 || got.HiddenProviders[0] != "claude_code" {
+		t.Fatalf("hidden=%v", got.HiddenProviders)
+	}
+	wantOrder := []string{"cursor", "codex"}
+	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
+		t.Fatalf("order=%v", got.ProviderOrder)
+	}
+
+	again, err := loadSettings(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(again.ProviderOrder, ",") != strings.Join(got.ProviderOrder, ",") ||
+		strings.Join(again.HiddenProviders, ",") != strings.Join(got.HiddenProviders, ",") {
+		t.Fatalf("second load mutated settings: %+v vs %+v", again, got)
+	}
+	orderJSON, err := store.GetSetting("provider_order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenStored, err := store.GetSetting("hidden_providers")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again2, err := loadSettings(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orderJSON2, _ := store.GetSetting("provider_order")
+	hiddenStored2, _ := store.GetSetting("hidden_providers")
+	if orderJSON != orderJSON2 || hiddenStored != hiddenStored2 {
+		t.Fatalf("second load persisted again: order %q -> %q hidden %q -> %q", orderJSON, orderJSON2, hiddenStored, hiddenStored2)
+	}
+	_ = again2
 }
 
 type stubPoller struct {

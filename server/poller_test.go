@@ -122,7 +122,7 @@ func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
 
 	snapshot := latestSnap(t, store)
 	claude := snapshot.Providers[0]
-	if !claude.Stale || claude.Error != "" || len(claude.Windows) != 1 || claude.Windows[0].UsedPercent != 25 {
+	if claude.ID != "claude_code" || !claude.Stale || claude.Error != "" || len(claude.Windows) != 1 || claude.Windows[0].UsedPercent != 25 {
 		t.Fatalf("Claude last-known usage was not preserved: %+v", claude)
 	}
 	codex := snapshot.Providers[1]

@@ -93,13 +93,20 @@ const CurrentSchemaVersion = 1
 
 var defaultSettings = map[string]string{
 	"poll_interval_minutes":           "5",
-	"provider_order":                  `["cursor","codex","claude_code","claude","copilot","gemini_cli","grok"]`,
 	"hidden_providers":                `[]`,
 	"notifications_enabled":           "true",
 	"early_threshold_pct":             "10",
 	"danger_threshold_pct":            "10",
 	"default_repeat_interval_minutes": "0",
 	"quiet_hours":                     `{"enabled":false,"startMinute":1320,"endMinute":420,"timeZone":"UTC"}`,
+}
+
+func init() {
+	order, err := json.Marshal(defaultProviderOrder)
+	if err != nil {
+		panic(err)
+	}
+	defaultSettings["provider_order"] = string(order)
 }
 
 func OpenStore(dbPath string) (*Store, error) {

@@ -461,7 +461,9 @@ func (a *API) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 	if snap.Stale || time.Since(fetchedAt) > freshLimit {
 		clearForecasts(&snap)
 	}
+	snap.Providers = projectCatalogProviders(snap.Providers)
 	snap.Providers = filterHidden(snap.Providers, settings.HiddenProviders)
+	snap.Providers = fillMissingCatalogSlots(snap.Providers, settings.ProviderOrder, settings.HiddenProviders)
 	for i := range snap.Providers {
 		snap.Providers[i].Raw = nil
 	}
@@ -475,11 +477,11 @@ func filterHidden(providers []Provider, hiddenIDs []string) []Provider {
 	}
 	hidden := make(map[string]bool, len(hiddenIDs))
 	for _, id := range hiddenIDs {
-		hidden[id] = true
+		hidden[canonicalProviderID(id)] = true
 	}
 	out := make([]Provider, 0, len(providers))
 	for _, p := range providers {
-		if !hidden[p.ID] {
+		if !hidden[canonicalProviderID(p.ID)] {
 			out = append(out, p)
 		}
 	}
@@ -572,7 +574,27 @@ func loadSettings(store *Store) (Settings, error) {
 	if err != nil {
 		return Settings{}, err
 	}
+	if sanitizeSettings(&s) {
+		if err := persistSanitizedProviderLists(store, s); err != nil {
+			return Settings{}, err
+		}
+	}
 	return s, nil
+}
+
+func persistSanitizedProviderLists(store *Store, s Settings) error {
+	order, err := json.Marshal(s.ProviderOrder)
+	if err != nil {
+		return err
+	}
+	if err := store.SetSetting("provider_order", string(order)); err != nil {
+		return err
+	}
+	hidden, err := json.Marshal(s.HiddenProviders)
+	if err != nil {
+		return err
+	}
+	return store.SetSetting("hidden_providers", string(hidden))
 }
 
 func (a *API) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -642,11 +664,13 @@ func (a *API) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		set("poll_interval_minutes", strconv.Itoa(*req.PollIntervalMinutes))
 	}
 	if req.ProviderOrder != nil {
-		b, _ := json.Marshal(*req.ProviderOrder)
+		ids := sanitizeProviderIDs(*req.ProviderOrder, true)
+		b, _ := json.Marshal(ids)
 		set("provider_order", string(b))
 	}
 	if req.HiddenProviders != nil {
-		b, _ := json.Marshal(*req.HiddenProviders)
+		ids := sanitizeProviderIDs(*req.HiddenProviders, false)
+		b, _ := json.Marshal(ids)
 		set("hidden_providers", string(b))
 	}
 	if req.NotificationsEnabled != nil {

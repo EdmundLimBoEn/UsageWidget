@@ -141,6 +141,7 @@ final class AppModel {
             try store.savePreferences(preferences)
             WidgetCenter.shared.reloadAllTimelines()
             errorMessage = nil
+            await refresh()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -152,6 +153,7 @@ final class AppModel {
         preferences = DisplayPreferences(providerOrder: updated.providerOrder, hiddenProviders: updated.hiddenProviders)
         try store.savePreferences(preferences)
         WidgetCenter.shared.reloadAllTimelines()
+        await refresh()
     }
 
     func refreshReadiness() async {

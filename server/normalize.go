@@ -204,10 +204,11 @@ func normalizeOne(raw json.RawMessage) (Provider, error) {
 	if id == "" {
 		return Provider{}, fmt.Errorf("normalize: provider missing id")
 	}
+	id = canonicalProviderID(id)
 
-	name := up.Name
-	if name == "" {
-		name = displayNameForProvider(id)
+	name := displayNameForProvider(id)
+	if !inProviderCatalog(id) && strings.TrimSpace(up.Name) != "" {
+		name = up.Name
 	}
 
 	p := Provider{

@@ -64,19 +64,14 @@ func normalizeOpenUsage(body []byte, pollIntervalMinutes int, fetchedAt time.Tim
 	order := make([]string, 0)
 
 	for _, raw := range snaps {
-		id := strings.TrimSpace(raw.ProviderID)
-		if id == "" || isSpendOrAPIProvider(id) {
+		rawID := strings.TrimSpace(raw.ProviderID)
+		id := canonicalProviderID(rawID)
+		if id == "" || !inProviderCatalog(id) {
 			continue
 		}
 		p, ok := byProvider[id]
 		if !ok {
-			name := displayNameForProvider(id)
-			if raw.Attributes != nil {
-				if v := strings.TrimSpace(raw.Attributes["display_name"]); v != "" {
-					name = v
-				}
-			}
-			p = &Provider{ID: id, Name: name}
+			p = &Provider{ID: id, Name: displayNameForProvider(id)}
 			byProvider[id] = p
 			order = append(order, id)
 		}
@@ -395,33 +390,6 @@ func resolveReset(resets map[string]time.Time, key string) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
-}
-
-func displayNameForProvider(id string) string {
-	switch strings.ToLower(id) {
-	case "cursor":
-		return "Cursor"
-	case "claude", "claude_code":
-		return "Claude Code"
-	case "codex", "codex_cli":
-		return "Codex"
-	case "copilot", "github_copilot":
-		return "Copilot"
-	case "gemini", "gemini_cli":
-		return "Gemini"
-	case "grok", "xai":
-		return "Grok"
-	case "openrouter":
-		return "OpenRouter"
-	case "openai":
-		return "OpenAI"
-	case "anthropic":
-		return "Anthropic"
-	case "ollama":
-		return "Ollama"
-	default:
-		return displayName(strings.ReplaceAll(id, "_", " "))
-	}
 }
 
 func firstNonEmpty(values ...string) string {

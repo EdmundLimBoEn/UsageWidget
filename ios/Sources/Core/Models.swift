@@ -193,7 +193,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
 
     public init(
         pollIntervalMinutes: Int = 5,
-        providerOrder: [String] = ["cursor", "codex", "claude_code", "claude", "copilot", "gemini_cli", "grok"],
+        providerOrder: [String] = ProviderCatalog.defaultOrder,
         hiddenProviders: [String] = [],
         notificationsEnabled: Bool = true,
         earlyThresholdPct: Double = 10,
@@ -222,7 +222,7 @@ public struct ServerSettings: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         pollIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .pollIntervalMinutes) ?? 5
-        providerOrder = try c.decodeIfPresent([String].self, forKey: .providerOrder) ?? ["cursor", "codex", "claude_code", "claude", "copilot", "gemini_cli", "grok"]
+        providerOrder = try c.decodeIfPresent([String].self, forKey: .providerOrder) ?? ProviderCatalog.defaultOrder
         hiddenProviders = try c.decodeIfPresent([String].self, forKey: .hiddenProviders) ?? []
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         earlyThresholdPct = try c.decodeIfPresent(Double.self, forKey: .earlyThresholdPct) ?? 10
@@ -436,6 +436,10 @@ public enum ForecastText {
     }
 }
 
+public enum ProviderCatalog {
+    public static let defaultOrder = ["cursor", "codex", "claude_code", "grok"]
+}
+
 public enum ProviderDisplay {
     /// Visible providers in user order, then any remaining visible ones.
     public static func orderedVisible(
@@ -443,7 +447,11 @@ public enum ProviderDisplay {
         order: [String],
         hidden: Set<String>
     ) -> [Provider] {
-        let byID = Dictionary(uniqueKeysWithValues: providers.map { ($0.id, $0) })
+        var byID: [String: Provider] = [:]
+        byID.reserveCapacity(providers.count)
+        for provider in providers where byID[provider.id] == nil {
+            byID[provider.id] = provider
+        }
         var seen = Set<String>()
         var result: [Provider] = []
         for id in order {
@@ -453,6 +461,7 @@ public enum ProviderDisplay {
         }
         for p in providers where !seen.contains(p.id) && !hidden.contains(p.id) {
             result.append(p)
+            seen.insert(p.id)
         }
         return result
     }

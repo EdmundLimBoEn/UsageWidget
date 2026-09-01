@@ -4,7 +4,7 @@ public struct DisplayPreferences: Codable, Equatable, Sendable {
     public var providerOrder: [String]
     public var hiddenProviders: [String]
 
-    public init(providerOrder: [String] = ["cursor", "codex", "claude_code", "claude", "copilot", "gemini_cli", "grok"], hiddenProviders: [String] = []) {
+    public init(providerOrder: [String] = ProviderCatalog.defaultOrder, hiddenProviders: [String] = []) {
         self.providerOrder = providerOrder
         self.hiddenProviders = hiddenProviders
     }

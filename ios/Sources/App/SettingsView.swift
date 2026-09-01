@@ -34,11 +34,9 @@ struct SettingsView: View {
                 LabeledContent("Permission", value: model.notificationStatusLabel)
             } header: {
                 Text("Alerts")
-            } footer: {
-                Text("Hiding a provider removes it from the widget and stops its alerts.")
             }
 
-            Section("Providers") {
+            Section {
                 if let providers = model.snapshot?.providers {
                     ForEach(providerRows(providers), id: \.id) { row in
                         HStack {
@@ -62,6 +60,10 @@ struct SettingsView: View {
                     Text("No providers yet")
                         .foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("Providers")
+            } footer: {
+                Text("Hiding a provider removes it from the widget and stops its alerts.")
             }
 
             Section {
@@ -105,21 +107,11 @@ struct SettingsView: View {
     }
 
     private func providerRows(_ providers: [Provider]) -> [Row] {
-        let ordered = ProviderDisplay.orderedVisible(
+        ProviderDisplay.orderedVisible(
             providers: providers,
             order: model.preferences.providerOrder,
             hidden: []
-        )
-        var rows = ordered.map { Row(id: $0.id, name: $0.name) }
-        let seen = Set(rows.map(\.id))
-        for p in providers where !seen.contains(p.id) {
-            rows.append(Row(id: p.id, name: p.name))
-        }
-        for id in model.preferences.providerOrder + model.preferences.hiddenProviders
-        where !rows.contains(where: { $0.id == id }) {
-            rows.append(Row(id: id, name: id))
-        }
-        return rows
+        ).map { Row(id: $0.id, name: $0.name) }
     }
 
     private func requestNotifications() async {

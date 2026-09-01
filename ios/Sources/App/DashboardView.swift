@@ -10,12 +10,21 @@ struct DashboardView: View {
                 freshnessButton
 
                 if model.visibleProviders.isEmpty {
-                    ContentUnavailableView(
-                        "No usage yet",
-                        systemImage: "gauge.with.dots.needle.0percent",
-                        description: Text("Refresh after the server collects its first snapshot.")
-                    )
-                    .frame(minHeight: 360)
+                    if model.snapshot != nil {
+                        ContentUnavailableView(
+                            "No providers to show",
+                            systemImage: "eye.slash",
+                            description: Text("Providers are hidden or not in this collection.")
+                        )
+                        .frame(minHeight: 360)
+                    } else {
+                        ContentUnavailableView(
+                            "No usage yet",
+                            systemImage: "gauge.with.dots.needle.0percent",
+                            description: Text("Refresh after the server collects its first snapshot.")
+                        )
+                        .frame(minHeight: 360)
+                    }
                 } else {
                     ForEach(model.visibleProviders) { provider in
                         ProviderCapacityCard(provider: provider)
@@ -201,13 +210,6 @@ struct CapacityWindowRow: View {
             }
             ProgressView(value: min(max(window.usedPercent / 100, 0), 1))
                 .tint(capacityTint(window.remainingPercent))
-            HStack {
-                Text(String(format: "%.0f%% used", window.usedPercent))
-                Spacer()
-                Text(String(format: "%.0f%% left", window.remainingPercent))
-            }
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(.secondary)
             if let forecast = ForecastText.string(for: window) {
                 Label(forecast, systemImage: window.forecast?.exhaustsBeforeReset == true ? "hourglass.bottomhalf.filled" : "checkmark.circle")
                     .font(.caption2)

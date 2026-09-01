@@ -197,6 +197,8 @@ func (p *Poller) preserveLastKnownProviderUsage(snapshot *Snapshot) {
 	if err := json.Unmarshal(payload, &previous); err != nil {
 		return
 	}
+	snapshot.Providers = projectCatalogProviders(snapshot.Providers)
+	previous.Providers = projectCatalogProviders(previous.Providers)
 	byID := make(map[string]Provider, len(previous.Providers))
 	for _, provider := range previous.Providers {
 		byID[provider.ID] = provider

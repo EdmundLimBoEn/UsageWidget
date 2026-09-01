@@ -115,6 +115,28 @@ final class ModelsAndStoreTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.id), ["c", "a"])
     }
 
+    func testOrderedVisibleIgnoresOrderLeftoversAndDuplicateIDs() {
+        let providers = [
+            Provider(id: "codex", name: "Codex"),
+            Provider(id: "codex", name: "Codex dup"),
+            Provider(id: "grok", name: "Grok"),
+        ]
+        let ordered = ProviderDisplay.orderedVisible(
+            providers: providers,
+            order: ["cursor", "codex", "demo"],
+            hidden: []
+        )
+        XCTAssertEqual(ordered.map(\.id), ["codex", "grok"])
+        XCTAssertEqual(ordered.first?.name, "Codex")
+    }
+
+    func testDefaultProviderOrderIsTrackedFour() {
+        XCTAssertEqual(DisplayPreferences().providerOrder, ["cursor", "codex", "claude_code", "grok"])
+        XCTAssertEqual(ServerSettings().providerOrder, ProviderCatalog.defaultOrder)
+        XCTAssertFalse(ProviderCatalog.defaultOrder.contains("copilot"))
+        XCTAssertFalse(ProviderCatalog.defaultOrder.contains("gemini_cli"))
+    }
+
     func testDeviceIDStable() {
         let store = SnapshotStore.temporary()
         let a = store.deviceID()

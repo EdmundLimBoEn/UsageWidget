@@ -156,7 +156,7 @@ func TestNormalize(t *testing.T) {
 			},
 		},
 		{
-			name: "unknown provider passes through untouched",
+			name: "unknown provider is dropped",
 			body: `{
 				"providers": [
 					{
@@ -167,12 +167,8 @@ func TestNormalize(t *testing.T) {
 				]
 			}`,
 			check: func(t *testing.T, snap Snapshot) {
-				p := snap.Providers[0]
-				if p.ID != "mystery" || p.Name != "Mystery Provider" {
-					t.Fatalf("unexpected unknown provider: %+v", p)
-				}
-				if len(p.Windows) != 1 {
-					t.Fatalf("expected 1 window, got %d", len(p.Windows))
+				if len(snap.Providers) != 0 {
+					t.Fatalf("unknown plugins must drop, got %+v", snap.Providers)
 				}
 			},
 		},
