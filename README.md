@@ -9,12 +9,12 @@ WidgetKit refreshes to the phone.
 ```text
 ┌──────────────┐   Tailscale HTTPS    ┌──────────────────┐   Unix socket   ┌─────────────────┐
 │ iPhone app   │ ───────────────────► │ usagewidgetd     │ ──────────────► │ CLI collector   │
-│ + widget     │ ◄── APNs/WidgetKit ─ │ Go API + SQLite  │                 │ OpenUsage export│
+│ + widget     │ ◄── APNs/WidgetKit ─ │ Go API + SQLite  │                 │ OpenUsage CLI   │
 └──────────────┘                      └──────────────────┘                 └─────────────────┘
 ```
 
 Linux uses the isolated Unix-socket collector shown above. Native macOS runs
-can point at `openusage export`, an OpenUsage hub URL, or a legacy CodexBar
+can point at the `openusage` CLI, an OpenUsage hub URL, or a legacy CodexBar
 CLI/HTTP source. Native Windows installs currently use CodexBar
 (`CODEXBAR_BIN` / `CODEXBAR_URL`) only.
 
@@ -23,7 +23,7 @@ CLI/HTTP source. Native Windows installs currently use CodexBar
 - Prefers plan/quota gauges (Cursor Plan + Auto, Codex/Claude 5h/7d windows)
   and drops API spend dashboards (OpenAI Admin API, OpenRouter, and similar)
   plus telemetry-only providers.
-- Includes Cursor, Codex, Claude Code, and Grok in the default provider order.
+- Includes Cursor, Codex, Claude Code, Copilot, Gemini, and Grok in the default provider order.
 - Shows remaining capacity, reset time, and OpenUsage-style projected runouts
   (`100% in …` / `~N% by reset`) as soon as a window + reset clock exist;
   history-based burn rates still enrich forecasts after enough samples.
@@ -200,7 +200,7 @@ The data source is selected in this order:
 
 1. `OPENUSAGE_CMD`, a full OpenUsage command override.
 2. `OPENUSAGE_URL`, an OpenUsage hub `/v1/snapshots` URL.
-3. `OPENUSAGE_BIN`, an exact `openusage` path (`export --format json`).
+3. `OPENUSAGE_BIN`, an exact `openusage` path (bare CLI; output is always JSON).
 4. `OPENUSAGE_SOCKET`, an OpenUsage daemon UDS for `/v1/read-model`.
 5. Collector socket (Linux production default
    `/run/usagewidget/collector.sock`) when `USAGE_SOURCE` is `auto`/`openusage`.

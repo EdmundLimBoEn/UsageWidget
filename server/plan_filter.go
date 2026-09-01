@@ -9,18 +9,19 @@ type providerCatalogEntry struct {
 	ID      string
 	Name    string
 	Aliases []string
+	CLI     string
 }
 
 var providerCatalog = []providerCatalogEntry{
-	{ID: "cursor", Name: "Cursor", Aliases: []string{"cursor_ai", "cursor_ide"}},
-	{ID: "codex", Name: "Codex", Aliases: []string{"codex_cli"}},
-	{ID: "claude_code", Name: "Claude Code", Aliases: []string{"claude"}},
-	{ID: "grok", Name: "Grok", Aliases: []string{"xai"}},
-	{ID: "copilot", Name: "Copilot", Aliases: []string{"github_copilot"}},
-	{ID: "gemini_cli", Name: "Gemini", Aliases: []string{"gemini"}},
+	{ID: "cursor", Name: "Cursor", Aliases: []string{"cursor_ai", "cursor_ide"}, CLI: "cursor"},
+	{ID: "codex", Name: "Codex", Aliases: []string{"codex_cli"}, CLI: "codex"},
+	{ID: "claude_code", Name: "Claude Code", Aliases: []string{"claude"}, CLI: "claude"},
+	{ID: "copilot", Name: "Copilot", Aliases: []string{"github_copilot"}, CLI: "copilot"},
+	{ID: "gemini_cli", Name: "Gemini", Aliases: []string{"gemini", "antigravity"}, CLI: "gemini"},
+	{ID: "grok", Name: "Grok", Aliases: []string{"xai"}, CLI: "grok"},
 }
 
-var defaultProviderOrder = []string{"cursor", "codex", "claude_code", "grok"}
+var defaultProviderOrder = []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
 
 var (
 	aliasToCanonical map[string]string
@@ -82,7 +83,10 @@ func isAPINoiseWindow(providerID, key, title string) bool {
 	if strings.Contains(blob, "third party") || strings.Contains(blob, "third-party") {
 		return true
 	}
-	if canonicalProviderID(providerID) == "cursor" && key == "tertiary" {
+	if canonicalProviderID(providerID) == "cursor" && (key == "tertiary" || key == "apiUsage" || key == "grokBot") {
+		return true
+	}
+	if strings.Contains(blob, "apiusage") || strings.Contains(blob, "grokbot") {
 		return true
 	}
 	if strings.Contains(blob, "plan_api") || blob == "api" || strings.HasPrefix(blob, "api ") || strings.Contains(blob, " api") {
@@ -106,9 +110,9 @@ func planWindowTitle(providerID, key, title string, minutes *float64) string {
 	return windowTitle(key, minutes)
 }
 
-func sanitizeProviderIDs(ids []string, ensureCursor bool) []string {
-	seen := make(map[string]bool, len(ids)+1)
-	out := make([]string, 0, len(ids)+1)
+func sanitizeProviderIDs(ids []string, fillCatalog bool) []string {
+	seen := make(map[string]bool, len(ids)+len(defaultProviderOrder))
+	out := make([]string, 0, len(ids)+len(defaultProviderOrder))
 	for _, id := range ids {
 		canon := canonicalProviderID(id)
 		if canon == "" || !inProviderCatalog(canon) || seen[canon] {
@@ -117,8 +121,19 @@ func sanitizeProviderIDs(ids []string, ensureCursor bool) []string {
 		seen[canon] = true
 		out = append(out, canon)
 	}
-	if ensureCursor && !seen["cursor"] {
+	if !fillCatalog {
+		return out
+	}
+	if !seen["cursor"] {
 		out = append([]string{"cursor"}, out...)
+		seen["cursor"] = true
+	}
+	for _, id := range defaultProviderOrder {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
 	}
 	return out
 }
@@ -156,36 +171,6 @@ func projectCatalogProviders(providers []Provider) []Provider {
 	out := make([]Provider, 0, len(order))
 	for _, id := range order {
 		out = append(out, byID[id])
-	}
-	return out
-}
-
-func fillMissingCatalogSlots(providers []Provider, order, hidden []string) []Provider {
-	hiddenSet := make(map[string]bool, len(hidden))
-	for _, id := range hidden {
-		hiddenSet[canonicalProviderID(id)] = true
-	}
-	seen := make(map[string]bool, len(providers)+len(order))
-	for _, p := range providers {
-		seen[canonicalProviderID(p.ID)] = true
-	}
-	out := append([]Provider(nil), providers...)
-	for _, id := range order {
-		canon := canonicalProviderID(id)
-		if canon == "" || hiddenSet[canon] || seen[canon] {
-			continue
-		}
-		name, ok := catalogDisplayName(canon)
-		if !ok {
-			continue
-		}
-		out = append(out, Provider{
-			ID:      canon,
-			Name:    name,
-			Error:   "Not in the latest collection",
-			Windows: []Window{},
-		})
-		seen[canon] = true
 	}
 	return out
 }

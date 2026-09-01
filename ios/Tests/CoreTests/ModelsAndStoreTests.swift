@@ -130,11 +130,11 @@ final class ModelsAndStoreTests: XCTestCase {
         XCTAssertEqual(ordered.first?.name, "Codex")
     }
 
-    func testDefaultProviderOrderIsTrackedFour() {
-        XCTAssertEqual(DisplayPreferences().providerOrder, ["cursor", "codex", "claude_code", "grok"])
+    func testDefaultProviderOrderIsCatalog() {
+        XCTAssertEqual(DisplayPreferences().providerOrder, ["cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"])
         XCTAssertEqual(ServerSettings().providerOrder, ProviderCatalog.defaultOrder)
-        XCTAssertFalse(ProviderCatalog.defaultOrder.contains("copilot"))
-        XCTAssertFalse(ProviderCatalog.defaultOrder.contains("gemini_cli"))
+        XCTAssertTrue(ProviderCatalog.defaultOrder.contains("copilot"))
+        XCTAssertTrue(ProviderCatalog.defaultOrder.contains("gemini_cli"))
     }
 
     func testDeviceIDStable() {

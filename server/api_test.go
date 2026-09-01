@@ -147,10 +147,10 @@ func TestGetSettingsDefaults(t *testing.T) {
 	if got.PollIntervalMinutes != 5 {
 		t.Fatalf("expected default poll interval 5, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 4 || got.ProviderOrder[0] != "cursor" {
+	if len(got.ProviderOrder) != 6 || got.ProviderOrder[0] != "cursor" {
 		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
 	}
-	wantOrder := []string{"cursor", "codex", "claude_code", "grok"}
+	wantOrder := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
 	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
 	}
@@ -174,7 +174,7 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	if got.PollIntervalMinutes != 15 {
 		t.Fatalf("expected updated poll interval 15, got %d", got.PollIntervalMinutes)
 	}
-	wantOrder := []string{"cursor", "claude_code", "codex"}
+	wantOrder := []string{"cursor", "claude_code", "codex", "copilot", "gemini_cli", "grok"}
 	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unexpected provider order: %+v", got.ProviderOrder)
 	}
@@ -395,7 +395,7 @@ func TestFilterHidden(t *testing.T) {
 	}
 }
 
-func TestSnapshotFillsMissingCatalogSlots(t *testing.T) {
+func TestSnapshotDoesNotInventMissingCatalogSlots(t *testing.T) {
 	api, store := newTestAPI(t)
 	if err := store.SetSetting("provider_order", `["cursor","codex","grok"]`); err != nil {
 		t.Fatal(err)
@@ -424,34 +424,18 @@ func TestSnapshotFillsMissingCatalogSlots(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	var cursor *Provider
 	ids := make([]string, 0, len(got.Providers))
-	for i := range got.Providers {
-		p := &got.Providers[i]
+	for _, p := range got.Providers {
 		ids = append(ids, p.ID)
 		if p.ID == "cursor" {
-			cursor = p
+			t.Fatalf("GET must not invent cursor: %+v", p)
+		}
+		if p.Error == "Not in the latest collection" {
+			t.Fatalf("placeholder leaked: %+v", p)
 		}
 	}
-	if cursor == nil {
-		t.Fatalf("missing cursor placeholder: %v", ids)
-	}
-	if cursor.Name != "Cursor" || cursor.Error != "Not in the latest collection" {
-		t.Fatalf("cursor placeholder: %+v", cursor)
-	}
-
-	_, storedPayload, ok, err := store.LatestSnapshot()
-	if err != nil || !ok {
-		t.Fatalf("stored snapshot ok=%v err=%v", ok, err)
-	}
-	var stored Snapshot
-	if err := json.Unmarshal(storedPayload, &stored); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range stored.Providers {
-		if p.ID == "cursor" {
-			t.Fatal("placeholder must not be persisted")
-		}
+	if strings.Join(ids, ",") != "codex,grok" {
+		t.Fatalf("ids=%v", ids)
 	}
 }
 
@@ -492,8 +476,11 @@ func TestSnapshotDropsStoredAPINoiseAndCanonicalizes(t *testing.T) {
 		}
 	}
 	joined := strings.Join(ids, ",")
-	if !strings.Contains(joined, "claude_code") || !strings.Contains(joined, "codex") || !strings.Contains(joined, "cursor") {
+	if !strings.Contains(joined, "claude_code") || !strings.Contains(joined, "codex") {
 		t.Fatalf("ids=%v", ids)
+	}
+	if strings.Contains(joined, "cursor") {
+		t.Fatalf("GET invented cursor: %v", ids)
 	}
 }
 
@@ -522,7 +509,7 @@ func TestLoadSettingsPrunesHiddenAndPrependsCursor(t *testing.T) {
 	if len(got.HiddenProviders) != 1 || got.HiddenProviders[0] != "claude_code" {
 		t.Fatalf("hidden=%v", got.HiddenProviders)
 	}
-	wantOrder := []string{"cursor", "codex"}
+	wantOrder := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
 	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("order=%v", got.ProviderOrder)
 	}

@@ -2,6 +2,7 @@ package server
 
 import (
 	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -265,3 +266,118 @@ func TestWhitespaceOpenUsageCmdIsIgnored(t *testing.T) {
 		t.Fatalf("got %s", src.SourceName())
 	}
 }
+
+func TestNormalizeOpenUsageLimitsV1(t *testing.T) {
+	fetchedAt := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	body := `{
+		"schema": "openusage.limits.v1",
+		"generatedAt": "2026-09-01T12:00:00Z",
+		"providers": {
+			"cursor": {
+				"displayName": "Cursor",
+				"plan": "Pro",
+				"stale": false,
+				"resources": {
+					"apiUsage": {"kind":"consumption","unit":"percent","utilization":0.8,"used":80,"limit":100,"remaining":20,"resetsAt":"2026-10-01T00:00:00Z","windowSeconds":2592000},
+					"autoUsage": {"kind":"consumption","unit":"percent","utilization":0.125,"used":12.5,"limit":100,"remaining":87.5,"resetsAt":"2026-10-01T00:00:00Z","windowSeconds":2592000},
+					"totalUsage": {"kind":"consumption","unit":"percent","utilization":0.45,"used":45,"limit":100,"remaining":55,"resetsAt":"2026-10-01T00:00:00Z","windowSeconds":2592000},
+					"grokBot": {"kind":"consumption","unit":"percent","utilization":0.01,"used":1,"limit":100,"remaining":99,"windowSeconds":2592000},
+					"credits": {"kind":"balance","unit":"usd","available":10}
+				}
+			},
+			"codex": {
+				"displayName": "Codex",
+				"resources": {
+					"session": {"kind":"consumption","unit":"percent","utilization":0.2,"used":0.2,"limit":100,"remaining":80,"resetsAt":"2026-09-01T17:00:00Z","windowSeconds":18000},
+					"weekly": {"kind":"consumption","unit":"percent","utilization":0.4,"used":0.4,"limit":100,"remaining":60,"resetsAt":"2026-09-08T00:00:00Z","windowSeconds":604800},
+					"credits": {"kind":"balance","unit":"credits","available":7}
+				}
+			}
+		},
+		"errors": [{"providerId":"claude","message":"Not logged in"}]
+	}`
+	snap, err := Normalize([]byte(body), 5, fetchedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.SourceKind != "openusage" {
+		t.Fatalf("source=%q", snap.SourceKind)
+	}
+	byID := map[string]Provider{}
+	for _, p := range snap.Providers {
+		byID[p.ID] = p
+	}
+	cursor, ok := byID["cursor"]
+	if !ok {
+		t.Fatalf("missing cursor: %+v", snap.Providers)
+	}
+	if len(cursor.Windows) != 2 {
+		t.Fatalf("cursor windows: %+v", cursor.Windows)
+	}
+	if cursor.Windows[0].Title != "Plan" || math.Abs(cursor.Windows[0].UsedPercent-45) > 0.01 {
+		t.Fatalf("plan: %+v", cursor.Windows[0])
+	}
+	if cursor.Windows[1].Title != "Auto" || math.Abs(cursor.Windows[1].UsedPercent-12.5) > 0.01 {
+		t.Fatalf("auto: %+v", cursor.Windows[1])
+	}
+	for _, w := range cursor.Windows {
+		if strings.Contains(strings.ToLower(w.Key), "api") || w.Key == "grokBot" || w.Title == "API" {
+			t.Fatalf("noise leaked: %+v", w)
+		}
+	}
+	codex, ok := byID["codex"]
+	if !ok {
+		t.Fatalf("missing codex")
+	}
+	if len(codex.Windows) != 2 || codex.Windows[0].Title != "5h" || math.Abs(codex.Windows[0].UsedPercent-20) > 0.01 {
+		t.Fatalf("codex windows: %+v", codex.Windows)
+	}
+	if codex.Credits == nil || codex.Credits.AvailableCount != 7 {
+		t.Fatalf("codex credits: %+v", codex.Credits)
+	}
+	claude, ok := byID["claude_code"]
+	if !ok || claude.Error != "Not logged in" {
+		t.Fatalf("claude: %+v ok=%v", claude, ok)
+	}
+}
+
+func TestCollectOpenUsageLimitsMergesExtras(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/openusage"
+	script := `#!/bin/sh
+if [ $# -eq 0 ]; then
+  printf '%s' '{"schema":"openusage.limits.v1","providers":{"cursor":{"displayName":"Cursor","resources":{"totalUsage":{"kind":"consumption","unit":"percent","utilization":0.1,"windowSeconds":2592000}}}},"errors":[]}'
+  exit 0
+fi
+if [ "$1" = "copilot" ]; then
+  printf '%s' '{"schema":"openusage.limits.v1","providers":{"copilot":{"displayName":"Copilot","resources":{"premiumCredits":{"kind":"consumption","unit":"percent","utilization":0.3,"windowSeconds":2592000}}}},"errors":[]}'
+  exit 0
+fi
+if [ "$1" = "claude" ]; then
+  printf '%s' '{"schema":"openusage.limits.v1","providers":{},"errors":[{"providerId":"claude","message":"Not logged in"}]}'
+  exit 4
+fi
+echo 'openusage: Unknown provider' >&2
+exit 2
+`
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	body, err := CollectOpenUsageLimits(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Normalize(body, 5, time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(snap.Providers))
+	for _, p := range snap.Providers {
+		ids = append(ids, p.ID)
+	}
+	joined := strings.Join(ids, ",")
+	if !strings.Contains(joined, "cursor") || !strings.Contains(joined, "copilot") || !strings.Contains(joined, "claude_code") {
+		t.Fatalf("merged ids=%v body=%s", ids, body)
+	}
+}
+

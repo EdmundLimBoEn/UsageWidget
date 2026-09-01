@@ -30,7 +30,7 @@ func NewOpenUsageHTTPClient(url string) *OpenUsageClient {
 
 func NewOpenUsageBinaryClient(binary string) *OpenUsageClient {
 	return &OpenUsageClient{
-		Cmd:    []string{binary, "export", "--format", "json"},
+		Cmd:    []string{binary},
 		Source: "openusage-cli",
 	}
 }
@@ -69,6 +69,9 @@ func newOpenUsageUnixClient(socketPath, url, source string) *OpenUsageClient {
 func (c *OpenUsageClient) SourceName() string { return c.Source }
 
 func (c *OpenUsageClient) Fetch(ctx context.Context) ([]byte, error) {
+	if len(c.Cmd) == 1 {
+		return CollectOpenUsageLimits(ctx, c.Cmd[0])
+	}
 	if len(c.Cmd) > 0 {
 		return c.fetchCmd(ctx)
 	}

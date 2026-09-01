@@ -18,6 +18,7 @@ const collectorMaxResponseBytes = 4 << 20
 // Requests serialize so browser/app refreshes cannot fan out into concurrent scrapes.
 type Collector struct {
 	Binary  string
+	Source  string
 	Args    []string
 	Timeout time.Duration
 
@@ -29,31 +30,39 @@ func NewCollector(binary string) *Collector {
 }
 
 func NewCollectorWithArgs(binary string, args []string) *Collector {
-	if len(args) == 0 {
-		args = defaultCollectorArgs(binary, "")
-	}
-	return &Collector{Binary: binary, Args: args, Timeout: 90 * time.Second}
+	return NewCollectorForSource(binary, "", args)
 }
 
 func NewCollectorForSource(binary, source string, args []string) *Collector {
 	if len(args) == 0 {
 		args = defaultCollectorArgs(binary, source)
 	}
-	return &Collector{Binary: binary, Args: args, Timeout: 90 * time.Second}
+	return &Collector{Binary: binary, Source: source, Args: args, Timeout: 90 * time.Second}
 }
 
 func defaultCollectorArgs(binary, source string) []string {
 	src := strings.ToLower(strings.TrimSpace(source))
 	switch src {
 	case "openusage":
-		return []string{"export", "--format", "json"}
+		return nil
 	case "codexbar":
 		return []string{"usage", "--format", "json"}
 	}
 	if strings.Contains(strings.ToLower(binary), "openusage") {
-		return []string{"export", "--format", "json"}
+		return nil
 	}
 	return []string{"usage", "--format", "json"}
+}
+
+func (c *Collector) collectOpenUsageLimits() bool {
+	if len(c.Args) > 0 {
+		return false
+	}
+	src := strings.ToLower(strings.TrimSpace(c.Source))
+	if src == "openusage" {
+		return true
+	}
+	return src == "" && strings.Contains(strings.ToLower(c.Binary), "openusage")
 }
 
 func (c *Collector) Handler() http.Handler {
@@ -73,9 +82,25 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
+	if c.collectOpenUsageLimits() {
+		body, err := CollectOpenUsageLimits(ctx, c.Binary)
+		if err != nil {
+			if ctx.Err() != nil {
+				http.Error(w, "collector timeout", http.StatusGatewayTimeout)
+				return
+			}
+			http.Error(w, truncateDiagnostic(err.Error(), 180), http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-UsageWidget-Collected-At", time.Now().UTC().Format(time.RFC3339))
+		_, _ = w.Write(body)
+		return
+	}
+
 	args := c.Args
 	if len(args) == 0 {
-		args = defaultCollectorArgs(c.Binary, "")
+		args = defaultCollectorArgs(c.Binary, c.Source)
 	}
 
 	var stdout, stderr bytes.Buffer

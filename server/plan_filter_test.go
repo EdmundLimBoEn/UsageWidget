@@ -6,7 +6,7 @@ import (
 )
 
 func TestKeepPlanProvider(t *testing.T) {
-	for _, id := range []string{"openai", "openrouter", "azureopenai", "opencode", "antigravity"} {
+	for _, id := range []string{"openai", "openrouter", "azureopenai", "opencode"} {
 		if keepPlanProvider(Provider{ID: id, Windows: []Window{{Title: "API credits"}}}) {
 			t.Fatalf("%s with windows must drop", id)
 		}
@@ -20,6 +20,9 @@ func TestKeepPlanProvider(t *testing.T) {
 	if keepPlanProvider(Provider{ID: "mystery", Error: "No available fetch strategy"}) {
 		t.Fatal("unknown error-only providers must drop")
 	}
+	if !keepPlanProvider(Provider{ID: "antigravity", Windows: []Window{{Title: "Plan"}}}) {
+		t.Fatal("antigravity is the Gemini catalog member")
+	}
 }
 
 func TestCanonicalProviderID(t *testing.T) {
@@ -31,6 +34,7 @@ func TestCanonicalProviderID(t *testing.T) {
 		"xai":            "grok",
 		"github_copilot": "copilot",
 		"gemini":         "gemini_cli",
+		"antigravity":    "gemini_cli",
 		"openai":         "openai",
 	}
 	for in, want := range cases {
@@ -84,5 +88,8 @@ func TestAPINoiseWindow(t *testing.T) {
 	}
 	if isAPINoiseWindow("cursor", "primary", "Plan") || isAPINoiseWindow("codex", "primary", "5h limit") {
 		t.Fatal("plan windows should stay")
+	}
+	if !isAPINoiseWindow("cursor", "apiUsage", "") || !isAPINoiseWindow("cursor", "grokBot", "") {
+		t.Fatal("cursor API/grokBot gauges should drop")
 	}
 }

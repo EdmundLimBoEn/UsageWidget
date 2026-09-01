@@ -58,6 +58,10 @@ committed to the repository.
 - [ ] For a desktop host, verify the generated config and SQLite data are
   readable only by the signed-in user, keep the foreground process running,
   and confirm the private Tailscale route survives a reboot if desired.
+- [ ] Cursor Plan/Auto are collected from OpenUsage on the Mac where Cursor is
+  signed in. If the phone talks to a Linux host, keep a Mac OpenUsage collector
+  reachable on the tailnet (`COLLECTOR_HTTP_ADDR`) and point the daemon at it
+  with `OPENUSAGE_URL`. The Mac process must stay running.
 - [ ] For Windows, provide a private `CODEXBAR_URL` unless you have independently
   verified a compatible native CodexBar CLI build; upstream standalone archives
   currently target macOS and Linux.

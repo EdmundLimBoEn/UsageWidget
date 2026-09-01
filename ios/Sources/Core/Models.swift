@@ -437,7 +437,7 @@ public enum ForecastText {
 }
 
 public enum ProviderCatalog {
-    public static let defaultOrder = ["cursor", "codex", "claude_code", "grok"]
+    public static let defaultOrder = ["cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"]
 }
 
 public enum ProviderDisplay {

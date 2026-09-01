@@ -37,7 +37,7 @@ Before installation:
 3. As that account, authenticate the desired providers and verify collection:
 
    ```bash
-   openusage export --format json
+   openusage
    ```
 
    Or, for a CodexBar fallback:
@@ -246,7 +246,7 @@ Server variables:
 | `DB_PATH` | `./usagewidget.db` | SQLite path; installer sets the data-directory path |
 | `LISTEN_ADDR` | `127.0.0.1:8377` | Main API listener |
 | `OPENUSAGE_URL` | unset | OpenUsage hub `/v1/snapshots` URL |
-| `OPENUSAGE_BIN` | unset | Exact `openusage` binary path (`export --format json`) |
+| `OPENUSAGE_BIN` | unset | Exact `openusage` binary path (bare CLI; JSON on stdout) |
 | `OPENUSAGE_CMD` | unset | Full OpenUsage command override |
 | `OPENUSAGE_SOCKET` | unset | OpenUsage daemon UDS for `/v1/read-model` |
 | `CODEXBAR_URL` | unset | Legacy CodexBar HTTP-source override |
@@ -267,8 +267,8 @@ COLLECTOR_SOCKET=/run/usagewidget/collector.sock
 Source precedence prefers OpenUsage (`OPENUSAGE_CMD`, `OPENUSAGE_URL`,
 `OPENUSAGE_BIN`, `OPENUSAGE_SOCKET`, then the collector socket) and falls back
 to CodexBar when `USAGE_SOURCE=codexbar` or an explicit CodexBar endpoint is
-configured. The collector auto-selects `openusage export --format json` when
-the binary name contains `openusage`, otherwise `usage --format json`.
+configured. The collector runs the OpenUsage CLI with no extra arguments when
+the source is OpenUsage, and `usage --format json` for CodexBar.
 
 Do not point collector binaries at an account whose home must remain isolated
 from the daemon. The sidecar is the production path and exposes only

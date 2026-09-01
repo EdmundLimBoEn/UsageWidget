@@ -463,7 +463,6 @@ func (a *API) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	snap.Providers = projectCatalogProviders(snap.Providers)
 	snap.Providers = filterHidden(snap.Providers, settings.HiddenProviders)
-	snap.Providers = fillMissingCatalogSlots(snap.Providers, settings.ProviderOrder, settings.HiddenProviders)
 	for i := range snap.Providers {
 		snap.Providers[i].Raw = nil
 	}

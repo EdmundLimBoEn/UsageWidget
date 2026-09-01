@@ -41,6 +41,9 @@ type openUsageReadModel struct {
 }
 
 func looksLikeOpenUsage(body []byte) bool {
+	if looksLikeOpenUsageLimitsV1(body) {
+		return true
+	}
 	trim := strings.TrimSpace(string(body))
 	if trim == "" {
 		return false
@@ -55,6 +58,9 @@ func looksLikeOpenUsage(body []byte) bool {
 }
 
 func normalizeOpenUsage(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snapshot, error) {
+	if looksLikeOpenUsageLimitsV1(body) {
+		return normalizeOpenUsageLimitsV1(body, pollIntervalMinutes, fetchedAt)
+	}
 	snaps, err := extractOpenUsageSnapshots(body)
 	if err != nil {
 		return Snapshot{}, err
