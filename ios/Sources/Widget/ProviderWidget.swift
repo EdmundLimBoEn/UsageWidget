@@ -71,7 +71,7 @@ struct UsageTimelineProvider: TimelineProvider {
                 ]),
             ],
             pollIntervalMinutes: 5,
-            sourceKind: "openusage"
+            sourceKind: "crossusage"
         )
     }
 }

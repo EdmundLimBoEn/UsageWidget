@@ -8,14 +8,9 @@ import (
 
 type Config struct {
 	Token           string
-	UsageSource     string // openusage | codexbar | auto
-	OpenUsageURL    string
-	OpenUsageCmd    string
-	OpenUsageBin    string
-	OpenUsageSocket string
-	CodexBarURL     string
-	CodexBarCmd     string
-	CodexBarBin     string
+	CrossUsageURL   string
+	CrossUsageCmd   string
+	CrossUsageBin   string
 	CollectorSocket string
 	DBPath          string
 	ListenAddr      string
@@ -40,23 +35,11 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("USAGEWIDGET_TOKEN must not have surrounding whitespace")
 	}
 
-	source := strings.ToLower(strings.TrimSpace(envOr("USAGE_SOURCE", "auto")))
-	switch source {
-	case "auto", "openusage", "codexbar":
-	default:
-		return Config{}, fmt.Errorf("USAGE_SOURCE must be auto, openusage, or codexbar")
-	}
-
 	return Config{
 		Token:           token,
-		UsageSource:     source,
-		OpenUsageURL:    strings.TrimSpace(os.Getenv("OPENUSAGE_URL")),
-		OpenUsageCmd:    strings.TrimSpace(os.Getenv("OPENUSAGE_CMD")),
-		OpenUsageBin:    strings.TrimSpace(os.Getenv("OPENUSAGE_BIN")),
-		OpenUsageSocket: strings.TrimSpace(os.Getenv("OPENUSAGE_SOCKET")),
-		CodexBarURL:     strings.TrimSpace(os.Getenv("CODEXBAR_URL")),
-		CodexBarCmd:     strings.TrimSpace(os.Getenv("CODEXBAR_CMD")),
-		CodexBarBin:     strings.TrimSpace(os.Getenv("CODEXBAR_BIN")),
+		CrossUsageURL:   strings.TrimSpace(os.Getenv("CROSSUSAGE_URL")),
+		CrossUsageCmd:   strings.TrimSpace(os.Getenv("CROSSUSAGE_CMD")),
+		CrossUsageBin:   strings.TrimSpace(os.Getenv("CROSSUSAGE_BIN")),
 		CollectorSocket: envOr("COLLECTOR_SOCKET", "/run/usagewidget/collector.sock"),
 		DBPath:          envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:      envOr("LISTEN_ADDR", "127.0.0.1:8377"),
@@ -76,42 +59,15 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-// NewUsageSourceFromConfig picks OpenUsage first (quota gauges + Cursor), then CodexBar.
 func NewUsageSourceFromConfig(cfg Config) UsageSource {
-	wantOpen := cfg.UsageSource == "openusage" || cfg.UsageSource == "auto"
-	wantCodex := cfg.UsageSource == "codexbar" || cfg.UsageSource == "auto"
-
-	if wantOpen {
-		if cfg.OpenUsageCmd != "" {
-			return NewOpenUsageCommandClient(cfg.OpenUsageCmd)
-		}
-		if cfg.OpenUsageURL != "" {
-			return NewOpenUsageHTTPClient(cfg.OpenUsageURL)
-		}
-		if cfg.OpenUsageBin != "" {
-			return NewOpenUsageBinaryClient(cfg.OpenUsageBin)
-		}
-		if cfg.OpenUsageSocket != "" {
-			return NewOpenUsageUnixClient(cfg.OpenUsageSocket)
-		}
-		if cfg.UsageSource == "openusage" || (cfg.UsageSource == "auto" && cfg.CodexBarURL == "" && cfg.CodexBarCmd == "" && cfg.CodexBarBin == "") {
-			// Default production path: collector sidecar speaking OpenUsage export JSON at /usage.
-			return NewOpenUsageCollectorClient(cfg.CollectorSocket)
-		}
+	if cfg.CrossUsageCmd != "" {
+		return NewCrossUsageCommandClient(cfg.CrossUsageCmd)
 	}
-
-	if wantCodex {
-		if cfg.CodexBarCmd != "" {
-			return NewCodexBarCommandClient(cfg.CodexBarCmd)
-		}
-		if cfg.CodexBarURL != "" {
-			return NewCodexBarClient(cfg.CodexBarURL)
-		}
-		if cfg.CodexBarBin != "" {
-			return NewCodexBarBinaryClient(cfg.CodexBarBin)
-		}
-		return NewCodexBarUnixClient(cfg.CollectorSocket)
+	if cfg.CrossUsageURL != "" {
+		return NewCrossUsageHTTPClient(cfg.CrossUsageURL)
 	}
-
-	return NewOpenUsageCollectorClient(cfg.CollectorSocket)
+	if cfg.CrossUsageBin != "" {
+		return NewCrossUsageBinaryClient(cfg.CrossUsageBin)
+	}
+	return NewCrossUsageCollectorClient(cfg.CollectorSocket)
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=UsageWidget companion (CodexBar poller + APNs)
+Description=UsageWidget companion (CrossUsage poller + APNs)
 After=network-online.target usagewidget-collector.service
 Wants=network-online.target usagewidget-collector.service
 

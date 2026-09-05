@@ -8,7 +8,7 @@ import (
 )
 
 // configureCommandCancellation makes sure helper processes spawned by
-// CodexBar do not survive a timed-out collection on Unix systems.
+// CrossUsage do not survive a timed-out collection on Unix systems.
 func configureCommandCancellation(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {

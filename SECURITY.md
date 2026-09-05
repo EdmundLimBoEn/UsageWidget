@@ -17,7 +17,7 @@ bearer authenticated but must still remain bound to `127.0.0.1:8377` and be
 exposed only through an authenticated private-network proxy such as Tailscale
 Serve. It is not designed to be placed directly on the public Internet.
 
-The production Linux collector runs as the unprivileged account that owns CodexBar's
+The production Linux collector runs as the unprivileged account that owns CrossUsage
 provider sessions and exposes only `GET /usage` on a group-restricted Unix
 socket. The main daemon must not run with that account's home-directory access.
 Native macOS and Windows mode instead runs under the signed-in desktop account;
@@ -45,7 +45,7 @@ SQLite database private to that account.
 Release bundles contain an internal checksum manifest and are accompanied by a
 SHA-256 file. These detect corruption but are not a substitute for verifying
 the GitHub repository, release tag, and publishing account. Review release
-workflow output and the pinned CodexBar asset checksums before installing or
+workflow output and the pinned CrossUsage CLI asset checksums before installing or
 updating a sensitive host.
 
 ## Before making the repository public

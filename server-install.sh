@@ -109,25 +109,40 @@ detect_public_url() {
   PUBLIC_URL="https://${dns}/usagewidget"
 }
 
-install_codexbar_if_needed() {
-  local existing=""; existing="$(command -v codexbar 2>/dev/null || command -v CodexBarCLI 2>/dev/null || true)"
-  if [[ -n $existing ]]; then CODEXBAR_BIN=$existing; return; fi
+install_crossusage_if_needed() {
+  local existing=""
+  existing="$(command -v crossusage-cli 2>/dev/null || true)"
+  if [[ -n $existing ]]; then
+    CROSSUSAGE_BIN=$existing
+    local dir; dir="$(cd "$(dirname "$existing")" && pwd)"
+    if [[ -d $dir/resources/bundled_plugins ]]; then
+      CROSSUSAGE_RESOURCES="$dir/resources"
+    fi
+    return
+  fi
   [[ -r $MANIFEST ]] || die "release manifest is missing: $MANIFEST"
-  local version asset digest url tmp
-  version="$(jq -er '.codexbar.version' "$MANIFEST")"
-  asset="$(jq -er --arg a "$HOST_ARCH" '.codexbar.linux[$a].asset' "$MANIFEST")"
-  digest="$(jq -er --arg a "$HOST_ARCH" '.codexbar.linux[$a].sha256' "$MANIFEST")"
-  url="https://github.com/steipete/CodexBar/releases/download/v${version}/${asset}"
+  if ! jq -e --arg a "$HOST_ARCH" '.crossusage.linux[$a].asset' "$MANIFEST" >/dev/null 2>&1; then
+    die "no pinned CrossUsage CLI for ${HOST_ARCH}; install crossusage-cli on PATH, then rerun"
+  fi
+  local version asset digest url tmp dest
+  version="$(jq -er '.crossusage.version' "$MANIFEST")"
+  asset="$(jq -er --arg a "$HOST_ARCH" '.crossusage.linux[$a].asset' "$MANIFEST")"
+  digest="$(jq -er --arg a "$HOST_ARCH" '.crossusage.linux[$a].sha256' "$MANIFEST")"
+  url="https://github.com/barramee27/crossusage/releases/download/v${version}/${asset}"
   tmp="$(mktemp -d)"
-  say "Downloading pinned CodexBar ${version} for ${HOST_ARCH}…"
+  dest="$PREFIX/dependencies/crossusage-cli-$version-$HOST_ARCH"
+  say "Downloading pinned CrossUsage CLI ${version} for ${HOST_ARCH}…"
   curl -fL --retry 3 -o "$tmp/$asset" "$url"
-  printf '%s  %s\n' "$digest" "$tmp/$asset" | sha256sum -c - >/dev/null || die "CodexBar checksum verification failed"
-  install -d -m 0755 "$PREFIX/dependencies/codexbar-$version-$HOST_ARCH"
-  tar -xzf "$tmp/$asset" -C "$PREFIX/dependencies/codexbar-$version-$HOST_ARCH"
-  CODEXBAR_BIN="$PREFIX/dependencies/codexbar-$version-$HOST_ARCH/codexbar"
-  [[ -x $CODEXBAR_BIN ]] || CODEXBAR_BIN="$PREFIX/dependencies/codexbar-$version-$HOST_ARCH/CodexBarCLI"
-  [[ -x $CODEXBAR_BIN ]] || die "CodexBar archive did not contain an executable"
-  ln -sfn "$CODEXBAR_BIN" "$PREFIX/dependencies/codexbar"
+  printf '%s  %s\n' "$digest" "$tmp/$asset" | sha256sum -c - >/dev/null || die "CrossUsage checksum verification failed"
+  rm -rf -- "$dest"
+  install -d -m 0755 "$dest"
+  tar -xzf "$tmp/$asset" -C "$dest"
+  CROSSUSAGE_BIN="$dest/crossusage-cli"
+  [[ -x $CROSSUSAGE_BIN ]] || die "CrossUsage archive did not contain crossusage-cli"
+  if [[ -d $dest/resources/bundled_plugins ]]; then
+    CROSSUSAGE_RESOURCES="$dest/resources"
+  fi
+  ln -sfn "$CROSSUSAGE_BIN" "$PREFIX/dependencies/crossusage-cli"
   rm -rf -- "$tmp"
 }
 
@@ -156,18 +171,45 @@ configure_apns() {
 }
 
 validate_collector() {
-  local home output; home="$(getent passwd "$COLLECTOR_USER" | cut -d: -f6)"
-  if ! runuser -u "$COLLECTOR_USER" -- env HOME="$home" "$CODEXBAR_BIN" config validate >/dev/null; then die "CodexBar configuration is invalid for $COLLECTOR_USER"; fi
-  output="$(mktemp /tmp/usagewidget-codexbar-validation.XXXXXX)"
-  if ! runuser -u "$COLLECTOR_USER" -- env HOME="$home" "$CODEXBAR_BIN" usage --format json >"$output"; then
-    if jq -e 'type == "array" and any(.[]; .usage? != null)' "$output" >/dev/null 2>&1; then
-      warn "CodexBar returned usable usage data but one or more enabled providers failed; continuing with the working providers"
+  local home output
+  local -a env_prefix
+  home="$(getent passwd "$COLLECTOR_USER" | cut -d: -f6)"
+  env_prefix=(env HOME="$home")
+  if [[ -n ${CROSSUSAGE_RESOURCES:-} ]]; then
+    env_prefix+=(CROSSUSAGE_RESOURCES="$CROSSUSAGE_RESOURCES")
+  fi
+  output="$(mktemp /tmp/usagewidget-crossusage-validation.XXXXXX)"
+  if ! runuser -u "$COLLECTOR_USER" -- "${env_prefix[@]}" "$CROSSUSAGE_BIN" limits cursor >"$output" 2>/dev/null; then
+    if jq -e '.schema == "crossusage.limits.v1"' "$output" >/dev/null 2>&1; then
+      warn "CrossUsage returned limits JSON with provider errors; continuing so remaining catalog tools can still collect"
     else
       rm -f -- "$output"
-      die "CodexBar found no usable provider session. Log in to Codex/Claude as '$COLLECTOR_USER', then rerun the installer; credentials are never collected here"
+      die "CrossUsage could not collect limits as '$COLLECTOR_USER'. Sign in to Cursor/Codex/Claude as that account, then rerun; credentials are never collected here"
     fi
   fi
   rm -f -- "$output"
+}
+
+write_collector_env() {
+  {
+    printf 'CROSSUSAGE_BIN=%s\n' "$CROSSUSAGE_BIN"
+    if [[ -n ${CROSSUSAGE_RESOURCES:-} ]]; then
+      printf 'CROSSUSAGE_RESOURCES=%s\n' "$CROSSUSAGE_RESOURCES"
+    fi
+    printf 'COLLECTOR_SOCKET=/run/usagewidget/collector.sock\n'
+  } >"$COLLECTOR_ENV"
+  chmod 0640 "$COLLECTOR_ENV"
+  chown root:usagewidget "$COLLECTOR_ENV"
+}
+
+strip_obsolete_env_keys() {
+  [[ -f $ENV_FILE ]] || return 0
+  local tmp
+  tmp="$(mktemp "$CONFIG_DIR/env.XXXXXX")"
+  grep -vE '^(USAGE_SOURCE|OPENUSAGE_|CODEXBAR_)' "$ENV_FILE" >"$tmp" || true
+  chown root:usagewidget "$tmp"
+  chmod 0600 "$tmp"
+  mv -f "$tmp" "$ENV_FILE"
 }
 
 write_initial_env() {
@@ -180,17 +222,14 @@ write_initial_env() {
       printf 'USAGEWIDGET_PUBLIC_URL=%s\n' "$PUBLIC_URL"
       printf 'DB_PATH=%s/usagewidget.db\n' "$DATA_DIR"
       printf 'LISTEN_ADDR=127.0.0.1:8377\n'
-      printf 'USAGE_SOURCE=auto\n'
       printf 'COLLECTOR_SOCKET=/run/usagewidget/collector.sock\n'
     } >>"$ENV_FILE"
   elif ! grep -q '^USAGEWIDGET_PUBLIC_URL=' "$ENV_FILE"; then printf 'USAGEWIDGET_PUBLIC_URL=%s\n' "$PUBLIC_URL" >>"$ENV_FILE"; fi
-  if [[ ! -e $COLLECTOR_ENV ]]; then
-    if command -v openusage >/dev/null 2>&1; then
-      printf 'OPENUSAGE_BIN=%s\nCOLLECTOR_SOCKET=/run/usagewidget/collector.sock\n' "$(command -v openusage)" >"$COLLECTOR_ENV"
-    else
-      printf 'CODEXBAR_BIN=%s\nCOLLECTOR_SOCKET=/run/usagewidget/collector.sock\n' "$CODEXBAR_BIN" >"$COLLECTOR_ENV"
-    fi
-    chmod 0640 "$COLLECTOR_ENV"; chown root:usagewidget "$COLLECTOR_ENV"
+  strip_obsolete_env_keys
+  if [[ ! -e $COLLECTOR_ENV ]] || grep -qE '^(OPENUSAGE_|CODEXBAR_)' "$COLLECTOR_ENV"; then
+    write_collector_env
+  elif ! grep -q '^CROSSUSAGE_BIN=' "$COLLECTOR_ENV"; then
+    write_collector_env
   fi
 }
 
@@ -247,7 +286,7 @@ do_install() {
   getent group usagewidget >/dev/null || groupadd --system usagewidget
   id usagewidget >/dev/null 2>&1 || useradd --system --gid usagewidget --home-dir "$DATA_DIR" --shell /usr/sbin/nologin usagewidget
   install -d -m 0755 "$PREFIX/releases" "$PREFIX/dependencies"
-  install_codexbar_if_needed; validate_collector; write_initial_env; configure_apns
+  install_crossusage_if_needed; validate_collector; write_initial_env; configure_apns
   if [[ -f $PRESERVE_LOCAL_BUILD_FILE && -x $PREFIX/current/bin/usagewidgetd ]]; then
     warn "preserving the server's marked local build"
     systemctl restart usagewidget-collector usagewidget

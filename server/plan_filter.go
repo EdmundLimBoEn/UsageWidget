@@ -23,6 +23,10 @@ var providerCatalog = []providerCatalogEntry{
 
 var defaultProviderOrder = []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
 
+func catalogPluginIDs() []string {
+	return []string{"cursor", "claude", "codex", "copilot", "grok", "antigravity"}
+}
+
 var (
 	aliasToCanonical map[string]string
 	catalogNames     map[string]string
@@ -86,7 +90,7 @@ func isAPINoiseWindow(providerID, key, title string) bool {
 	if canonicalProviderID(providerID) == "cursor" && (key == "tertiary" || key == "apiUsage" || key == "grokBot") {
 		return true
 	}
-	if strings.Contains(blob, "apiusage") || strings.Contains(blob, "grokbot") {
+	if strings.Contains(blob, "apiusage") || strings.Contains(blob, "api-usage") || strings.Contains(blob, "api usage") || strings.Contains(blob, "grokbot") {
 		return true
 	}
 	if strings.Contains(blob, "plan_api") || blob == "api" || strings.HasPrefix(blob, "api ") || strings.Contains(blob, " api") {

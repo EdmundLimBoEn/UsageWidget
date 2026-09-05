@@ -12,7 +12,7 @@ import (
 
 func collectorScript(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "codexbar-test")
+	path := filepath.Join(t.TempDir(), "crossusage-test")
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -20,10 +20,10 @@ func collectorScript(t *testing.T, body string) string {
 }
 
 func TestCollectorReturnsValidCLIJSON(t *testing.T) {
-	binary := collectorScript(t, `printf '[{"provider":"claude"}]'`)
+	binary := collectorScript(t, `printf '{"schema":"crossusage.limits.v1","providers":{"claude":{"displayName":"Claude","resources":{}}},"errors":[]}'`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/usage", nil)
-	NewCollector(binary).Handler().ServeHTTP(rec, req)
+	NewCollectorWithArgs(binary, []string{"probe"}).Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"claude"`) {
 		t.Fatalf("unexpected response %d: %s", rec.Code, rec.Body.String())
 	}
@@ -33,9 +33,9 @@ func TestCollectorReturnsValidCLIJSON(t *testing.T) {
 }
 
 func TestCollectorReturnsPartialJSONWhenCLIExitsNonZero(t *testing.T) {
-	binary := collectorScript(t, `printf '[{"provider":"codex","usage":{}},{"provider":"claude","error":{"message":"No available fetch strategy for claude."}}]'; exit 1`)
+	binary := collectorScript(t, `printf '{"schema":"crossusage.limits.v1","providers":{"codex":{"displayName":"Codex","resources":{}}},"errors":[{"providerId":"claude","message":"No available fetch strategy for claude."}]}'; exit 1`)
 	rec := httptest.NewRecorder()
-	NewCollector(binary).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
+	NewCollectorWithArgs(binary, []string{"probe"}).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"No available fetch strategy for claude."`) {
 		t.Fatalf("unexpected partial response %d: %s", rec.Code, rec.Body.String())
 	}
@@ -43,7 +43,7 @@ func TestCollectorReturnsPartialJSONWhenCLIExitsNonZero(t *testing.T) {
 
 func TestCollectorClassifiesRateLimitAndRejectsOtherRoutes(t *testing.T) {
 	binary := collectorScript(t, `echo 'usage CLI overloaded / rate limited' >&2; exit 1`)
-	handler := NewCollector(binary).Handler()
+	handler := NewCollectorWithArgs(binary, []string{"probe"}).Handler()
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "rate limited") {
@@ -58,7 +58,7 @@ func TestCollectorClassifiesRateLimitAndRejectsOtherRoutes(t *testing.T) {
 
 func TestCollectorTimesOutAndRejectsInvalidJSON(t *testing.T) {
 	timeoutBinary := collectorScript(t, `sleep 2 & wait`)
-	collector := NewCollector(timeoutBinary)
+	collector := NewCollectorWithArgs(timeoutBinary, []string{"sleep"})
 	collector.Timeout = 10 * time.Millisecond
 	started := time.Now()
 	rec := httptest.NewRecorder()
@@ -72,7 +72,7 @@ func TestCollectorTimesOutAndRejectsInvalidJSON(t *testing.T) {
 
 	invalidBinary := collectorScript(t, `printf 'not-json'`)
 	rec = httptest.NewRecorder()
-	NewCollector(invalidBinary).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
+	NewCollectorWithArgs(invalidBinary, []string{"probe"}).Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/usage", nil))
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected invalid JSON failure, got %d", rec.Code)
 	}

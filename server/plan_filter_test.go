@@ -47,7 +47,7 @@ func TestCanonicalProviderID(t *testing.T) {
 func TestNormalizeCanonicalizesTrackedProviders(t *testing.T) {
 	now := time.Date(2026, 8, 29, 12, 0, 0, 0, time.UTC)
 
-	cursor, err := Normalize([]byte(`[{"provider":"cursor","usage":{"primary":{"title":"Plan","usedPercent":10}}}]`), 5, now)
+	cursor, err := Normalize([]byte(`{"schema":"crossusage.limits.v1","providers":{"cursor":{"resources":{"total-usage":{"unit":"percent","used":10,"limit":100,"utilization":0.1,"label":"Total usage"}}}}}`), 5, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestNormalizeCanonicalizesTrackedProviders(t *testing.T) {
 		t.Fatalf("cursor: %+v", cursor.Providers)
 	}
 
-	claude, err := Normalize([]byte(`[{"provider":"claude","usage":{"primary":{"usedPercent":20,"windowMinutes":300}}}]`), 5, now)
+	claude, err := Normalize([]byte(`{"schema":"crossusage.limits.v1","providers":{"claude":{"resources":{"session":{"unit":"percent","used":20,"limit":100,"utilization":0.2,"windowSeconds":18000,"label":"Session"}}}}}`), 5, now)
 	if err != nil {
 		t.Fatal(err)
 	}

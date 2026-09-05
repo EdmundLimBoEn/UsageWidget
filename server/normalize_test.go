@@ -1,6 +1,7 @@
 package server
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -15,22 +16,19 @@ func TestNormalize(t *testing.T) {
 		check   func(t *testing.T, snap Snapshot)
 	}{
 		{
-			name: "codex fixture with primary secondary extra credits",
+			name: "codex session and weekly",
 			body: `{
-				"providers": [
-					{
-						"id": "codex",
-						"name": "Codex",
-						"primary":   {"title": "5h limit", "usedPercent": 42.0, "resetsAt": "2026-07-17T20:00:00Z"},
-						"secondary": {"title": "Weekly", "usedPercent": 11.5, "resetsAt": "2026-07-21T00:00:00Z"},
-						"tertiary":  null,
-						"extraRateWindows": [
-							{"key": "opus", "title": "Opus weekly", "usedPercent": 3.0, "resetsAt": "2026-07-21T00:00:00Z"}
-						],
-						"codexResetCredits": {"availableCount": 2},
-						"error": null
+				"schema": "crossusage.limits.v1",
+				"providers": {
+					"codex": {
+						"displayName": "Codex",
+						"resources": {
+							"session": {"unit":"percent","used":42,"limit":100,"remaining":58,"utilization":0.42,"resetsAt":"2026-07-17T20:00:00Z","label":"Session","windowSeconds":18000},
+							"weekly": {"unit":"percent","used":11.5,"limit":100,"remaining":88.5,"utilization":0.115,"resetsAt":"2026-07-21T00:00:00Z","label":"Weekly","windowSeconds":604800}
+						}
 					}
-				]
+				},
+				"errors": []
 			}`,
 			check: func(t *testing.T, snap Snapshot) {
 				if len(snap.Providers) != 1 {
@@ -40,43 +38,36 @@ func TestNormalize(t *testing.T) {
 				if p.ID != "codex" || p.Name != "Codex" {
 					t.Fatalf("unexpected provider id/name: %+v", p)
 				}
-				if len(p.Windows) != 3 {
-					t.Fatalf("expected 3 windows, got %d: %+v", len(p.Windows), p.Windows)
+				if len(p.Windows) != 2 {
+					t.Fatalf("expected 2 windows, got %d: %+v", len(p.Windows), p.Windows)
 				}
 				w := p.Windows[0]
-				if w.ID != "codex.primary" || w.Key != "primary" || w.UsedPercent != 42.0 || w.RemainingPercent != 58.0 {
-					t.Fatalf("unexpected primary window: %+v", w)
+				if w.ID != "codex.session" || w.Key != "session" || math.Abs(w.UsedPercent-42) > 0.01 {
+					t.Fatalf("unexpected session window: %+v", w)
 				}
 				if w.ResetsAt == nil || !w.ResetsAt.Equal(time.Date(2026, 7, 17, 20, 0, 0, 0, time.UTC)) {
 					t.Fatalf("unexpected resetsAt: %+v", w.ResetsAt)
 				}
-				extra := p.Windows[2]
-				if extra.ID != "codex.opus" || extra.Key != "opus" {
-					t.Fatalf("unexpected extra window: %+v", extra)
-				}
-				if p.Credits == nil || p.Credits.AvailableCount != 2 {
-					t.Fatalf("unexpected credits: %+v", p.Credits)
-				}
-				if p.Raw == nil {
-					t.Fatalf("expected raw JSON to be preserved")
-				}
 			},
 		},
 		{
-			name: "claude fixture missing secondary and tertiary",
+			name: "claude session only",
 			body: `{
-				"providers": [
-					{
-						"id": "claude",
-						"name": "Claude",
-						"primary": {"title": "5h limit", "usedPercent": 20.0, "resetsAt": null},
-						"secondary": null,
-						"tertiary": null
+				"schema": "crossusage.limits.v1",
+				"providers": {
+					"claude": {
+						"displayName": "Claude",
+						"resources": {
+							"session": {"unit":"percent","used":20,"limit":100,"utilization":0.2,"label":"Session"}
+						}
 					}
-				]
+				}
 			}`,
 			check: func(t *testing.T, snap Snapshot) {
 				p := snap.Providers[0]
+				if p.ID != "claude_code" {
+					t.Fatalf("expected claude_code, got %+v", p)
+				}
 				if len(p.Windows) != 1 {
 					t.Fatalf("expected 1 window, got %d: %+v", len(p.Windows), p.Windows)
 				}
@@ -86,85 +77,17 @@ func TestNormalize(t *testing.T) {
 			},
 		},
 		{
-			name: "grok fixture with tertiary window",
-			body: `{
-				"providers": [
-					{
-						"id": "grok",
-						"name": "Grok",
-						"primary": {"title": "5h limit", "usedPercent": 5.0, "resetsAt": "2026-07-17T20:00:00Z"},
-						"secondary": {"title": "Weekly", "usedPercent": 8.0, "resetsAt": "2026-07-21T00:00:00Z"},
-						"tertiary": {"title": "Monthly", "usedPercent": 1.0, "resetsAt": "2026-08-01T00:00:00Z"}
-					}
-				]
-			}`,
-			check: func(t *testing.T, snap Snapshot) {
-				p := snap.Providers[0]
-				if len(p.Windows) != 3 {
-					t.Fatalf("expected 3 windows, got %d", len(p.Windows))
-				}
-				if p.Windows[2].ID != "grok.tertiary" {
-					t.Fatalf("unexpected tertiary window id: %s", p.Windows[2].ID)
-				}
-			},
-		},
-		{
-			name: "extra window without key derives slug from title",
-			body: `{
-				"providers": [
-					{
-						"id": "codex",
-						"name": "Codex",
-						"extraRateWindows": [
-							{"title": "Opus Weekly!!", "usedPercent": 3.0, "resetsAt": null}
-						]
-					}
-				]
-			}`,
-			check: func(t *testing.T, snap Snapshot) {
-				w := snap.Providers[0].Windows[0]
-				if w.Key != "opus-weekly" || w.ID != "codex.opus-weekly" {
-					t.Fatalf("unexpected derived key/id: key=%s id=%s", w.Key, w.ID)
-				}
-			},
-		},
-		{
-			name: "extra window key collision gets numeric suffix",
-			body: `{
-				"providers": [
-					{
-						"id": "codex",
-						"name": "Codex",
-						"primary": {"title": "5h limit", "usedPercent": 1.0, "resetsAt": null},
-						"extraRateWindows": [
-							{"key": "primary", "title": "Duplicate", "usedPercent": 2.0, "resetsAt": null}
-						]
-					}
-				]
-			}`,
-			check: func(t *testing.T, snap Snapshot) {
-				windows := snap.Providers[0].Windows
-				if len(windows) != 2 {
-					t.Fatalf("expected 2 windows, got %d", len(windows))
-				}
-				if windows[0].Key != "primary" {
-					t.Fatalf("expected first window key primary, got %s", windows[0].Key)
-				}
-				if windows[1].Key != "primary-2" || windows[1].ID != "codex.primary-2" {
-					t.Fatalf("expected collision-resolved key primary-2, got %+v", windows[1])
-				}
-			},
-		},
-		{
 			name: "unknown provider is dropped",
 			body: `{
-				"providers": [
-					{
-						"id": "mystery",
-						"name": "Mystery Provider",
-						"primary": {"title": "Daily", "usedPercent": 50.0, "resetsAt": null}
+				"schema": "crossusage.limits.v1",
+				"providers": {
+					"mystery": {
+						"displayName": "Mystery",
+						"resources": {
+							"session": {"unit":"percent","used":50,"limit":100,"utilization":0.5,"label":"Session"}
+						}
 					}
-				]
+				}
 			}`,
 			check: func(t *testing.T, snap Snapshot) {
 				if len(snap.Providers) != 0 {
@@ -173,32 +96,11 @@ func TestNormalize(t *testing.T) {
 			},
 		},
 		{
-			name: "null resetsAt preserved as nil",
-			body: `{
-				"providers": [
-					{
-						"id": "codex",
-						"name": "Codex",
-						"primary": {"title": "5h limit", "usedPercent": 10.0, "resetsAt": null}
-					}
-				]
-			}`,
-			check: func(t *testing.T, snap Snapshot) {
-				if snap.Providers[0].Windows[0].ResetsAt != nil {
-					t.Fatalf("expected nil resetsAt")
-				}
-			},
-		},
-		{
 			name: "provider level error with no windows",
 			body: `{
-				"providers": [
-					{
-						"id": "codex",
-						"name": "Codex",
-						"error": "upstream timeout"
-					}
-				]
+				"schema": "crossusage.limits.v1",
+				"providers": {},
+				"errors": [{"providerId":"codex","message":"upstream timeout"}]
 			}`,
 			check: func(t *testing.T, snap Snapshot) {
 				p := snap.Providers[0]
@@ -212,30 +114,32 @@ func TestNormalize(t *testing.T) {
 		},
 		{
 			name:    "malformed JSON rejected",
-			body:    `{"providers": [ this is not json }`,
+			body:    `{"schema": "crossusage.limits.v1", "providers": [ this is not json }`,
 			wantErr: true,
 		},
 		{
-			name: "real codexbar array with nested usage and object error",
+			name: "usage line array maps to catalog gauges",
 			body: `[
 				{
-					"provider": "codex",
-					"source": "auto",
-					"usage": {
-						"primary": {"usedPercent": 28, "windowMinutes": 300, "resetsAt": "2025-12-04T19:15:00Z"},
-						"secondary": {"usedPercent": 59, "windowMinutes": 10080, "resetsAt": "2025-12-05T17:00:00Z"},
-						"tertiary": null
-					},
-					"credits": {"remaining": 112.4}
+					"providerId": "codex",
+					"displayName": "Codex",
+					"lines": [
+						{"type":"progress","label":"Session","used":28,"limit":100,"format":{"kind":"percent"},"resetsAt":"2025-12-04T19:15:00Z","periodDurationMs":18000000},
+						{"type":"progress","label":"Weekly","used":59,"limit":100,"format":{"kind":"percent"},"resetsAt":"2025-12-05T17:00:00Z","periodDurationMs":604800000},
+						{"type":"text","label":"Today","value":"$1.33"}
+					]
 				},
 				{
-					"provider": "openai",
-					"error": {"kind": "provider", "code": 1, "message": "No available fetch strategy for openai."}
+					"providerId": "openai",
+					"displayName": "OpenAI",
+					"lines": [
+						{"type":"progress","label":"API","used":88,"limit":100,"format":{"kind":"percent"}}
+					]
 				}
 			]`,
 			check: func(t *testing.T, snap Snapshot) {
 				if len(snap.Providers) != 1 {
-					t.Fatalf("expected 1 provider (openai API noise dropped), got %d", len(snap.Providers))
+					t.Fatalf("expected 1 provider (openai dropped), got %d: %+v", len(snap.Providers), snap.Providers)
 				}
 				codex := snap.Providers[0]
 				if codex.ID != "codex" || codex.Name != "Codex" {
@@ -244,13 +148,12 @@ func TestNormalize(t *testing.T) {
 				if len(codex.Windows) != 2 {
 					t.Fatalf("expected 2 windows, got %d: %+v", len(codex.Windows), codex.Windows)
 				}
-				if codex.Windows[0].Title != "5h limit" || codex.Windows[1].Title != "Weekly" {
-					t.Fatalf("unexpected titles: %q %q", codex.Windows[0].Title, codex.Windows[1].Title)
-				}
-				if codex.Credits != nil {
-					t.Fatalf("float remaining credits should not map to availableCount: %+v", codex.Credits)
-				}
 			},
+		},
+		{
+			name:    "unrecognized payload rejected",
+			body:    `{"providers":[{"id":"codex","primary":{"usedPercent":1}}]}`,
+			wantErr: true,
 		},
 	}
 
@@ -272,6 +175,9 @@ func TestNormalize(t *testing.T) {
 			if !snap.FetchedAt.Equal(fetchedAt) {
 				t.Fatalf("unexpected fetchedAt: %+v", snap.FetchedAt)
 			}
+			if snap.SourceKind != "crossusage" {
+				t.Fatalf("source=%q", snap.SourceKind)
+			}
 			tt.check(t, snap)
 		})
 	}
@@ -279,7 +185,7 @@ func TestNormalize(t *testing.T) {
 
 func TestNormalizeProviderScopedStale(t *testing.T) {
 	fetchedAt := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
-	snapshot, err := Normalize([]byte(`{"provider":"codex","name":"Codex","stale":true,"usage":{}}`), 5, fetchedAt)
+	snapshot, err := Normalize([]byte(`{"schema":"crossusage.limits.v1","providers":{"codex":{"displayName":"Codex","stale":true,"resources":{"session":{"unit":"percent","used":1,"limit":100,"utilization":0.01,"label":"Session"}}}}}`), 5, fetchedAt)
 	if err != nil {
 		t.Fatal(err)
 	}

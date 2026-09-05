@@ -15,21 +15,7 @@ import (
 )
 
 func main() {
-	openusageBin := strings.TrimSpace(os.Getenv("OPENUSAGE_BIN"))
-	codexbarBin := strings.TrimSpace(os.Getenv("CODEXBAR_BIN"))
-	sourceHint := strings.ToLower(strings.TrimSpace(os.Getenv("COLLECTOR_SOURCE")))
-
-	binary := firstNonEmpty(openusageBin, codexbarBin, "openusage")
-	if sourceHint == "" {
-		switch {
-		case openusageBin != "":
-			sourceHint = "openusage"
-		case codexbarBin != "":
-			sourceHint = "codexbar"
-		default:
-			sourceHint = "openusage"
-		}
-	}
+	binary := firstNonEmpty(strings.TrimSpace(os.Getenv("CROSSUSAGE_BIN")), "crossusage-cli")
 
 	httpAddr := strings.TrimSpace(os.Getenv("COLLECTOR_HTTP_ADDR"))
 	socketPath := os.Getenv("COLLECTOR_SOCKET")
@@ -42,7 +28,7 @@ func main() {
 		args = strings.Fields(raw)
 	}
 
-	collector := server.NewCollectorForSource(binary, sourceHint, args)
+	collector := server.NewCollectorWithArgs(binary, args)
 	handler := collector.Handler()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -99,7 +85,7 @@ func newCollectorHTTPServer(handler http.Handler) *http.Server {
 		Handler:           handler,
 		ReadHeaderTimeout: 2 * time.Second,
 		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      95 * time.Second,
+		WriteTimeout:      250 * time.Second,
 		IdleTimeout:       30 * time.Second,
 		MaxHeaderBytes:    8 << 10,
 	}

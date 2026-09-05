@@ -2,7 +2,7 @@ package server
 
 import "context"
 
-// UsageSource fetches raw provider usage JSON (OpenUsage export or CodexBar).
+// UsageSource fetches raw CrossUsage limits JSON.
 type UsageSource interface {
 	Fetch(ctx context.Context) ([]byte, error)
 	SourceName() string
