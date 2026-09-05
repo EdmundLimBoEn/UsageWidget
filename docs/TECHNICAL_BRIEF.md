@@ -6,7 +6,7 @@ write-up.
 
 ## The product in one sentence
 
-UsageWidget turns usage-limit data from OpenUsage (preferred) or CodexBar into a
+UsageWidget turns usage-limit data from CrossUsage into a
 private, self-hosted iPhone dashboard, Home Screen widget, forecasts, and timely
 capacity/reset notifications across multiple AI providers.
 
@@ -23,7 +23,7 @@ capacity/reset notifications across multiple AI providers.
 ## System shape
 
 ```text
-OpenUsage (or CodexBar)
+CrossUsage
       │
       ▼
 isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
@@ -35,8 +35,8 @@ isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
 ```
 
 - The production deployment intentionally separates two Linux processes.
-- The collector runs as the unprivileged account that owns the CodexBar login
-  sessions. It executes one fixed usage command, serializes requests, validates
+- The collector runs as the unprivileged account that owns the CrossUsage login
+  sessions. It runs `crossusage-cli limits` for the catalog plugins, serializes requests, validates
   JSON, bounds output size, and exposes only `GET /usage` over a restricted Unix
   socket.
 - The main Go daemon has no need to read that account's home directory. It
@@ -46,13 +46,13 @@ isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
   stays bound to loopback rather than being exposed directly to the public
   internet.
 - The daemon also builds natively for macOS and Windows. Desktop mode uses an
-  exact CodexBar CLI path or a private CodexBar HTTP endpoint and stores SQLite
+  exact CrossUsage CLI path or a private CrossUsage HTTP endpoint and stores SQLite
   data in the signed-in user's application-data directory. It trades Linux's
   account isolation and systemd supervision for easier personal-machine setup.
 
 ## Data flow, step by step
 
-1. The poller asks CodexBar for all currently enabled providers.
+1. The poller asks CrossUsage for catalog provider limits.
 2. The normalizer converts provider-specific shapes into one model: provider,
    usage windows, percent used/remaining, reset time, optional credits, error,
    and stale state.
@@ -122,7 +122,7 @@ isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
 
 ## Security and privacy model
 
-- Provider credentials remain on the machine running OpenUsage or CodexBar and
+- Provider credentials remain on the machine running CrossUsage and
   never move to the iPhone. Linux keeps them in the isolated collector account;
   desktop mode runs the daemon as the trusted signed-in user.
 - The phone API uses a bearer token and exposes normalized display data, not raw

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// paceProjection mirrors OpenUsage gauge pace: linear used% / elapsed window.
+// paceProjection is linear used% / elapsed window.
 // Returns nil when the window label is unrecognized or pace cannot be computed.
 func paceProjection(usedPercent float64, resetsAt time.Time, windowLabel string, now time.Time) *WindowForecast {
 	windowDur, ok := gaugeWindowDuration(windowLabel)
@@ -132,7 +132,7 @@ func joinAnnotationParts(parts ...string) string {
 	return strings.Join(out, " · ")
 }
 
-// preferForecast picks pace (OpenUsage-style) when history regression is thin,
+// preferForecast picks pace when history regression is thin,
 // otherwise keeps the richer history-based burn forecast and copies annotation.
 func preferForecast(pace, history *WindowForecast) *WindowForecast {
 	switch {

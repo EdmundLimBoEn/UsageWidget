@@ -1,4 +1,4 @@
-param([string]$CodexBarUrl = $env:CODEXBAR_URL)
+param([string]$CrossUsageUrl = $env:CROSSUSAGE_URL)
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $dataDirectory = Join-Path $env:LOCALAPPDATA "UsageWidget"
@@ -15,19 +15,29 @@ if ([string]::IsNullOrWhiteSpace($dns)) { throw "Could not determine the target 
 $publicUrl = "https://$dns/usagewidget"
 
 if (-not (Test-Path -LiteralPath $configPath)) {
-    $codexBar = Get-Command codexbar.exe, CodexBarCLI.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -eq $codexBar -and [string]::IsNullOrWhiteSpace($CodexBarUrl)) { throw "No compatible CodexBar CLI found; rerun with a private CodexBar URL" }
+    $crossUsage = Get-Command crossusage-cli.exe, crossusage-cli -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $crossUsage -and [string]::IsNullOrWhiteSpace($CrossUsageUrl)) {
+        throw "No crossusage-cli found; rerun with CROSSUSAGE_URL=http://127.0.0.1:6736/v1/limits after starting CrossUsage, or install the CLI"
+    }
     $bytes = New-Object byte[] 32
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $token = -join ($bytes | ForEach-Object { $_.ToString("x2") })
     $config = [ordered]@{ USAGEWIDGET_TOKEN=$token; USAGEWIDGET_PUBLIC_URL=$publicUrl; DB_PATH=(Join-Path $dataDirectory "usagewidget.db"); LISTEN_ADDR="127.0.0.1:8377" }
-    if ($null -ne $codexBar) { $config.CODEXBAR_BIN=$codexBar.Source } else { $config.CODEXBAR_URL=$CodexBarUrl }
+    if ($null -ne $crossUsage) {
+        $config.CROSSUSAGE_BIN = $crossUsage.Source
+        $resources = Join-Path (Split-Path -Parent $crossUsage.Source) "resources"
+        if (Test-Path -LiteralPath (Join-Path $resources "bundled_plugins") -PathType Container) {
+            $config.CROSSUSAGE_RESOURCES = $resources
+        }
+    } else {
+        $config.CROSSUSAGE_URL = $CrossUsageUrl
+    }
     $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
-} elseif (-not [string]::IsNullOrWhiteSpace($CodexBarUrl)) {
+} elseif (-not [string]::IsNullOrWhiteSpace($CrossUsageUrl)) {
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    $config | Add-Member -NotePropertyName CODEXBAR_URL -NotePropertyValue $CodexBarUrl -Force
+    $config | Add-Member -NotePropertyName CROSSUSAGE_URL -NotePropertyValue $CrossUsageUrl -Force
     $config | Add-Member -NotePropertyName USAGEWIDGET_PUBLIC_URL -NotePropertyValue $publicUrl -Force
-    $config.PSObject.Properties.Remove("CODEXBAR_BIN")
+    $config.PSObject.Properties.Remove("CROSSUSAGE_BIN")
     $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
 }
 $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json

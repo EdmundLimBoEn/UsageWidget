@@ -1,6 +1,6 @@
 # UsageWidget server deployment
 
-`usagewidgetd` polls OpenUsage (preferred) or CodexBar through an isolated
+`usagewidgetd` polls CrossUsage through an isolated
 local collector, stores normalized snapshots and event state in SQLite, serves
 the private phone API, and sends APNs alerts and WidgetKit refreshes.
 
@@ -17,7 +17,7 @@ native macOS and Windows executable for personal desktop hosts.
 | Main listener | `127.0.0.1:8377` |
 | Private route | Tailscale Serve path `/usagewidget` |
 | Main service | `usagewidget.service` as user `usagewidget` |
-| Collector | `usagewidget-collector.service` as the OpenUsage/CodexBar login account |
+| Collector | `usagewidget-collector.service` as the CrossUsage login account |
 | Configuration | `/etc/usagewidget/env` and `/etc/usagewidget/collector.env` |
 | Data | `/var/lib/usagewidget/usagewidget.db` |
 | Releases | `/opt/usagewidget/releases` |
@@ -33,18 +33,11 @@ receives only fresh usage JSON over a group-restricted Unix socket.
 Before installation:
 
 1. Log Tailscale into the intended tailnet.
-2. Create or select an unprivileged login account for OpenUsage (preferred) or CodexBar.
+2. Create or select an unprivileged login account for CrossUsage.
 3. As that account, authenticate the desired providers and verify collection:
 
    ```bash
-   openusage
-   ```
-
-   Or, for a CodexBar fallback:
-
-   ```bash
-   CodexBarCLI config validate
-   CodexBarCLI usage --format json
+   crossusage-cli limits cursor claude
    ```
 
 4. Ensure the installing account has root or sudo access.
@@ -66,7 +59,7 @@ required:
 curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 ```
 
-The bootstrap prompts for the SSH destination and any target-specific CodexBar
+The bootstrap prompts for the SSH destination and any target-specific CrossUsage
 source. Linux targets additionally ask for the unprivileged collector account.
 Every target configures a private Tailscale route and prints the setup QR back
 in the controller terminal.
@@ -145,10 +138,10 @@ For a manual archive install instead, extract the matching `darwin-amd64` or
 ./start-server.sh
 ```
 
-The launcher discovers `codexbar` or `CodexBarCLI` and creates
+The launcher discovers `crossusage-cli` and creates
 `~/Library/Application Support/UsageWidget/server.env` with mode restricted by
-the user's umask. Override discovery with `CODEXBAR_BIN=/absolute/path` or set
-`CODEXBAR_URL` before the first launch.
+the user's umask. Override discovery with `CROSSUSAGE_BIN=/absolute/path` or set
+`CROSSUSAGE_URL` before the first launch.
 
 ### Windows 10/11
 
@@ -161,21 +154,20 @@ For a manual archive install instead, extract `windows-amd64` (or
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\start-server.ps1 `
-  -CodexBarUrl http://PRIVATE-CODEXBAR-HOST:8765/usage
+  -CrossUsageUrl http://127.0.0.1:6736/v1/limits
 ```
 
 Configuration and data are created in `%LOCALAPPDATA%\UsageWidget`. A custom
-compatible CLI executable can be used instead:
+CLI executable can be used instead:
 
 ```powershell
-.\start-server.ps1 -CodexBarBin "C:\Program Files\CodexBar\codexbar.exe"
+.\start-server.ps1 -CrossUsageBin "C:\Program Files\CrossUsage\crossusage-cli.exe"
 ```
 
 Rerun the launcher with either source flag to update an existing configuration;
 the two flags are mutually exclusive.
 
-CodexBar's official standalone CLI releases currently target macOS and Linux,
-so the URL form is the normal Windows setup. Keep that URL reachable only over
+CrossUsage ships a Windows CLI zip and a loopback HTTP API. Keep that URL on
 loopback or a private network.
 
 ### Connect a desktop host privately
@@ -229,7 +221,6 @@ The installer owns `/etc/usagewidget/env`. Its core values are:
 
 ```bash
 USAGEWIDGET_TOKEN=replace-with-at-least-32-random-characters
-USAGE_SOURCE=auto
 COLLECTOR_SOCKET=/run/usagewidget/collector.sock
 DB_PATH=/var/lib/usagewidget/usagewidget.db
 LISTEN_ADDR=127.0.0.1:8377
@@ -241,34 +232,27 @@ Server variables:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `USAGEWIDGET_TOKEN` | required | Main API bearer token, minimum 32 characters |
-| `USAGE_SOURCE` | `auto` | `auto`, `openusage`, or `codexbar` |
 | `COLLECTOR_SOCKET` | `/run/usagewidget/collector.sock` | Production collector socket |
 | `DB_PATH` | `./usagewidget.db` | SQLite path; installer sets the data-directory path |
 | `LISTEN_ADDR` | `127.0.0.1:8377` | Main API listener |
-| `OPENUSAGE_URL` | unset | OpenUsage hub `/v1/snapshots` URL |
-| `OPENUSAGE_BIN` | unset | Exact `openusage` binary path (bare CLI; JSON on stdout) |
-| `OPENUSAGE_CMD` | unset | Full OpenUsage command override |
-| `OPENUSAGE_SOCKET` | unset | OpenUsage daemon UDS for `/v1/read-model` |
-| `CODEXBAR_URL` | unset | Legacy CodexBar HTTP-source override |
-| `CODEXBAR_BIN` | unset | Exact CodexBar CLI path; supports spaces |
-| `CODEXBAR_CMD` | unset | Legacy CodexBar command-source override |
+| `CROSSUSAGE_URL` | unset | CrossUsage HTTP source, usually `/v1/limits` |
+| `CROSSUSAGE_BIN` | unset | Exact `crossusage-cli` path |
+| `CROSSUSAGE_CMD` | unset | Full CrossUsage command override |
+| `CROSSUSAGE_RESOURCES` | unset | Directory containing `bundled_plugins/` |
 | `APNS_*` | unset | APNs signing configuration; all required to enable push |
 
 `/etc/usagewidget/collector.env` normally contains:
 
 ```bash
-OPENUSAGE_BIN=/usr/local/bin/openusage
+CROSSUSAGE_BIN=/opt/usagewidget/dependencies/crossusage-cli
+CROSSUSAGE_RESOURCES=/opt/usagewidget/dependencies/crossusage-cli-1.4.4-amd64/resources
 COLLECTOR_SOCKET=/run/usagewidget/collector.sock
-# Optional legacy fallback:
-# CODEXBAR_BIN=/absolute/path/to/CodexBarCLI
-# COLLECTOR_ARGS=usage --format json
 ```
 
-Source precedence prefers OpenUsage (`OPENUSAGE_CMD`, `OPENUSAGE_URL`,
-`OPENUSAGE_BIN`, `OPENUSAGE_SOCKET`, then the collector socket) and falls back
-to CodexBar when `USAGE_SOURCE=codexbar` or an explicit CodexBar endpoint is
-configured. The collector runs the OpenUsage CLI with no extra arguments when
-the source is OpenUsage, and `usage --format json` for CodexBar.
+Source precedence is `CROSSUSAGE_CMD`, then `CROSSUSAGE_URL`, then
+`CROSSUSAGE_BIN`, then the collector socket. The collector runs
+`crossusage-cli limits` for the catalog plugin ids unless `COLLECTOR_ARGS`
+overrides it.
 
 Do not point collector binaries at an account whose home must remain isolated
 from the daemon. The sidecar is the production path and exposes only
@@ -392,12 +376,12 @@ All main `/v1/*` routes require
 sudo usagewidget-admin doctor --json
 sudo systemctl status usagewidget usagewidget-collector --no-pager
 sudo journalctl -u usagewidget -u usagewidget-collector -n 100 --no-pager
-sudo -u YOUR_LOGIN CodexBarCLI config validate
-sudo -u YOUR_LOGIN CodexBarCLI usage --format json
+sudo -u YOUR_LOGIN env HOME=/home/YOUR_LOGIN CROSSUSAGE_RESOURCES=/opt/usagewidget/dependencies/crossusage-cli-1.4.4-amd64/resources \
+  /opt/usagewidget/dependencies/crossusage-cli limits cursor
 ```
 
-- Collector unhealthy: confirm the systemd `User=`, the account's CodexBar
-  session, `CODEXBAR_BIN`, and socket group permissions.
+- Collector unhealthy: confirm the systemd `User=`, the account's CrossUsage
+  session, `CROSSUSAGE_BIN`, `CROSSUSAGE_RESOURCES`, and socket group permissions.
 - Database unhealthy: inspect ownership and free space under
   `/var/lib/usagewidget`; restore a verified backup if needed.
 - APNs false: configure every `APNS_*` value and restart the main service.

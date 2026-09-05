@@ -37,8 +37,8 @@ committed to the repository.
 
 ## Server and Tailscale
 
-- [ ] Log in to CodexBar as the unprivileged account selected for the collector;
-  verify `CodexBarCLI config validate` and `CodexBarCLI usage --format json` as
+- [ ] Log in to CrossUsage as the unprivileged account selected for the collector;
+  verify `crossusage-cli limits cursor` as
   that exact account.
 - [ ] Log Tailscale into the intended tailnet before installation and verify the
   server's MagicDNS name.
@@ -58,13 +58,10 @@ committed to the repository.
 - [ ] For a desktop host, verify the generated config and SQLite data are
   readable only by the signed-in user, keep the foreground process running,
   and confirm the private Tailscale route survives a reboot if desired.
-- [ ] Cursor Plan/Auto are collected from OpenUsage on the Mac where Cursor is
-  signed in. If the phone talks to a Linux host, keep a Mac OpenUsage collector
-  reachable on the tailnet (`COLLECTOR_HTTP_ADDR`) and point the daemon at it
-  with `OPENUSAGE_URL`. The Mac process must stay running.
-- [ ] For Windows, provide a private `CODEXBAR_URL` unless you have independently
-  verified a compatible native CodexBar CLI build; upstream standalone archives
-  currently target macOS and Linux.
+- [ ] Cursor Plan/Auto are collected from CrossUsage on the machine where Cursor is
+  signed in. Put the collector on that same Linux, Mac, or Windows box.
+- [ ] For Windows, install `crossusage-cli` or point `CROSSUSAGE_URL` at
+  `http://127.0.0.1:6736/v1/limits` while the CrossUsage tray app is running.
 
 ## Landing page deployment (Codex)
 
@@ -75,8 +72,8 @@ committed to the repository.
 
 ## Release publication
 
-- [ ] Update `release-manifest.json` only after verifying the pinned CodexBar
-  assets and SHA-256 values for both supported architectures.
+- [ ] Update `release-manifest.json` only after verifying the pinned CrossUsage
+  CLI assets and SHA-256 values.
 - [ ] Run the full verification commands documented in `README.md` on a clean
   checkout.
 - [ ] Create a `v*` tag, verify the GitHub Actions release workflow, and inspect
