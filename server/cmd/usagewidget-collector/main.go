@@ -18,7 +18,7 @@ func main() {
 	binary := firstNonEmpty(strings.TrimSpace(os.Getenv("CROSSUSAGE_BIN")), "crossusage-cli")
 
 	httpAddr := strings.TrimSpace(os.Getenv("COLLECTOR_HTTP_ADDR"))
-	socketPath := os.Getenv("COLLECTOR_SOCKET")
+	socketPath := server.CanonicalCollectorSocket(os.Getenv("COLLECTOR_SOCKET"))
 	if httpAddr == "" && socketPath == "" {
 		socketPath = "/run/usagewidget/collector.sock"
 	}

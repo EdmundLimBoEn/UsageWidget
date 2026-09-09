@@ -40,7 +40,7 @@ func LoadConfig() (Config, error) {
 		CrossUsageURL:   strings.TrimSpace(os.Getenv("CROSSUSAGE_URL")),
 		CrossUsageCmd:   strings.TrimSpace(os.Getenv("CROSSUSAGE_CMD")),
 		CrossUsageBin:   strings.TrimSpace(os.Getenv("CROSSUSAGE_BIN")),
-		CollectorSocket: envOr("COLLECTOR_SOCKET", "/run/usagewidget/collector.sock"),
+		CollectorSocket: CanonicalCollectorSocket(envOr("COLLECTOR_SOCKET", "/run/usagewidget/collector.sock")),
 		DBPath:          envOr("DB_PATH", "./usagewidget.db"),
 		ListenAddr:      envOr("LISTEN_ADDR", "127.0.0.1:8377"),
 
@@ -50,6 +50,13 @@ func LoadConfig() (Config, error) {
 		APNsBundleID: os.Getenv("APNS_BUNDLE_ID"),
 		APNsEnv:      envOr("APNS_ENV", "sandbox"),
 	}, nil
+}
+
+func CanonicalCollectorSocket(path string) string {
+	if path == "/run/usagewidget/codexbar.sock" {
+		return "/run/usagewidget/collector.sock"
+	}
+	return path
 }
 
 func envOr(key, fallback string) string {

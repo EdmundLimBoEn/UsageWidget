@@ -202,6 +202,18 @@ write_collector_env() {
   chown root:usagewidget "$COLLECTOR_ENV"
 }
 
+rewrite_legacy_collector_socket() {
+  local file=$1 mode=$2
+  [[ -f $file ]] || return 0
+  grep -q '^COLLECTOR_SOCKET=/run/usagewidget/codexbar.sock$' "$file" || return 0
+  local tmp
+  tmp="$(mktemp "$file.XXXXXX")"
+  awk '/^COLLECTOR_SOCKET=\/run\/usagewidget\/codexbar.sock$/{print "COLLECTOR_SOCKET=/run/usagewidget/collector.sock"; next} {print}' "$file" >"$tmp"
+  chown root:usagewidget "$tmp"
+  chmod "$mode" "$tmp"
+  mv -f "$tmp" "$file"
+}
+
 strip_obsolete_env_keys() {
   [[ -f $ENV_FILE ]] || return 0
   local tmp
@@ -210,6 +222,8 @@ strip_obsolete_env_keys() {
   chown root:usagewidget "$tmp"
   chmod 0600 "$tmp"
   mv -f "$tmp" "$ENV_FILE"
+  rewrite_legacy_collector_socket "$ENV_FILE" 0600
+  rewrite_legacy_collector_socket "$COLLECTOR_ENV" 0640
 }
 
 write_initial_env() {

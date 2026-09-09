@@ -22,6 +22,35 @@ func TestLoadConfigRejectsWeakOrWhitespaceToken(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRemapsLegacyCodexBarCollectorSocket(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
+	t.Setenv("CROSSUSAGE_URL", "")
+	t.Setenv("CROSSUSAGE_BIN", "")
+	t.Setenv("CROSSUSAGE_CMD", "")
+	t.Setenv("COLLECTOR_SOCKET", "/run/usagewidget/codexbar.sock")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.CollectorSocket != "/run/usagewidget/collector.sock" {
+		t.Fatalf("legacy CodexBar socket was not remapped: %s", cfg.CollectorSocket)
+	}
+}
+
+func TestLoadConfigKeepsCustomCollectorSocket(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
+	t.Setenv("COLLECTOR_SOCKET", "/tmp/custom-collector.sock")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.CollectorSocket != "/tmp/custom-collector.sock" {
+		t.Fatalf("custom collector socket was changed: %s", cfg.CollectorSocket)
+	}
+}
+
 func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
 	t.Setenv("CROSSUSAGE_URL", "")

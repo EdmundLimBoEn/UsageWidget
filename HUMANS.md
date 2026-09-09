@@ -37,6 +37,7 @@ committed to the repository.
 
 ## Server and Tailscale
 
+- [ ] After the CrossUsage cutover on edserve, pull-to-refresh Collection on the phone and confirm source `crossusage-collector` with Cursor/Codex, not `openusage-collector`.
 - [ ] Log in to CrossUsage as the unprivileged account selected for the collector;
   verify `crossusage-cli limits cursor` as
   that exact account.
