@@ -15,9 +15,9 @@ import (
 func newTestAPI(t *testing.T) (*API, *Store) {
 	t.Helper()
 	store := openTestStore(t)
-	cfg := Config{Token: "secret-token", CodexBarURL: "http://127.0.0.1:0/unreachable"}
-	codexbar := NewCodexBarClient(cfg.CodexBarURL)
-	return NewAPI(cfg, store, codexbar), store
+	cfg := Config{Token: "secret-token", CrossUsageURL: "http://127.0.0.1:0/unreachable"}
+	client := NewCrossUsageHTTPClient(cfg.CrossUsageURL)
+	return NewAPI(cfg, store, client), store
 }
 
 func doRequest(t *testing.T, api *API, method, path, token string, body []byte) *httptest.ResponseRecorder {
@@ -347,8 +347,8 @@ func TestHealthIsPassiveAndReportsLastPollOutcome(t *testing.T) {
 	defer upstream.Close()
 
 	store := openTestStore(t)
-	cfg := Config{Token: "secret-token", CodexBarURL: upstream.URL}
-	api := NewAPI(cfg, store, NewCodexBarClient(upstream.URL))
+	cfg := Config{Token: "secret-token", CrossUsageURL: upstream.URL}
+	api := NewAPI(cfg, store, NewCrossUsageHTTPClient(upstream.URL))
 	api.RecordPollOutcome(PollResult{PolledAt: time.Now().UTC(), Success: true})
 
 	rec := doRequest(t, api, http.MethodGet, "/v1/health", "secret-token", nil)
@@ -569,8 +569,8 @@ func (r *recordingNotifier) SendWidgetRefresh(_ context.Context, _ string) error
 
 func TestReadinessTestTargetsDevicePersistsAndRateLimits(t *testing.T) {
 	store := openTestStore(t)
-	cfg := Config{Token: "secret-token", CodexBarURL: "http://127.0.0.1:0", APNsKeyPath: "key", APNsKeyID: "kid", APNsTeamID: "team", APNsBundleID: "app"}
-	api := NewAPI(cfg, store, NewCodexBarClient(cfg.CodexBarURL))
+	cfg := Config{Token: "secret-token", CrossUsageURL: "http://127.0.0.1:0", APNsKeyPath: "key", APNsKeyID: "kid", APNsTeamID: "team", APNsBundleID: "app"}
+	api := NewAPI(cfg, store, NewCrossUsageHTTPClient(cfg.CrossUsageURL))
 	notifier := &recordingNotifier{}
 	api.SetNotifier(notifier)
 	if err := store.UpsertDevice("phone-a", "alert-a", "widget-a"); err != nil {

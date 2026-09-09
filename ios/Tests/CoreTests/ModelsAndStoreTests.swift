@@ -150,7 +150,7 @@ final class ModelsAndStoreTests: XCTestCase {
         {
           "service":"ok", "codexbar":false, "database":true, "polling":true, "apns":true,
           "collector": {
-            "source":"codexbar-cli-sidecar", "status":"degraded",
+            "source":"crossusage-collector", "status":"degraded",
             "lastAttemptAt":"2026-07-18T10:00:00Z", "lastSuccessAt":"2026-07-18T09:55:00Z",
             "durationMs":720, "consecutiveFailures":1, "lastError":"collector rate limited"
           },
@@ -161,7 +161,7 @@ final class ModelsAndStoreTests: XCTestCase {
         }
         """.data(using: .utf8)!
         let health = try JSONCoding.decoder.decode(Health.self, from: json)
-        XCTAssertEqual(health.collector?.source, "codexbar-cli-sidecar")
+        XCTAssertEqual(health.collector?.source, "crossusage-collector")
         XCTAssertEqual(health.collector?.consecutiveFailures, 1)
         XCTAssertEqual(health.widgetDelivery?.failed, 1)
     }

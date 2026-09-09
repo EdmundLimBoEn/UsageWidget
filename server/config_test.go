@@ -24,11 +24,9 @@ func TestLoadConfigRejectsWeakOrWhitespaceToken(t *testing.T) {
 
 func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
-	t.Setenv("USAGE_SOURCE", "")
-	t.Setenv("OPENUSAGE_URL", "")
-	t.Setenv("OPENUSAGE_BIN", "")
-	t.Setenv("CODEXBAR_URL", "")
-	t.Setenv("CODEXBAR_BIN", "")
+	t.Setenv("CROSSUSAGE_URL", "")
+	t.Setenv("CROSSUSAGE_BIN", "")
+	t.Setenv("CROSSUSAGE_CMD", "")
 	t.Setenv("COLLECTOR_SOCKET", "")
 	t.Setenv("DB_PATH", "")
 	t.Setenv("LISTEN_ADDR", "")
@@ -37,14 +35,11 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.CodexBarURL != "" {
-		t.Fatalf("unexpected default CodexBarURL: %s", cfg.CodexBarURL)
+	if cfg.CrossUsageURL != "" {
+		t.Fatalf("unexpected default CrossUsageURL: %s", cfg.CrossUsageURL)
 	}
 	if cfg.CollectorSocket != "/run/usagewidget/collector.sock" {
 		t.Fatalf("unexpected collector socket: %s", cfg.CollectorSocket)
-	}
-	if cfg.UsageSource != "auto" {
-		t.Fatalf("unexpected usage source: %s", cfg.UsageSource)
 	}
 	if cfg.DBPath != "./usagewidget.db" {
 		t.Fatalf("unexpected default DBPath: %s", cfg.DBPath)
@@ -57,16 +52,16 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
-func TestLoadConfigPreservesCodexBarBinaryPath(t *testing.T) {
+func TestLoadConfigPreservesCrossUsageBinaryPath(t *testing.T) {
 	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
-	t.Setenv("CODEXBAR_BIN", `C:\\Program Files\\CodexBar\\codexbar.exe`)
+	t.Setenv("CROSSUSAGE_BIN", `C:\\Program Files\\CrossUsage\\crossusage-cli.exe`)
 
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.CodexBarBin != `C:\\Program Files\\CodexBar\\codexbar.exe` {
-		t.Fatalf("CodexBarBin was changed: %q", cfg.CodexBarBin)
+	if cfg.CrossUsageBin != `C:\\Program Files\\CrossUsage\\crossusage-cli.exe` {
+		t.Fatalf("CrossUsageBin was changed: %q", cfg.CrossUsageBin)
 	}
 }
 
@@ -86,25 +81,43 @@ func TestLoadConfigAPNsEnabledWhenAllVarsPresent(t *testing.T) {
 	}
 }
 
-func TestNewUsageSourceFromConfigPrefersOpenUsage(t *testing.T) {
-	cfg := Config{UsageSource: "auto", CollectorSocket: "/tmp/collector.sock"}
+func TestNewUsageSourceFromConfig(t *testing.T) {
+	cfg := Config{CollectorSocket: "/tmp/collector.sock"}
 	src := NewUsageSourceFromConfig(cfg)
-	if src.SourceName() != "openusage-collector" {
-		t.Fatalf("expected openusage-collector, got %s", src.SourceName())
+	if src.SourceName() != "crossusage-collector" {
+		t.Fatalf("expected crossusage-collector, got %s", src.SourceName())
 	}
-	cfg.CodexBarURL = "http://127.0.0.1:8765/usage"
+	cfg.CrossUsageURL = "http://127.0.0.1:6736/v1/limits"
 	src = NewUsageSourceFromConfig(cfg)
-	if src.SourceName() != "http" {
-		t.Fatalf("expected codexbar http when CODEXBAR_URL set, got %s", src.SourceName())
+	if src.SourceName() != "crossusage-http" {
+		t.Fatalf("expected crossusage-http when CROSSUSAGE_URL set, got %s", src.SourceName())
 	}
-	cfg = Config{UsageSource: "openusage", OpenUsageBin: "/usr/bin/openusage"}
+	cfg = Config{CrossUsageBin: "/usr/bin/crossusage-cli"}
 	src = NewUsageSourceFromConfig(cfg)
-	if src.SourceName() != "openusage-cli" {
-		t.Fatalf("expected openusage-cli, got %s", src.SourceName())
+	if src.SourceName() != "crossusage-cli" {
+		t.Fatalf("expected crossusage-cli, got %s", src.SourceName())
 	}
-	cfg = Config{UsageSource: "openusage", OpenUsageSocket: "/tmp/openusage.sock"}
+	cfg = Config{CrossUsageCmd: "crossusage-cli limits cursor"}
 	src = NewUsageSourceFromConfig(cfg)
-	if src.SourceName() != "openusage-daemon" {
-		t.Fatalf("expected openusage-daemon, got %s", src.SourceName())
+	if src.SourceName() != "crossusage-command" {
+		t.Fatalf("expected crossusage-command, got %s", src.SourceName())
+	}
+}
+
+func TestWhitespaceCrossUsageCmdIsIgnored(t *testing.T) {
+	t.Setenv("USAGEWIDGET_TOKEN", validTestToken)
+	t.Setenv("CROSSUSAGE_CMD", "   ")
+	t.Setenv("CROSSUSAGE_BIN", "")
+	t.Setenv("CROSSUSAGE_URL", "")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CrossUsageCmd != "" {
+		t.Fatalf("expected trimmed empty CrossUsageCmd, got %q", cfg.CrossUsageCmd)
+	}
+	src := NewUsageSourceFromConfig(cfg)
+	if src.SourceName() != "crossusage-collector" {
+		t.Fatalf("got %s", src.SourceName())
 	}
 }

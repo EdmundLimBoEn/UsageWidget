@@ -25,18 +25,20 @@ func testHTTPResponse(status int, body string) *http.Response {
 	}
 }
 
-const codexBarBody = `{
-  "providers": [
-    {
-      "id": "codex",
-      "name": "Codex",
-      "primary": {"title": "5h limit", "usedPercent": 42.0, "resetsAt": "2026-07-17T20:00:00Z"},
-      "codexResetCredits": {"availableCount": 2}
+const crossUsageBody = `{
+  "schema": "crossusage.limits.v1",
+  "providers": {
+    "codex": {
+      "displayName": "Codex",
+      "resources": {
+        "session": {"unit":"percent","used":42,"limit":100,"utilization":0.42,"resetsAt":"2026-07-17T20:00:00Z","label":"Session","windowSeconds":18000}
+      }
     }
-  ]
+  },
+  "errors": []
 }`
 
-func newPollerHarness(t *testing.T) (*Poller, *Store, *atomic.Bool, *CodexBarClient) {
+func newPollerHarness(t *testing.T) (*Poller, *Store, *atomic.Bool, *CrossUsageClient) {
 	t.Helper()
 	store := openTestStore(t)
 	healthy := &atomic.Bool{}
@@ -47,14 +49,14 @@ func newPollerHarness(t *testing.T) (*Poller, *Store, *atomic.Bool, *CodexBarCli
 			http.Error(w, "boom", http.StatusInternalServerError)
 			return
 		}
-		_, _ = w.Write([]byte(codexBarBody))
+		_, _ = w.Write([]byte(crossUsageBody))
 	}))
 	t.Cleanup(server.Close)
 
-	codexbar := NewCodexBarClient(server.URL)
-	api := NewAPI(Config{Token: "x"}, store, codexbar)
-	poller := NewPoller(store, codexbar, noopNotifier{}, api)
-	return poller, store, healthy, codexbar
+	client := NewCrossUsageHTTPClient(server.URL)
+	api := NewAPI(Config{Token: "x"}, store, client)
+	poller := NewPoller(store, client, noopNotifier{}, api)
+	return poller, store, healthy, client
 }
 
 func latestSnap(t *testing.T, store *Store) Snapshot {
@@ -101,13 +103,13 @@ func TestPollerStaleFallback(t *testing.T) {
 }
 
 func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
-	poller, store, _, codexbar := newPollerHarness(t)
+	poller, store, _, client := newPollerHarness(t)
 	responses := []string{
-		`[{"provider":"claude","usage":{"primary":{"usedPercent":25,"windowMinutes":300}}},{"provider":"codex","usage":{"primary":{"usedPercent":10,"windowMinutes":300}}}]`,
-		`[{"provider":"claude","error":{"message":"rate limited"}},{"provider":"codex","usage":{"primary":{"usedPercent":20,"windowMinutes":300}}}]`,
+		`{"schema":"crossusage.limits.v1","providers":{"claude":{"resources":{"session":{"unit":"percent","used":25,"limit":100,"utilization":0.25,"windowSeconds":18000,"label":"Session"}}},"codex":{"resources":{"session":{"unit":"percent","used":10,"limit":100,"utilization":0.1,"windowSeconds":18000,"label":"Session"}}}}}`,
+		`{"schema":"crossusage.limits.v1","providers":{"claude":{"resources":{}},"codex":{"resources":{"session":{"unit":"percent","used":20,"limit":100,"utilization":0.2,"windowSeconds":18000,"label":"Session"}}}},"errors":[{"providerId":"claude","message":"rate limited"}]}`,
 	}
 	request := 0
-	codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		body := responses[request]
 		request++
 		return testHTTPResponse(http.StatusOK, body), nil
@@ -121,24 +123,28 @@ func TestPollerPreservesLastKnownUsageForErroredProvider(t *testing.T) {
 	}
 
 	snapshot := latestSnap(t, store)
-	claude := snapshot.Providers[0]
+	byID := map[string]Provider{}
+	for _, p := range snapshot.Providers {
+		byID[p.ID] = p
+	}
+	claude := byID["claude_code"]
 	if claude.ID != "claude_code" || !claude.Stale || claude.Error != "" || len(claude.Windows) != 1 || claude.Windows[0].UsedPercent != 25 {
 		t.Fatalf("Claude last-known usage was not preserved: %+v", claude)
 	}
-	codex := snapshot.Providers[1]
+	codex := byID["codex"]
 	if codex.Stale || len(codex.Windows) != 1 || codex.Windows[0].UsedPercent != 20 {
 		t.Fatalf("fresh Codex usage was not saved: %+v", codex)
 	}
 }
 
 func TestPollerDoesNotRestoreDroppedAPIProviders(t *testing.T) {
-	poller, store, _, codexbar := newPollerHarness(t)
+	poller, store, _, client := newPollerHarness(t)
 	responses := []string{
-		`[{"provider":"cursor","usage":{"primary":{"usedPercent":10,"windowMinutes":43200}}},{"provider":"openai","usage":{"primary":{"usedPercent":99}}}]`,
-		`[{"provider":"cursor","usage":{"primary":{"usedPercent":11,"windowMinutes":43200}}},{"provider":"openai","error":{"message":"No available fetch strategy for openai."}}]`,
+		`{"schema":"crossusage.limits.v1","providers":{"cursor":{"resources":{"total-usage":{"unit":"percent","used":10,"limit":100,"utilization":0.1,"windowSeconds":2592000,"label":"Total usage"}}},"openai":{"resources":{"session":{"unit":"percent","used":99,"limit":100,"utilization":0.99,"label":"API"}}}}}`,
+		`{"schema":"crossusage.limits.v1","providers":{"cursor":{"resources":{"total-usage":{"unit":"percent","used":11,"limit":100,"utilization":0.11,"windowSeconds":2592000,"label":"Total usage"}}}},"errors":[{"providerId":"openai","message":"No available fetch strategy for openai."}]}`,
 	}
 	request := 0
-	codexbar.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+	client.httpClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		body := responses[request]
 		request++
 		return testHTTPResponse(http.StatusOK, body), nil
@@ -161,7 +167,7 @@ func TestPollerDoesNotRestoreDroppedAPIProviders(t *testing.T) {
 
 func TestPollerNoRepeatEventsOnDuplicate(t *testing.T) {
 	poller, store, _, _ := newPollerHarness(t)
-	seedWindow(t, store, "codex.primary", 5, nil)
+	seedWindow(t, store, "codex.session", 5, nil)
 
 	first := poller.PollNow(context.Background())
 	if !first.Success || first.Events < 1 {

@@ -12,8 +12,7 @@ type Snapshot struct {
 	Stale               bool       `json:"stale"`
 	Providers           []Provider `json:"providers"`
 	PollIntervalMinutes int        `json:"pollIntervalMinutes"`
-	// SourceKind is "openusage" or "codexbar". Empty means legacy/unknown.
-	SourceKind string `json:"sourceKind,omitempty"`
+	SourceKind          string     `json:"sourceKind,omitempty"`
 }
 
 type Provider struct {
@@ -34,7 +33,7 @@ type Window struct {
 	RemainingPercent float64         `json:"remainingPercent"`
 	ResetsAt         *time.Time      `json:"resetsAt,omitempty"`
 	WindowLabel      string          `json:"windowLabel,omitempty"`
-	PaceForecast     *WindowForecast `json:"-"` // filled during normalize; merged into Forecast on save
+	PaceForecast     *WindowForecast `json:"-"`
 	Forecast         *WindowForecast `json:"forecast,omitempty"`
 }
 
@@ -42,261 +41,34 @@ type Credits struct {
 	AvailableCount int `json:"availableCount"`
 }
 
-// CodexBar serve/CLI emits either:
-//   - a single provider payload
-//   - an array of provider payloads
-//   - { "providers": [ ... ] } (forward-compatible wrapper)
-//
-// Real payload fields (see CodexBar docs/cli.md):
-//
-//	provider, usage.{primary,secondary,tertiary}, credits.remaining, error.message
 func Normalize(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snapshot, error) {
-	if looksLikeOpenUsage(body) {
-		return normalizeOpenUsage(body, pollIntervalMinutes, fetchedAt)
+	if looksLikeLimitsV1(body) {
+		return normalizeLimitsV1(body, pollIntervalMinutes, fetchedAt)
 	}
-	return normalizeCodexBar(body, pollIntervalMinutes, fetchedAt)
-}
-
-func normalizeCodexBar(body []byte, pollIntervalMinutes int, fetchedAt time.Time) (Snapshot, error) {
-	rawProviders, err := extractProviderRaw(body)
-	if err != nil {
-		return Snapshot{}, err
-	}
-
-	providers := make([]Provider, 0, len(rawProviders))
-	for _, rawProvider := range rawProviders {
-		p, err := normalizeOne(rawProvider)
+	if looksLikeUsageLines(body) {
+		converted, err := usageLinesToLimits(body)
 		if err != nil {
 			return Snapshot{}, err
 		}
-		if !keepPlanProvider(p) {
-			continue
-		}
-		providers = append(providers, p)
+		return normalizeLimitsV1(converted, pollIntervalMinutes, fetchedAt)
 	}
-
-	for pi := range providers {
-		for wi := range providers[pi].Windows {
-			w := &providers[pi].Windows[wi]
-			if w.WindowLabel == "" {
-				w.WindowLabel = inferWindowLabel(w.Title, w.Key)
-			}
-			if w.ResetsAt != nil && w.WindowLabel != "" {
-				w.PaceForecast = paceProjection(w.UsedPercent, *w.ResetsAt, w.WindowLabel, fetchedAt)
-			}
-		}
-	}
-
-	return Snapshot{
-		FetchedAt:           fetchedAt,
-		Stale:               false,
-		Providers:           providers,
-		PollIntervalMinutes: pollIntervalMinutes,
-		SourceKind:          "codexbar",
-	}, nil
+	return Snapshot{}, fmt.Errorf("normalize: unrecognized CrossUsage payload")
 }
 
 func inferWindowLabel(title, key string) string {
 	lower := strings.ToLower(title + " " + key)
 	switch {
-	case strings.Contains(lower, "5h") || strings.Contains(lower, "5 h") || strings.Contains(lower, "primary"):
+	case strings.Contains(lower, "5h") || strings.Contains(lower, "5 h") || strings.Contains(lower, "session"):
 		return "5h"
-	case strings.Contains(lower, "weekly") || strings.Contains(lower, "7d") || strings.Contains(lower, "secondary"):
+	case strings.Contains(lower, "weekly") || strings.Contains(lower, "7d"):
 		return "7d"
-	case strings.Contains(lower, "monthly") || strings.Contains(lower, "30d"):
+	case strings.Contains(lower, "monthly") || strings.Contains(lower, "30d") || strings.Contains(lower, "total"):
 		return "30d"
 	case strings.Contains(lower, "daily") || strings.Contains(lower, "1d") || strings.Contains(lower, "24h"):
 		return "1d"
 	default:
 		return ""
 	}
-}
-
-func extractProviderRaw(body []byte) ([]json.RawMessage, error) {
-	trim := strings.TrimSpace(string(body))
-	if trim == "" {
-		return nil, fmt.Errorf("normalize: empty body")
-	}
-
-	switch trim[0] {
-	case '[':
-		var arr []json.RawMessage
-		if err := json.Unmarshal(body, &arr); err != nil {
-			return nil, fmt.Errorf("normalize: decode array: %w", err)
-		}
-		return arr, nil
-	case '{':
-		// Wrapped form from plan.
-		var wrapped struct {
-			Providers []json.RawMessage `json:"providers"`
-		}
-		if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Providers) > 0 {
-			return wrapped.Providers, nil
-		}
-		// Single provider payload.
-		var single json.RawMessage
-		if err := json.Unmarshal(body, &single); err != nil {
-			return nil, fmt.Errorf("normalize: decode object: %w", err)
-		}
-		return []json.RawMessage{single}, nil
-	default:
-		return nil, fmt.Errorf("normalize: unexpected JSON start %q", trim[:1])
-	}
-}
-
-type codexBarPayload struct {
-	Provider string `json:"provider"`
-	// Alternate id field used by plan-shaped fixtures.
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Stale bool   `json:"stale"`
-
-	// Nested usage windows (real CodexBar shape).
-	Usage *struct {
-		Primary   *codexBarWindow `json:"primary"`
-		Secondary *codexBarWindow `json:"secondary"`
-		Tertiary  *codexBarWindow `json:"tertiary"`
-	} `json:"usage"`
-
-	// Flat windows (plan-shaped fixtures / possible future).
-	Primary          *codexBarWindow       `json:"primary"`
-	Secondary        *codexBarWindow       `json:"secondary"`
-	Tertiary         *codexBarWindow       `json:"tertiary"`
-	ExtraRateWindows []codexBarExtraWindow `json:"extraRateWindows"`
-
-	Credits *struct {
-		Remaining      *float64 `json:"remaining"`
-		AvailableCount *int     `json:"availableCount"`
-	} `json:"credits"`
-	CodexResetCredits *struct {
-		AvailableCount int `json:"availableCount"`
-	} `json:"codexResetCredits"`
-
-	// error can be a string or {message, kind, code}.
-	Error json.RawMessage `json:"error"`
-}
-
-type codexBarWindow struct {
-	Title         string     `json:"title"`
-	UsedPercent   float64    `json:"usedPercent"`
-	WindowMinutes *float64   `json:"windowMinutes"`
-	ResetsAt      *time.Time `json:"resetsAt"`
-}
-
-type codexBarExtraWindow struct {
-	Key           string     `json:"key"`
-	Title         string     `json:"title"`
-	UsedPercent   float64    `json:"usedPercent"`
-	WindowMinutes *float64   `json:"windowMinutes"`
-	ResetsAt      *time.Time `json:"resetsAt"`
-}
-
-func normalizeOne(raw json.RawMessage) (Provider, error) {
-	var up codexBarPayload
-	if err := json.Unmarshal(raw, &up); err != nil {
-		return Provider{}, fmt.Errorf("normalize: decode provider: %w", err)
-	}
-
-	id := up.Provider
-	if id == "" {
-		id = up.ID
-	}
-	if id == "" {
-		return Provider{}, fmt.Errorf("normalize: provider missing id")
-	}
-	id = canonicalProviderID(id)
-
-	name := displayNameForProvider(id)
-	if !inProviderCatalog(id) && strings.TrimSpace(up.Name) != "" {
-		name = up.Name
-	}
-
-	p := Provider{
-		ID:    id,
-		Name:  name,
-		Stale: up.Stale,
-		Raw:   raw,
-	}
-	if msg := decodeErrorMessage(up.Error); msg != "" {
-		p.Error = msg
-	}
-
-	if up.CodexResetCredits != nil {
-		p.Credits = &Credits{AvailableCount: up.CodexResetCredits.AvailableCount}
-	} else if up.Credits != nil && up.Credits.AvailableCount != nil {
-		p.Credits = &Credits{AvailableCount: *up.Credits.AvailableCount}
-	}
-
-	usedKeys := make(map[string]bool)
-	add := func(key string, w *codexBarWindow) {
-		if w == nil {
-			return
-		}
-		title := planWindowTitle(id, key, w.Title, w.WindowMinutes)
-		if isAPINoiseWindow(id, key, title) {
-			return
-		}
-		p.Windows = append(p.Windows, Window{
-			ID:               id + "." + key,
-			Key:              key,
-			Title:            title,
-			UsedPercent:      w.UsedPercent,
-			RemainingPercent: 100 - w.UsedPercent,
-			ResetsAt:         w.ResetsAt,
-		})
-		usedKeys[key] = true
-	}
-
-	// Prefer nested usage.* (real CodexBar), fall back to flat fields.
-	if up.Usage != nil {
-		add("primary", up.Usage.Primary)
-		add("secondary", up.Usage.Secondary)
-		add("tertiary", up.Usage.Tertiary)
-	} else {
-		add("primary", up.Primary)
-		add("secondary", up.Secondary)
-		add("tertiary", up.Tertiary)
-	}
-
-	for _, extra := range up.ExtraRateWindows {
-		key := extra.Key
-		if key == "" {
-			key = slugify(extra.Title)
-		}
-		key = uniqueKey(key, usedKeys)
-		title := planWindowTitle(id, key, extra.Title, extra.WindowMinutes)
-		if isAPINoiseWindow(id, key, title) {
-			continue
-		}
-		p.Windows = append(p.Windows, Window{
-			ID:               id + "." + key,
-			Key:              key,
-			Title:            title,
-			UsedPercent:      extra.UsedPercent,
-			RemainingPercent: 100 - extra.UsedPercent,
-			ResetsAt:         extra.ResetsAt,
-		})
-		usedKeys[key] = true
-	}
-
-	return p, nil
-}
-
-func decodeErrorMessage(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-	var obj struct {
-		Message string `json:"message"`
-	}
-	if err := json.Unmarshal(raw, &obj); err == nil {
-		return obj.Message
-	}
-	return strings.TrimSpace(string(raw))
 }
 
 func displayName(id string) string {
@@ -332,12 +104,10 @@ func windowTitle(key string, minutes *float64) string {
 		}
 	}
 	switch key {
-	case "primary":
+	case "primary", "session":
 		return "Primary"
-	case "secondary":
+	case "secondary", "weekly":
 		return "Secondary"
-	case "tertiary":
-		return "Tertiary"
 	default:
 		return key
 	}
@@ -375,4 +145,13 @@ func uniqueKey(base string, used map[string]bool) string {
 			return candidate
 		}
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

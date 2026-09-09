@@ -65,7 +65,7 @@ else
 fi
 
 collector_user=""
-CODEXBAR_SOURCE_URL=""
+CROSSUSAGE_SOURCE_URL=""
 if [[ $OS == linux ]]; then
   detected_collector="$(ssh -n "\${SSH_OPTIONS[@]}" "$TARGET" "getent passwd | awk -F: '\$3>=1000 && \$3<65534 && \$7 !~ /(nologin|false)\$/ {print \$1; exit}'")"
   collector_prompt="Collector user"; [[ -n $detected_collector ]] && collector_prompt+=" [$detected_collector]"
@@ -73,9 +73,9 @@ if [[ $OS == linux ]]; then
   [[ $collector_user =~ ^[A-Za-z_][A-Za-z0-9._-]*$ ]] || die "collector user contains unsupported characters"
   ssh -n "\${SSH_OPTIONS[@]}" "$TARGET" "id -u '$collector_user'" >/dev/null || die "collector user does not exist on the server"
 else
-  prompt "Private CodexBar URL (leave blank to use a working CLI on the target): " CODEXBAR_SOURCE_URL
+  prompt "CrossUsage URL (leave blank to use crossusage-cli on the target): " CROSSUSAGE_SOURCE_URL
   url_pattern='^https?://[A-Za-z0-9._:/?&=%+-]+$'
-  [[ -z $CODEXBAR_SOURCE_URL || $CODEXBAR_SOURCE_URL =~ $url_pattern ]] || die "CodexBar URL contains unsupported characters"
+  [[ -z $CROSSUSAGE_SOURCE_URL || $CROSSUSAGE_SOURCE_URL =~ $url_pattern ]] || die "CrossUsage URL contains unsupported characters"
 fi
 
 if [[ $VERSION == latest ]]; then
@@ -111,11 +111,11 @@ tar -xzf '$ASSET'
 app=\"\$HOME/Library/Application Support/UsageWidget/App\"
 mkdir -p \"\$app\"
 cp -R './usagewidget-\${VERSION}-darwin-\${ARCH}/.' \"\$app/\"
-CODEXBAR_URL='$CODEXBAR_SOURCE_URL' \"\$app/install-server.sh\""
+CROSSUSAGE_URL='$CROSSUSAGE_SOURCE_URL' \"\$app/install-server.sh\""
 else
   ASSET="usagewidget-\${VERSION}-windows-\${ARCH}.zip"
-  escaped_url="\${CODEXBAR_SOURCE_URL//\'/\'\'}"
-  ps_script="\$ErrorActionPreference='Stop'; \$work=Join-Path ([IO.Path]::GetTempPath()) ('usagewidget-'+[guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path \$work|Out-Null; try { \$asset='$ASSET'; \$base='$BASE_URL'; Invoke-WebRequest -UseBasicParsing -Uri \"\$base/\$asset\" -OutFile (Join-Path \$work \$asset); Invoke-WebRequest -UseBasicParsing -Uri \"\$base/\$asset.sha256\" -OutFile (Join-Path \$work \"\$asset.sha256\"); \$expected=((Get-Content (Join-Path \$work \"\$asset.sha256\") -Raw).Trim() -split '\\s+')[0]; \$actual=(Get-FileHash -Algorithm SHA256 (Join-Path \$work \$asset)).Hash; if(\$actual -ne \$expected){throw 'checksum failed'}; Expand-Archive (Join-Path \$work \$asset) \$work -Force; Stop-ScheduledTask -TaskName 'UsageWidget Server' -ErrorAction SilentlyContinue; Get-Process usagewidgetd -ErrorAction SilentlyContinue|Stop-Process -Force; \$app=Join-Path \$env:LOCALAPPDATA 'UsageWidget\\App'; New-Item -ItemType Directory -Force -Path \$app|Out-Null; Copy-Item (Join-Path \$work 'usagewidget-\${VERSION}-windows-\${ARCH}\\*') \$app -Recurse -Force; \$env:CODEXBAR_URL='$escaped_url'; & (Join-Path \$app 'install-server.ps1') } finally { Remove-Item \$work -Recurse -Force -ErrorAction SilentlyContinue }"
+  escaped_url="\${CROSSUSAGE_SOURCE_URL//\'/\'\'}"
+  ps_script="\$ErrorActionPreference='Stop'; \$work=Join-Path ([IO.Path]::GetTempPath()) ('usagewidget-'+[guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Path \$work|Out-Null; try { \$asset='$ASSET'; \$base='$BASE_URL'; Invoke-WebRequest -UseBasicParsing -Uri \"\$base/\$asset\" -OutFile (Join-Path \$work \$asset); Invoke-WebRequest -UseBasicParsing -Uri \"\$base/\$asset.sha256\" -OutFile (Join-Path \$work \"\$asset.sha256\"); \$expected=((Get-Content (Join-Path \$work \"\$asset.sha256\") -Raw).Trim() -split '\\s+')[0]; \$actual=(Get-FileHash -Algorithm SHA256 (Join-Path \$work \$asset)).Hash; if(\$actual -ne \$expected){throw 'checksum failed'}; Expand-Archive (Join-Path \$work \$asset) \$work -Force; Stop-ScheduledTask -TaskName 'UsageWidget Server' -ErrorAction SilentlyContinue; Get-Process usagewidgetd -ErrorAction SilentlyContinue|Stop-Process -Force; \$app=Join-Path \$env:LOCALAPPDATA 'UsageWidget\\App'; New-Item -ItemType Directory -Force -Path \$app|Out-Null; Copy-Item (Join-Path \$work 'usagewidget-\${VERSION}-windows-\${ARCH}\\*') \$app -Recurse -Force; \$env:CROSSUSAGE_URL='$escaped_url'; & (Join-Path \$app 'install-server.ps1') } finally { Remove-Item \$work -Recurse -Force -ErrorAction SilentlyContinue }"
   command -v iconv >/dev/null 2>&1 && command -v base64 >/dev/null 2>&1 || die "iconv and base64 are required to install a Windows target"
   encoded="$(printf '%s' "$ps_script" | iconv -f UTF-8 -t UTF-16LE | base64 | tr -d '\n')"
   remote_command="powershell.exe -NoProfile -EncodedCommand $encoded"
@@ -147,7 +147,7 @@ if($os -eq "linux"){
   $uid=(& ssh $target id -u|Out-String).Trim();if($uid -ne "0"){$sudo="sudo ";& ssh -t $target "sudo -v"}
   $detected=(& ssh $target "getent passwd 1000 | cut -d: -f1"|Out-String).Trim();$collector=Read-Host $(if($detected){"Collector user [$detected]"}else{"Collector user"});if(!$collector){$collector=$detected}
   if($collector -notmatch '^[A-Za-z_][A-Za-z0-9._-]*$'){throw "Invalid collector user"}
-}else{$sourceUrl=Read-Host "Private CodexBar URL (leave blank to use a working CLI on the target)";if($sourceUrl -and $sourceUrl -notmatch '^https?://[A-Za-z0-9._:/?&=%+-]+$'){throw "Invalid CodexBar URL"}}
+}else{$sourceUrl=Read-Host "CrossUsage URL (leave blank to use crossusage-cli on the target)";if($sourceUrl -and $sourceUrl -notmatch '^https?://[A-Za-z0-9._:/?&=%+-]+$'){throw "Invalid CrossUsage URL"}}
 if(!$Version -or $Version -eq "latest"){$release=Invoke-RestMethod -Headers @{"User-Agent"="UsageWidget-Installer"} -Uri "https://api.github.com/repos/$Repository/releases/latest";$Version=([string]$release.tag_name)-replace '^v',''}
 if($Version -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$'){throw "Invalid release version"};$base="https://github.com/$Repository/releases/download/v$Version"
 if($os -eq "linux"){$asset="usagewidget-$Version-linux-$arch.tar.gz";$template=@'
@@ -162,11 +162,11 @@ sha256sum -c '__ASSET__.sha256'; tar -xzf '__ASSET__'; __SUDO__'./usagewidget-__
 set -euo pipefail
 work="$(mktemp -d /tmp/usagewidget-bootstrap.XXXXXX)"; trap 'rm -rf -- "$work"' EXIT; cd "$work"
 curl --http1.1 -fL --retry 5 --retry-all-errors -O '__BASE__/__ASSET__'; curl --http1.1 -fL --retry 5 --retry-all-errors -O '__BASE__/__ASSET__.sha256'; shasum -a 256 -c '__ASSET__.sha256'; tar -xzf '__ASSET__'
-app="$HOME/Library/Application Support/UsageWidget/App"; mkdir -p "$app"; cp -R './usagewidget-__VERSION__-darwin-__ARCH__/.' "$app/"; CODEXBAR_URL='__SOURCE__' "$app/install-server.sh"
+app="$HOME/Library/Application Support/UsageWidget/App"; mkdir -p "$app"; cp -R './usagewidget-__VERSION__-darwin-__ARCH__/.' "$app/"; CROSSUSAGE_URL='__SOURCE__' "$app/install-server.sh"
 '@;$command=$template.Replace('__BASE__',$base).Replace('__ASSET__',$asset).Replace('__VERSION__',$Version).Replace('__ARCH__',$arch).Replace('__SOURCE__',$sourceUrl)
 }else{$asset="usagewidget-$Version-windows-$arch.zip";$template=@'
 $ErrorActionPreference='Stop';$work=Join-Path ([IO.Path]::GetTempPath()) ('usagewidget-'+[guid]::NewGuid().ToString('N'));New-Item -ItemType Directory $work|Out-Null
-try{$asset='__ASSET__';$base='__BASE__';Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile (Join-Path $work $asset);Invoke-WebRequest -UseBasicParsing "$base/$asset.sha256" -OutFile (Join-Path $work "$asset.sha256");$expected=((Get-Content (Join-Path $work "$asset.sha256") -Raw).Trim() -split '\s+')[0];if((Get-FileHash (Join-Path $work $asset) -Algorithm SHA256).Hash -ne $expected){throw 'checksum failed'};Expand-Archive (Join-Path $work $asset) $work -Force;Stop-ScheduledTask -TaskName 'UsageWidget Server' -ErrorAction SilentlyContinue;Get-Process usagewidgetd -ErrorAction SilentlyContinue|Stop-Process -Force;$app=Join-Path $env:LOCALAPPDATA 'UsageWidget\App';New-Item -ItemType Directory -Force $app|Out-Null;Copy-Item (Join-Path $work 'usagewidget-__VERSION__-windows-__ARCH__\*') $app -Recurse -Force;$env:CODEXBAR_URL='__SOURCE__';& (Join-Path $app 'install-server.ps1')}finally{Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue}
+try{$asset='__ASSET__';$base='__BASE__';Invoke-WebRequest -UseBasicParsing "$base/$asset" -OutFile (Join-Path $work $asset);Invoke-WebRequest -UseBasicParsing "$base/$asset.sha256" -OutFile (Join-Path $work "$asset.sha256");$expected=((Get-Content (Join-Path $work "$asset.sha256") -Raw).Trim() -split '\s+')[0];if((Get-FileHash (Join-Path $work $asset) -Algorithm SHA256).Hash -ne $expected){throw 'checksum failed'};Expand-Archive (Join-Path $work $asset) $work -Force;Stop-ScheduledTask -TaskName 'UsageWidget Server' -ErrorAction SilentlyContinue;Get-Process usagewidgetd -ErrorAction SilentlyContinue|Stop-Process -Force;$app=Join-Path $env:LOCALAPPDATA 'UsageWidget\App';New-Item -ItemType Directory -Force $app|Out-Null;Copy-Item (Join-Path $work 'usagewidget-__VERSION__-windows-__ARCH__\*') $app -Recurse -Force;$env:CROSSUSAGE_URL='__SOURCE__';& (Join-Path $app 'install-server.ps1')}finally{Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue}
 '@;$ps=$template.Replace('__BASE__',$base).Replace('__ASSET__',$asset).Replace('__VERSION__',$Version).Replace('__ARCH__',$arch).Replace('__SOURCE__',$sourceUrl);$encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($ps));$command="powershell.exe -NoProfile -EncodedCommand $encoded"}
 Say "installing the $os/$arch server on $target";Say "the private iPhone setup QR will appear below when installation completes";& ssh -t $target $command;if($LASTEXITCODE -ne 0){throw "Remote installation failed"};Say "complete; scan the QR above in UsageWidget"
 `;

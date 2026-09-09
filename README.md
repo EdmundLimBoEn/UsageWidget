@@ -2,21 +2,19 @@
 
 UsageWidget is a self-hosted iOS 26+ app and large Home Screen widget for
 monitoring AI coding capacity. A small Go service runs on Linux, macOS, or
-Windows, normalizes OpenUsage (preferred on Linux/macOS) or CodexBar snapshots
-into quota-style windows, stores history in SQLite, and sends APNs alerts and
-WidgetKit refreshes to the phone.
+Windows, normalizes CrossUsage limits into quota-style windows, stores history
+in SQLite, and sends APNs alerts and WidgetKit refreshes to the phone.
 
 ```text
 ┌──────────────┐   Tailscale HTTPS    ┌──────────────────┐   Unix socket   ┌─────────────────┐
 │ iPhone app   │ ───────────────────► │ usagewidgetd     │ ──────────────► │ CLI collector   │
-│ + widget     │ ◄── APNs/WidgetKit ─ │ Go API + SQLite  │                 │ OpenUsage CLI   │
+│ + widget     │ ◄── APNs/WidgetKit ─ │ Go API + SQLite  │                 │ crossusage-cli  │
 └──────────────┘                      └──────────────────┘                 └─────────────────┘
 ```
 
-Linux uses the isolated Unix-socket collector shown above. Native macOS runs
-can point at the `openusage` CLI, an OpenUsage hub URL, or a legacy CodexBar
-CLI/HTTP source. Native Windows installs currently use CodexBar
-(`CODEXBAR_BIN` / `CODEXBAR_URL`) only.
+Linux uses the isolated Unix-socket collector shown above. Native macOS and
+Windows runs can point at `crossusage-cli` or a local CrossUsage
+`http://127.0.0.1:6736/v1/limits` URL.
 
 ## What it does
 
@@ -24,7 +22,7 @@ CLI/HTTP source. Native Windows installs currently use CodexBar
   and drops API spend dashboards (OpenAI Admin API, OpenRouter, and similar)
   plus telemetry-only providers.
 - Includes Cursor, Codex, Claude Code, Copilot, Gemini, and Grok in the default provider order.
-- Shows remaining capacity, reset time, and OpenUsage-style projected runouts
+- Shows remaining capacity, reset time, and projected runouts
   (`100% in …` / `~N% by reset`) as soon as a window + reset clock exist;
   history-based burn rates still enrich forecasts after enough samples.
 - Supports global and per-provider alert rules, quiet hours, and optional
@@ -42,7 +40,7 @@ CLI/HTTP source. Native Windows installs currently use CodexBar
 - Includes redacted health checks plus a targeted APNs and WidgetKit delivery
   test.
 
-Provider credentials never leave the machine running OpenUsage/CodexBar. On
+Provider credentials never leave the machine running CrossUsage. On
 Linux they remain isolated in the collector account; desktop mode runs as the
 signed-in user. The phone API does not return raw upstream payloads. The app
 and widget share the bearer token through a Keychain access group; App Group
@@ -64,9 +62,9 @@ defaults contain only cached display data and preferences.
 
 | Host | Support | Upstream source |
 |------|---------|-----------------|
-| Ubuntu 22.04/24.04, Debian 12 | Production service install (amd64/arm64) | Isolated OpenUsage/CodexBar collector |
-| macOS | Native foreground server (Intel/Apple silicon) | Local OpenUsage CLI, CodexBar CLI, or hub URL |
-| Windows 10/11 | Native foreground server (amd64/arm64) | `CODEXBAR_URL` or a compatible CLI build |
+| Ubuntu 22.04/24.04, Debian 12 | Production service install (amd64; arm64 if `crossusage-cli` is already on PATH) | Isolated CrossUsage collector |
+| macOS | Native foreground server (Intel/Apple silicon) | Local `crossusage-cli` or `CROSSUSAGE_URL` |
+| Windows 10/11 | Native foreground server (amd64) | `crossusage-cli` or `http://127.0.0.1:6736/v1/limits` |
 
 The managed Linux service remains the recommended always-on deployment because it
 provides service management and separates the server from provider credentials.
@@ -96,7 +94,7 @@ the controller terminal. Existing configuration and databases are retained.
 
 The supported release hosts are Ubuntu 22.04, Ubuntu 24.04, and Debian 12 on
 amd64 or arm64. The host needs systemd, Tailscale, an unprivileged account with
-a working OpenUsage install (preferred) or CodexBar session, and root or sudo
+a working CrossUsage CLI session, and root or sudo
 access for installation.
 
 The fastest setup downloads the latest release for the host architecture,
@@ -108,7 +106,7 @@ curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 ```
 
 The installer first asks for the SSH destination, then which unprivileged Linux
-account owns the working OpenUsage/CodexBar session. It invokes `sudo` only for remote
+account owns the working CrossUsage session. It invokes `sudo` only for remote
 system installation steps. You do not
 need to clone this repository or add command-line flags.
 When installation finishes, scan the QR in UsageWidget; the server URL and
@@ -125,7 +123,7 @@ sudo usagewidget-admin doctor
 sudo usagewidget-admin qr
 ```
 
-The installer verifies the release contents, installs OpenUsage or CodexBar when needed,
+The installer verifies the release contents, installs CrossUsage CLI when needed,
 preserves configuration and SQLite data on reruns, binds the API to
 `127.0.0.1:8377`, configures the Tailscale Serve `/usagewidget` route, and
 prints a setup QR when `qrencode` is available.
@@ -153,7 +151,7 @@ curl -fsSL https://usagewidget.edmundlim.systems/install.sh | bash
 It detects Intel or Apple silicon remotely, verifies and installs the matching
 release under `~/Library/Application Support/UsageWidget/App`, registers a
 LaunchAgent, configures Tailscale Serve, and prints the QR locally. It uses a
-working target-side `codexbar`/`CodexBarCLI` or a private CodexBar usage URL. Saved
+working target-side `crossusage-cli` or a CrossUsage `CROSSUSAGE_URL`. Saved
 configuration and SQLite data remain in the parent UsageWidget directory and
 survive application updates. Keep the terminal open. For a source checkout,
 build first with
@@ -171,13 +169,12 @@ irm https://usagewidget.edmundlim.systems/install.ps1 | iex
 
 It detects x64 or ARM64 remotely, verifies and installs the native bundle under
 `%LOCALAPPDATA%\UsageWidget\App`, registers a persistent scheduled task,
-configures Tailscale Serve, and prints the QR locally. It asks for a private
-CodexBar usage URL when no compatible target-side CLI exists. The
+configures Tailscale Serve, and prints the QR locally. It asks for a CrossUsage CLI or local
+`CROSSUSAGE_URL` when none is on PATH. The
 SQLite database and configuration stay in `%LOCALAPPDATA%\UsageWidget`, outside
-the replaceable application directory. CodexBar currently publishes
-standalone CLI archives for macOS and Linux, not Windows, so Windows normally
-uses a private CodexBar HTTP endpoint on another machine. A compatible Windows
-CLI can instead be selected with `-CodexBarBin C:\path\to\codexbar.exe`.
+the replaceable application directory. CrossUsage publishes a Windows CLI zip
+and a local HTTP API on `127.0.0.1:6736`. A CLI path can be selected with
+`-CrossUsageBin C:\path\to\crossusage-cli.exe`.
 Do not expose that upstream endpoint or UsageWidget port 8377 publicly.
 
 ### Local server development
@@ -187,25 +184,20 @@ Go 1.26.5 or newer is required by `server/go.mod`.
 ```bash
 cd server
 export USAGEWIDGET_TOKEN="$(openssl rand -hex 32)"
-export USAGE_SOURCE=auto
-# Preferred: OpenUsage CLI or hub
-export OPENUSAGE_BIN="$(command -v openusage)"
-# Legacy fallback: CodexBar HTTP
-# export USAGE_SOURCE=codexbar
-# export CODEXBAR_URL=http://127.0.0.1:8765/usage
+export CROSSUSAGE_BIN="$(command -v crossusage-cli)"
+# or talk to a running CrossUsage tray app:
+# export CROSSUSAGE_URL=http://127.0.0.1:6736/v1/limits
 go run ./cmd/usagewidgetd
 ```
 
 The data source is selected in this order:
 
-1. `OPENUSAGE_CMD`, a full OpenUsage command override.
-2. `OPENUSAGE_URL`, an OpenUsage hub `/v1/snapshots` URL.
-3. `OPENUSAGE_BIN`, an exact `openusage` path (bare CLI; output is always JSON).
-4. `OPENUSAGE_SOCKET`, an OpenUsage daemon UDS for `/v1/read-model`.
-5. Collector socket (Linux production default
-   `/run/usagewidget/collector.sock`) when `USAGE_SOURCE` is `auto`/`openusage`.
-6. Legacy CodexBar: `CODEXBAR_CMD`, `CODEXBAR_URL`, `CODEXBAR_BIN`, then the
-   same collector socket in CodexBar mode.
+1. `CROSSUSAGE_CMD`, a full CrossUsage command override.
+2. `CROSSUSAGE_URL`, usually `http://127.0.0.1:6736/v1/limits`.
+3. `CROSSUSAGE_BIN`, an exact `crossusage-cli` path. The collector runs `limits`
+   for the catalog plugin ids.
+4. Collector socket (Linux production default
+   `/run/usagewidget/collector.sock`).
 
 Providers without usage-limit gauges are omitted instead of becoming permanent
 noise rows.
@@ -326,5 +318,5 @@ device verification steps are tracked in [HUMANS.md](HUMANS.md).
 The public source is
 [github.com/EdmundLimBoEn/UsageWidget](https://github.com/EdmundLimBoEn/UsageWidget).
 Codex and GPT-5.6 were used to build the project. They are not runtime
-dependencies. The running app reads OpenUsage or CodexBar usage data on your
+dependencies. The running app reads CrossUsage limits data on your
 server.

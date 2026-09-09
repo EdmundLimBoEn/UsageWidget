@@ -1,16 +1,18 @@
 {
   "version": "dev",
   "schemaVersion": 1,
-  "codexbar": {
-    "version": "0.45.0",
+  "crossusage": {
+    "version": "1.4.4",
     "linux": {
       "amd64": {
-        "asset": "CodexBarCLI-v0.45.0-linux-x86_64.tar.gz",
-        "sha256": "e400c78b390896daf3899f77032802e2df2c709e12e7d15e596107ef6de32f9e"
-      },
-      "arm64": {
-        "asset": "CodexBarCLI-v0.45.0-linux-aarch64.tar.gz",
-        "sha256": "ddd215fa70bfecc27767baf07e2b33a48dcbe95ab9c58a0161945d9700af3ef4"
+        "asset": "crossusage-cli_1.4.4_linux_amd64.tar.gz",
+        "sha256": "d0d3f33048de6a79a52833b8b566272842e26a53761b7bb8f13893c3ed087c49"
+      }
+    },
+    "windows": {
+      "amd64": {
+        "asset": "crossusage-cli_1.4.4_windows_amd64.zip",
+        "sha256": "ce86c145ee56f62b128fe2e472927e256a15b0ada8e2bcfd1f63ffea568dac8a"
       }
     }
   }

@@ -1,18 +1,18 @@
 param(
-    [string]$CodexBarBin = $env:CODEXBAR_BIN,
-    [string]$CodexBarUrl = $env:CODEXBAR_URL,
+    [string]$CrossUsageBin = $env:CROSSUSAGE_BIN,
+    [string]$CrossUsageUrl = $env:CROSSUSAGE_URL,
     [string]$DataDirectory = "",
     [string]$ListenAddress = "127.0.0.1:8377"
 )
 
 $ErrorActionPreference = "Stop"
-$binWasPassed = $PSBoundParameters.ContainsKey("CodexBarBin")
-$urlWasPassed = $PSBoundParameters.ContainsKey("CodexBarUrl")
+$binWasPassed = $PSBoundParameters.ContainsKey("CrossUsageBin")
+$urlWasPassed = $PSBoundParameters.ContainsKey("CrossUsageUrl")
 $listenWasPassed = $PSBoundParameters.ContainsKey("ListenAddress")
 if ($binWasPassed -and $urlWasPassed -and
-    -not [string]::IsNullOrWhiteSpace($CodexBarBin) -and
-    -not [string]::IsNullOrWhiteSpace($CodexBarUrl)) {
-    throw "Pass only one of -CodexBarBin or -CodexBarUrl"
+    -not [string]::IsNullOrWhiteSpace($CrossUsageBin) -and
+    -not [string]::IsNullOrWhiteSpace($CrossUsageUrl)) {
+    throw "Pass only one of -CrossUsageBin or -CrossUsageUrl"
 }
 $root = $PSScriptRoot
 if (-not (Test-Path -LiteralPath (Join-Path $root "bin\usagewidgetd.exe") -PathType Leaf)) {
@@ -33,12 +33,12 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
     $configChanged = $false
     if ($binWasPassed) {
-        $config | Add-Member -NotePropertyName CODEXBAR_BIN -NotePropertyValue $CodexBarBin -Force
-        $config.PSObject.Properties.Remove("CODEXBAR_URL")
+        $config | Add-Member -NotePropertyName CROSSUSAGE_BIN -NotePropertyValue $CrossUsageBin -Force
+        $config.PSObject.Properties.Remove("CROSSUSAGE_URL")
         $configChanged = $true
     } elseif ($urlWasPassed) {
-        $config | Add-Member -NotePropertyName CODEXBAR_URL -NotePropertyValue $CodexBarUrl -Force
-        $config.PSObject.Properties.Remove("CODEXBAR_BIN")
+        $config | Add-Member -NotePropertyName CROSSUSAGE_URL -NotePropertyValue $CrossUsageUrl -Force
+        $config.PSObject.Properties.Remove("CROSSUSAGE_BIN")
         $configChanged = $true
     }
     if ($listenWasPassed) {
@@ -49,16 +49,16 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
     }
 } else {
-    if ([string]::IsNullOrWhiteSpace($CodexBarBin)) {
-        $command = Get-Command codexbar -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($CrossUsageBin)) {
+        $command = Get-Command crossusage-cli -ErrorAction SilentlyContinue
         if ($null -eq $command) {
-            $command = Get-Command CodexBarCLI -ErrorAction SilentlyContinue
+            $command = Get-Command crossusage-cli.exe -ErrorAction SilentlyContinue
         }
-        if ($null -eq $command -and [string]::IsNullOrWhiteSpace($CodexBarUrl)) {
-            throw "CodexBar has no official Windows CLI; pass -CodexBarUrl http://another-machine:8765/usage or -CodexBarBin for a compatible build"
+        if ($null -eq $command -and [string]::IsNullOrWhiteSpace($CrossUsageUrl)) {
+            throw "crossusage-cli was not found; pass -CrossUsageUrl http://127.0.0.1:6736/v1/limits or -CrossUsageBin for the CLI"
         }
         if ($null -ne $command) {
-            $CodexBarBin = $command.Source
+            $CrossUsageBin = $command.Source
         }
     }
 
@@ -71,17 +71,21 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         DB_PATH = (Join-Path $DataDirectory "usagewidget.db")
         LISTEN_ADDR = $ListenAddress
     }
-    if (-not [string]::IsNullOrWhiteSpace($CodexBarBin)) {
-        $config["CODEXBAR_BIN"] = $CodexBarBin
+    if (-not [string]::IsNullOrWhiteSpace($CrossUsageBin)) {
+        $config["CROSSUSAGE_BIN"] = $CrossUsageBin
+        $resources = Join-Path (Split-Path -Parent $CrossUsageBin) "resources"
+        if (Test-Path -LiteralPath (Join-Path $resources "bundled_plugins") -PathType Container) {
+            $config["CROSSUSAGE_RESOURCES"] = $resources
+        }
     } else {
-        $config["CODEXBAR_URL"] = $CodexBarUrl
+        $config["CROSSUSAGE_URL"] = $CrossUsageUrl
     }
     $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
     Write-Host "Created private configuration: $configPath"
 }
 
-foreach ($name in @("CODEXBAR_CMD", "CODEXBAR_URL", "CODEXBAR_BIN")) {
+foreach ($name in @("CROSSUSAGE_CMD", "CROSSUSAGE_URL", "CROSSUSAGE_BIN", "CROSSUSAGE_RESOURCES", "CODEXBAR_CMD", "CODEXBAR_URL", "CODEXBAR_BIN", "OPENUSAGE_CMD", "OPENUSAGE_URL", "OPENUSAGE_BIN")) {
     [Environment]::SetEnvironmentVariable($name, $null, "Process")
 }
 foreach ($property in $config.PSObject.Properties) {
@@ -90,13 +94,13 @@ foreach ($property in $config.PSObject.Properties) {
 if ([string]::IsNullOrWhiteSpace($env:USAGEWIDGET_TOKEN) -or $env:USAGEWIDGET_TOKEN.Length -lt 32) {
     throw "USAGEWIDGET_TOKEN must be at least 32 characters"
 }
-if ([string]::IsNullOrWhiteSpace($env:CODEXBAR_BIN) -and [string]::IsNullOrWhiteSpace($env:CODEXBAR_URL)) {
-    throw "CODEXBAR_BIN or CODEXBAR_URL must be configured"
+if ([string]::IsNullOrWhiteSpace($env:CROSSUSAGE_BIN) -and [string]::IsNullOrWhiteSpace($env:CROSSUSAGE_URL) -and [string]::IsNullOrWhiteSpace($env:CROSSUSAGE_CMD)) {
+    throw "CROSSUSAGE_BIN or CROSSUSAGE_URL must be configured"
 }
-if (-not [string]::IsNullOrWhiteSpace($env:CODEXBAR_BIN) -and
-    -not (Test-Path -LiteralPath $env:CODEXBAR_BIN -PathType Leaf) -and
-    $null -eq (Get-Command $env:CODEXBAR_BIN -ErrorAction SilentlyContinue)) {
-    throw "CodexBar CLI not found: $env:CODEXBAR_BIN"
+if (-not [string]::IsNullOrWhiteSpace($env:CROSSUSAGE_BIN) -and
+    -not (Test-Path -LiteralPath $env:CROSSUSAGE_BIN -PathType Leaf) -and
+    $null -eq (Get-Command $env:CROSSUSAGE_BIN -ErrorAction SilentlyContinue)) {
+    throw "CrossUsage CLI not found: $env:CROSSUSAGE_BIN"
 }
 
 Write-Host "UsageWidget is starting at http://$($env:LISTEN_ADDR) (press Control-C to stop)."

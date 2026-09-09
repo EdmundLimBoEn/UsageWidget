@@ -14,8 +14,7 @@ upgrade, use [the Linux deployment guide](server/deploy/README.md).
   the remote host and cross-compiles the matching binaries.
 - UsageWidget has already created `/etc/usagewidget/env`, its service account,
   data directory, and systemd units.
-- The selected collector user has a working OpenUsage install (preferred) or a
-  valid CodexBar session.
+- The selected collector user has a working CrossUsage CLI session.
 
 Do not print or commit `/etc/usagewidget/env`,
 `/etc/usagewidget/collector.env`, the SQLite database, a backup, or an APNs
@@ -61,7 +60,7 @@ The helper:
 Override the collector account only when automatic detection is wrong:
 
 ```bash
-USAGEWIDGET_COLLECTOR_USER=codexbar \
+USAGEWIDGET_COLLECTOR_USER=collector \
   USAGEWIDGET_DEPLOY_HOST=deploy@example-host \
   ./server/deploy/redeploy.sh
 ```
@@ -99,7 +98,7 @@ https://your-host.your-tailnet.ts.net/usagewidget/v1/health
 ```
 
 Healthy output has `service: "ok"`, `database: true`, and `polling: true`.
-`codexbar` and collector details identify upstream-session failures; APNs may be
+`upstream` and collector details identify upstream-session failures; APNs may be
 `false` for a deliberately dashboard-only installation.
 
 ## Logs and rollback
