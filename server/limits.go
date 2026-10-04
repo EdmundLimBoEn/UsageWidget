@@ -86,16 +86,20 @@ func CollectCrossUsageLimits(ctx context.Context, binary string) ([]byte, error)
 	ids := catalogPluginIDs()
 	raw, err := runCrossUsageCLI(ctx, binary, append([]string{"limits"}, ids...)...)
 	if err == nil && looksLikeLimitsV1(raw) {
-		return raw, nil
+		return attachDevinLimits(ctx, raw), nil
 	}
 	if err != nil && !isUnknownPlugin(err) && !looksLikeLimitsV1(raw) {
 		merged, mergeErr := collectLimitsByID(ctx, binary, ids)
 		if mergeErr == nil {
-			return merged, nil
+			return attachDevinLimits(ctx, merged), nil
 		}
 		return nil, err
 	}
-	return collectLimitsByID(ctx, binary, ids)
+	merged, mergeErr := collectLimitsByID(ctx, binary, ids)
+	if mergeErr != nil {
+		return nil, mergeErr
+	}
+	return attachDevinLimits(ctx, merged), nil
 }
 
 func collectLimitsByID(ctx context.Context, binary string, ids []string) ([]byte, error) {

@@ -239,6 +239,7 @@ Server variables:
 | `CROSSUSAGE_BIN` | unset | Exact `crossusage-cli` path |
 | `CROSSUSAGE_CMD` | unset | Full CrossUsage command override |
 | `CROSSUSAGE_RESOURCES` | unset | Directory containing `bundled_plugins/` |
+| `DEVIN_SERVICE_KEY` | unset | Optional Cognition GetTeamCreditBalance service key with Billing Read; omit Devin when unset |
 | `APNS_*` | unset | APNs signing configuration; all required to enable push |
 
 `/etc/usagewidget/collector.env` normally contains:
@@ -252,7 +253,10 @@ COLLECTOR_SOCKET=/run/usagewidget/collector.sock
 Source precedence is `CROSSUSAGE_CMD`, then `CROSSUSAGE_URL`, then
 `CROSSUSAGE_BIN`, then the collector socket. The collector runs
 `crossusage-cli limits` for the catalog plugin ids unless `COLLECTOR_ARGS`
-overrides it.
+overrides it. When `DEVIN_SERVICE_KEY` is set, it also POSTs Cognition's
+documented GetTeamCreditBalance endpoint and merges Devin into that payload.
+A missing key skips Devin; a failed Devin request records a provider error
+and still returns the other plugins.
 
 Do not point collector binaries at an account whose home must remain isolated
 from the daemon. The sidecar is the production path and exposes only

@@ -19,12 +19,13 @@ var providerCatalog = []providerCatalogEntry{
 	{ID: "copilot", Name: "Copilot", Aliases: []string{"github_copilot"}, CLI: "copilot"},
 	{ID: "gemini_cli", Name: "Gemini", Aliases: []string{"gemini", "antigravity"}, CLI: "gemini"},
 	{ID: "grok", Name: "Grok", Aliases: []string{"xai"}, CLI: "grok"},
+	{ID: "devin", Name: "Devin", Aliases: []string{"cognition", "windsurf", "codeium"}, CLI: "devin"},
 }
 
-var defaultProviderOrder = []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
+var defaultProviderOrder = []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"}
 
 func catalogPluginIDs() []string {
-	return []string{"cursor", "claude", "codex", "copilot", "grok", "antigravity"}
+	return []string{"cursor", "claude", "codex", "copilot", "grok", "antigravity", "devin"}
 }
 
 var (

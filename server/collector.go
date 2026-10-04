@@ -87,7 +87,7 @@ func (c *Collector) handleUsage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "collector returned invalid JSON", http.StatusBadGateway)
 		return
 	}
-	writeCollectedJSON(w, body)
+	writeCollectedJSON(w, attachDevinLimits(ctx, body))
 }
 
 func writeCollectedJSON(w http.ResponseWriter, body []byte) {

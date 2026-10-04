@@ -164,6 +164,7 @@ func TestPaceProjectionFitsInWindow(t *testing.T) {
 }
 
 func TestCollectCrossUsageLimitsMergesExtras(t *testing.T) {
+	t.Setenv(devinServiceKeyEnv, "")
 	dir := t.TempDir()
 	path := dir + "/crossusage-cli"
 	script := `#!/bin/sh

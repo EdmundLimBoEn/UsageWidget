@@ -84,7 +84,7 @@ func (c *CrossUsageClient) fetchCmd(ctx context.Context) ([]byte, error) {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if body, ok := extractJSONDocument(stdout.Bytes()); ok {
-			return body, nil
+			return attachDevinLimits(ctx, body), nil
 		}
 		return nil, fmt.Errorf("crossusage: run %q: %w: %s", strings.Join(c.Cmd, " "), err, strings.TrimSpace(stderr.String()))
 	}
@@ -92,7 +92,7 @@ func (c *CrossUsageClient) fetchCmd(ctx context.Context) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("crossusage: invalid JSON")
 	}
-	return body, nil
+	return attachDevinLimits(ctx, body), nil
 }
 
 func (c *CrossUsageClient) fetchHTTP(ctx context.Context) ([]byte, error) {
@@ -118,7 +118,7 @@ func (c *CrossUsageClient) fetchHTTP(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("crossusage: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 	if extracted, ok := extractJSONDocument(body); ok {
-		return extracted, nil
+		return attachDevinLimits(ctx, extracted), nil
 	}
-	return body, nil
+	return attachDevinLimits(ctx, body), nil
 }

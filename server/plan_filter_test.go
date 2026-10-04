@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,6 +24,30 @@ func TestKeepPlanProvider(t *testing.T) {
 	if !keepPlanProvider(Provider{ID: "antigravity", Windows: []Window{{Title: "Plan"}}}) {
 		t.Fatal("antigravity is the Gemini catalog member")
 	}
+	if !keepPlanProvider(Provider{ID: "devin", Windows: []Window{{Title: "Credits"}}}) {
+		t.Fatal("Devin plan credits must stay")
+	}
+	if !keepPlanProvider(Provider{ID: "cognition", Error: "authentication required"}) {
+		t.Fatal("Devin errors must stay so last-known usage can fill in")
+	}
+}
+
+func TestDefaultProviderOrderIncludesDevin(t *testing.T) {
+	want := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"}
+	if strings.Join(defaultProviderOrder, ",") != strings.Join(want, ",") {
+		t.Fatalf("defaultProviderOrder=%v", defaultProviderOrder)
+	}
+	if !inProviderCatalog("devin") || !inProviderCatalog("cognition") {
+		t.Fatal("Devin catalog membership")
+	}
+	order := sanitizeProviderIDs([]string{"cursor", "codex"}, true)
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Fatalf("filled order=%v", order)
+	}
+	hidden := sanitizeProviderIDs([]string{"cognition", "mystery"}, false)
+	if len(hidden) != 1 || hidden[0] != "devin" {
+		t.Fatalf("hidden=%v", hidden)
+	}
 }
 
 func TestCanonicalProviderID(t *testing.T) {
@@ -35,6 +60,9 @@ func TestCanonicalProviderID(t *testing.T) {
 		"github_copilot": "copilot",
 		"gemini":         "gemini_cli",
 		"antigravity":    "gemini_cli",
+		"cognition":      "devin",
+		"windsurf":       "devin",
+		"codeium":        "devin",
 		"openai":         "openai",
 	}
 	for in, want := range cases {

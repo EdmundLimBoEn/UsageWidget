@@ -61,6 +61,10 @@ committed to the repository.
   and confirm the private Tailscale route survives a reboot if desired.
 - [ ] Cursor Plan/Auto are collected from CrossUsage on the machine where Cursor is
   signed in. Put the collector on that same Linux, Mac, or Windows box.
+- [ ] For Devin, create a Devin Desktop / Windsurf service key with Billing
+  Read and put `DEVIN_SERVICE_KEY` in `/etc/usagewidget/collector.env` (Linux)
+  or the desktop env file. Do not put the key in the phone app or the
+  repository.
 - [ ] For Windows, install `crossusage-cli` or point `CROSSUSAGE_URL` at
   `http://127.0.0.1:6736/v1/limits` while the CrossUsage tray app is running.
 
