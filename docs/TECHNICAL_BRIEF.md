@@ -14,7 +14,7 @@ capacity/reset notifications across multiple AI providers.
 
 - AI tools expose several rate windows with different reset times; checking
   them individually interrupts work and makes it hard to plan capacity.
-- The primary user is a person who actively uses Cursor, Codex, Claude, Grok, or
+- The primary user is a person who actively uses Cursor, Codex, Claude, Grok, Devin, or
   other quota-backed providers and wants one glanceable view on their phone.
 - The value is not merely displaying a percentage. UsageWidget preserves the
   last known state, explains freshness, predicts likely exhaustion, and alerts
@@ -36,7 +36,8 @@ isolated CLI collector ── Unix socket ──► Go daemon ──► SQLite
 
 - The production deployment intentionally separates two Linux processes.
 - The collector runs as the unprivileged account that owns the CrossUsage login
-  sessions. It runs `crossusage-cli limits` for the catalog plugins, serializes requests, validates
+  sessions. It runs `crossusage-cli limits` for the catalog plugins, optionally
+  POSTs Cognition GetTeamCreditBalance when `DEVIN_SERVICE_KEY` is set, serializes requests, validates
   JSON, bounds output size, and exposes only `GET /usage` over a restricted Unix
   socket.
 - The main Go daemon has no need to read that account's home directory. It

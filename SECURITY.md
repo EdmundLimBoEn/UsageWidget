@@ -30,9 +30,10 @@ SQLite database private to that account.
   rotation invalidates every connected phone; distribute the replacement only
   through a newly generated private QR or another secure channel.
 - Keep `/etc/usagewidget/env`, `/etc/usagewidget/collector.env`, desktop
-  `server.env`/`server.json`, the APNs `.p8`,
+  `server.env`/`server.json`, the APNs `.p8`, optional `DEVIN_SERVICE_KEY`,
   SQLite database, and backups readable only by their intended service or
-  administrative accounts.
+  administrative accounts. Devin credentials stay on the collector host; they
+  never belong in the iOS app.
 - Treat setup QRs as bearer credentials. Do not put them in screenshots, issue
   reports, logs, chat transcripts, or release assets.
 - Backups include the database and bearer-token environment file. APNs material

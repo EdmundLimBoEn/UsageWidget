@@ -43,7 +43,7 @@ fi
 
 unset CROSSUSAGE_CMD CROSSUSAGE_URL CROSSUSAGE_BIN CROSSUSAGE_RESOURCES
 set -a
-# This file is private, generated locally, and may be edited to add APNS_* vars.
+# This file is private, generated locally, and may be edited to add APNS_* or DEVIN_SERVICE_KEY.
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a

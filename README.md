@@ -21,7 +21,7 @@ Windows runs can point at `crossusage-cli` or a local CrossUsage
 - Prefers plan/quota gauges (Cursor Plan + Auto, Codex/Claude 5h/7d windows)
   and drops API spend dashboards (OpenAI Admin API, OpenRouter, and similar)
   plus telemetry-only providers.
-- Includes Cursor, Codex, Claude Code, Copilot, Gemini, and Grok in the default provider order.
+- Includes Cursor, Codex, Claude Code, Copilot, Gemini, Grok, and Devin in the default provider order.
 - Shows remaining capacity, reset time, and projected runouts
   (`100% in …` / `~N% by reset`) as soon as a window + reset clock exist;
   history-based burn rates still enrich forecasts after enough samples.
@@ -185,6 +185,8 @@ Go 1.26.5 or newer is required by `server/go.mod`.
 cd server
 export USAGEWIDGET_TOKEN="$(openssl rand -hex 32)"
 export CROSSUSAGE_BIN="$(command -v crossusage-cli)"
+# optional Devin remaining-credits collector:
+# export DEVIN_SERVICE_KEY="your-billing-read-service-key"
 # or talk to a running CrossUsage tray app:
 # export CROSSUSAGE_URL=http://127.0.0.1:6736/v1/limits
 go run ./cmd/usagewidgetd
@@ -198,6 +200,16 @@ The data source is selected in this order:
    for the catalog plugin ids.
 4. Collector socket (Linux production default
    `/run/usagewidget/collector.sock`).
+
+Devin is collected from Cognition's
+[GetTeamCreditBalance](https://docs.devin.ai/desktop/accounts/api-reference/get-team-credit-balance)
+API, not from a hardcoded key. Set `DEVIN_SERVICE_KEY` to a Devin Desktop /
+Windsurf service key with **Billing Read**. On Linux, put it in
+`/etc/usagewidget/collector.env` so the key stays with the collector account.
+On macOS or Windows, put it in the same env file as the other server variables.
+If the key is unset, Devin is omitted and the rest of the poll still runs. If
+the key is set and the request fails, Devin appears as that provider error
+instead of failing Cursor, Codex, and the other plugins.
 
 Providers without usage-limit gauges are omitted instead of becoming permanent
 noise rows.
@@ -319,4 +331,4 @@ The public source is
 [github.com/EdmundLimBoEn/UsageWidget](https://github.com/EdmundLimBoEn/UsageWidget).
 Codex and GPT-5.6 were used to build the project. They are not runtime
 dependencies. The running app reads CrossUsage limits data on your
-server.
+server, plus Devin team credit balance when `DEVIN_SERVICE_KEY` is set.

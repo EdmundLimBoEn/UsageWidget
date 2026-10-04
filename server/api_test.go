@@ -147,10 +147,10 @@ func TestGetSettingsDefaults(t *testing.T) {
 	if got.PollIntervalMinutes != 5 {
 		t.Fatalf("expected default poll interval 5, got %d", got.PollIntervalMinutes)
 	}
-	if len(got.ProviderOrder) != 6 || got.ProviderOrder[0] != "cursor" {
+	if len(got.ProviderOrder) != 7 || got.ProviderOrder[0] != "cursor" {
 		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
 	}
-	wantOrder := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
+	wantOrder := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"}
 	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unexpected default provider order: %+v", got.ProviderOrder)
 	}
@@ -174,7 +174,7 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	if got.PollIntervalMinutes != 15 {
 		t.Fatalf("expected updated poll interval 15, got %d", got.PollIntervalMinutes)
 	}
-	wantOrder := []string{"cursor", "claude_code", "codex", "copilot", "gemini_cli", "grok"}
+	wantOrder := []string{"cursor", "claude_code", "codex", "copilot", "gemini_cli", "grok", "devin"}
 	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unexpected provider order: %+v", got.ProviderOrder)
 	}
@@ -195,6 +195,25 @@ func TestPutSettingsUpdatesFields(t *testing.T) {
 	}
 	if got2.PollIntervalMinutes != 15 {
 		t.Fatalf("expected persisted poll interval 15, got %d", got2.PollIntervalMinutes)
+	}
+}
+
+func TestPutSettingsAcceptsDevinHiddenAndOrder(t *testing.T) {
+	api, _ := newTestAPI(t)
+	body := []byte(`{"providerOrder":["devin","cursor"],"hiddenProviders":["cognition"]}`)
+	rec := doRequest(t, api, http.MethodPut, "/v1/settings", "secret-token", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got Settings
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ProviderOrder[0] != "devin" || got.ProviderOrder[1] != "cursor" {
+		t.Fatalf("order=%v", got.ProviderOrder)
+	}
+	if len(got.HiddenProviders) != 1 || got.HiddenProviders[0] != "devin" {
+		t.Fatalf("hidden=%v", got.HiddenProviders)
 	}
 }
 
@@ -509,7 +528,7 @@ func TestLoadSettingsPrunesHiddenAndPrependsCursor(t *testing.T) {
 	if len(got.HiddenProviders) != 1 || got.HiddenProviders[0] != "claude_code" {
 		t.Fatalf("hidden=%v", got.HiddenProviders)
 	}
-	wantOrder := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"}
+	wantOrder := []string{"cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"}
 	if strings.Join(got.ProviderOrder, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("order=%v", got.ProviderOrder)
 	}
