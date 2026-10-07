@@ -12,7 +12,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: DUU8J39BA7
     TARGETED_DEVICE_FAMILY: "1"
-    MARKETING_VERSION: "0.1"
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     # Avoid signing extra debug dylibs (common CodeSign/errSecInternalComponent site on device).
     ENABLE_DEBUG_DYLIB: NO
@@ -25,6 +25,8 @@ targets:
       - path: Sources/App
       - path: Sources/Core
       - path: Resources/Assets.xcassets
+        buildPhase: resources
+      - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     settings:
       base:
@@ -69,6 +71,8 @@ targets:
           - Info.plist
       - path: Sources/Core
       - path: Resources/Assets.xcassets
+        buildPhase: resources
+      - path: Resources/PrivacyInfo.xcprivacy
         buildPhase: resources
     info:
       path: Sources/Widget/Info.plist

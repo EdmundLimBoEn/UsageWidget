@@ -17,6 +17,7 @@ struct UsageWidgetApp: App {
                     appDelegate.model = model
                     UIApplication.shared.registerForRemoteNotifications()
                     Task {
+                        guard model.isConfigured else { return }
                         await model.refresh()
                         await model.registerTokensIfNeeded()
                     }
@@ -37,7 +38,7 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.isConfigured {
+            if model.homeSurface != .setup {
                 TabView {
                     NavigationStack {
                         DashboardView()

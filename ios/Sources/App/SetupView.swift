@@ -14,6 +14,19 @@ struct SetupView: View {
 
     var body: some View {
         Form {
+            if !model.isConfigured {
+                Section {
+                    Button {
+                        model.enterSamplePreview()
+                    } label: {
+                        Label("Preview with sample data", systemImage: "eye")
+                    }
+                    .accessibilityHint("Opens the dashboard with example capacity. This is not your usage.")
+                } footer: {
+                    Text("See remaining capacity, reset times, and alerts using sample data. This is not connected to a server and is not your usage.")
+                }
+            }
+
             Section {
                 TextField("https://your-host.your-tailnet.ts.net/usagewidget", text: $serverURL)
                     .textInputAutocapitalization(.never)
@@ -52,6 +65,17 @@ struct SetupView: View {
                     Label(statusText, systemImage: statusOK ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(statusOK ? .green : .red)
                 }
+            }
+
+            Section {
+                Link(destination: AppConstants.privacyPolicyURL) {
+                    Label("Privacy Policy", systemImage: "hand.raised")
+                }
+                Link(destination: AppConstants.supportURL) {
+                    Label("Support", systemImage: "questionmark.circle")
+                }
+            } footer: {
+                Text(AppConstants.affiliationDisclaimer)
             }
         }
         .navigationTitle("Connect")
