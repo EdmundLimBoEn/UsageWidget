@@ -52,6 +52,7 @@ defaults contain only cached display data and preferences.
 |------|---------|
 | `server/` | Go service, collector, SQLite store, event engine, APNs, and HTTP APIs |
 | `ios/` | SwiftUI app, WidgetKit extension, shared models, and XcodeGen project |
+| `review-worker/` | Always-on Cloudflare Worker that serves synthetic App Review API data |
 | `cli/usagewidget` | Local/server operations CLI |
 | `server-install.sh` | Linux release installer and `usagewidget-admin` lifecycle commands |
 | `server-setup.sh` | Interactive Mac-to-Linux source installation |
@@ -317,6 +318,48 @@ xcodebuild -exportArchive \
   -exportOptionsPlist ExportOptions.plist \
   -allowProvisioningUpdates
 ```
+
+GitHub Actions runs an unsigned iOS build and unit tests on every pull request
+and on push to `master` (`.github/workflows/ios-ci.yml`, macos-15, latest
+stable Xcode). A separate TestFlight workflow
+(`.github/workflows/ios-testflight.yml`) archives Release and uploads with
+the `asc` CLI on `workflow_dispatch` and on push to `master` that touches
+`ios/**`. It sets `CURRENT_PROJECT_VERSION` to `github.run_number + 1` so
+build numbers stay above the existing 0.1 (1).
+
+Set these repository secrets before the first TestFlight upload. The names
+match the working Lazy Man's Reminders workflow so the deploy bot can copy
+the same values:
+
+| Secret | Purpose |
+|--------|---------|
+| `ASC_KEY_ID` | App Store Connect API Key ID |
+| `ASC_ISSUER_ID` | App Store Connect Issuer ID |
+| `ASC_PRIVATE_KEY_B64` | Base64 of the `AuthKey_*.p8` App Store Connect API key |
+| `APPSTORE_CERTIFICATES_FILE_BASE64` | Base64 of the Apple Distribution `.p12` |
+| `APPSTORE_CERTIFICATES_PASSWORD` | Password for that `.p12` |
+
+Do not commit `.p8`, `.p12`, or signing passwords. Team `DUU8J39BA7` is
+already in `ios/project.yml`. The workflow resolves the App Store Connect app
+id from bundle id `systems.edmundlim.UsageWidget` at upload time.
+
+### App Review backend
+
+Guideline 2.1(a) needs a reachable backend. `review-worker/` is a Cloudflare
+Worker that serves the same `/v1/*` API as `usagewidgetd` with static
+synthetic data and a public demo token (not a production key).
+
+```bash
+cd review-worker
+npx wrangler deploy
+```
+
+Custom domain: `https://apple-review-testing.usagewidget.edmundlim.systems`  
+Token: `usagewidget-apple-review-only-not-a-secret`  
+Fallback: the Worker's `workers.dev` URL after deploy.
+
+See [review-worker/README.md](review-worker/README.md) for the exact deploy
+bot steps.
 
 Release tags (`v*`) run Go tests, shell syntax checks, installer tests, and
 build Linux, macOS, and Windows amd64/arm64 bundles through GitHub Actions.

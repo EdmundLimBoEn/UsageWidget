@@ -1,0 +1,108 @@
+# Unsigned iOS build + unit tests. Uses macos-15 and the latest stable Xcode
+# (never a beta). Does not require signing secrets.
+#
+# Triggers on every pull request and on push to master so a green check is
+# visible before TestFlight archives.
+
+name: iOS CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ios-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  ios:
+    name: Build and unit tests
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR_WAIT: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Confirm Xcode is not a beta
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcode-select -p
+          developer_dir="$(xcode-select -p)"
+          if echo "${developer_dir}" | grep -qi beta; then
+            echo "::error::Selected a beta Xcode at ${developer_dir}."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Build unsigned iOS app
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project UsageWidget.xcodeproj \
+            -scheme UsageWidget \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Pick iOS Simulator destination
+        id: sim
+        run: |
+          set -euo pipefail
+          destination="$(python3 scripts/pick-ios-simulator.py)"
+          echo "destination=${destination}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run unit tests
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project UsageWidget.xcodeproj \
+            -scheme UsageWidget \
+            -configuration Debug \
+            -destination "${{ steps.sim.outputs.destination }}" \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData" \
+            -resultBundlePath "${RUNNER_TEMP}/ios-tests.xcresult" \
+            -only-testing:UsageWidgetCoreTests \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test result summary
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -d "${RUNNER_TEMP}/ios-tests.xcresult" ]; then
+            xcrun xcresulttool get test-results summary --path "${RUNNER_TEMP}/ios-tests.xcresult" \
+              || echo "xcresulttool summary is unavailable on this Xcode."
+          fi
+
+      - name: Save test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ${{ runner.temp }}/ios-tests.xcresult

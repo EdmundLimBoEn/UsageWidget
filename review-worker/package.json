@@ -1,0 +1,18 @@
+{
+  "name": "usagewidget-apple-review",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/check-ios-schema.mjs && vitest run",
+    "typecheck": "wrangler types --include-runtime=false && tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "@cloudflare/workers-types": "^5.20261007.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.26.0"
+  }
+}
