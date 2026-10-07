@@ -11,6 +11,9 @@
 # Deploy bot: set these repository secrets before the first green upload.
 # Do not commit values, .p8/.p12 files, or signing material. Secret names match
 # the working lazy-mans-reminders workflow so the same bot config applies.
+# If any secret is empty, the workflow notices and skips archive/upload so the
+# run stays green (needed so this file can land on master before the signing
+# Mac is online).
 #
 #   ASC_KEY_ID                     App Store Connect API Key ID
 #   ASC_ISSUER_ID                  App Store Connect Issuer ID
@@ -45,7 +48,45 @@ defaults:
     shell: bash
 
 jobs:
+  secrets:
+    name: Check signing secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check signing and App Store Connect secrets
+        id: check
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+          APPSTORE_CERTIFICATES_FILE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          APPSTORE_CERTIFICATES_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+        run: |
+          set -euo pipefail
+          configured=true
+          for name in \
+            ASC_KEY_ID \
+            ASC_ISSUER_ID \
+            ASC_PRIVATE_KEY_B64 \
+            APPSTORE_CERTIFICATES_FILE_BASE64 \
+            APPSTORE_CERTIFICATES_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              configured=false
+            fi
+          done
+          if [ "${configured}" = true ]; then
+            echo "configured=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::TestFlight skipped: signing secrets not configured"
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   testflight:
+    needs: secrets
+    if: needs.secrets.outputs.configured == 'true'
     runs-on: macos-latest
     timeout-minutes: 90
     env:

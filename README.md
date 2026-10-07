@@ -329,7 +329,9 @@ build numbers stay above the existing 0.1 (1).
 
 Set these repository secrets before the first TestFlight upload. The names
 match the working Lazy Man's Reminders workflow so the deploy bot can copy
-the same values:
+the same values. If any secret is empty, the workflow posts
+`TestFlight skipped: signing secrets not configured` and skips
+archive/upload so the run stays green:
 
 | Secret | Purpose |
 |--------|---------|
