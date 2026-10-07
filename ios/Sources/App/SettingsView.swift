@@ -12,35 +12,37 @@ struct SettingsView: View {
             Section("Connection") {
                 LabeledContent("Server", value: model.credentials?.serverURL ?? "—")
                     .lineLimit(2)
-                Button("Edit connection…") { showSetup = true }
+                Button(model.isConfigured ? "Edit connection…" : "Connect a server…") { showSetup = true }
             }
 
-            Section("Polling") {
-                Picker("Interval", selection: $model.settings.pollIntervalMinutes) {
-                    ForEach(AppConstants.validPollIntervals, id: \.self) { m in
-                        Text(m == 1 ? "1 minute" : "\(m) minutes").tag(m)
+            if model.isConfigured {
+                Section("Polling") {
+                    Picker("Interval", selection: $model.settings.pollIntervalMinutes) {
+                        ForEach(AppConstants.validPollIntervals, id: \.self) { m in
+                            Text(m == 1 ? "1 minute" : "\(m) minutes").tag(m)
+                        }
+                    }
+                    .onChange(of: model.settings.pollIntervalMinutes) { _, _ in
+                        Task { await model.applySettings() }
                     }
                 }
-                .onChange(of: model.settings.pollIntervalMinutes) { _, _ in
-                    Task { await model.applySettings() }
-                }
-            }
 
-            Section {
-                NavigationLink { AlertRulesView() } label: { Label("Alert rules", systemImage: "bell.and.waves.left.and.right") }
-                Button("Request notification permission") {
-                    Task { await requestNotifications() }
+                Section {
+                    NavigationLink { AlertRulesView() } label: { Label("Alert rules", systemImage: "bell.and.waves.left.and.right") }
+                    Button("Request notification permission") {
+                        Task { await requestNotifications() }
+                    }
+                    LabeledContent("Permission", value: model.notificationStatusLabel)
+                } header: {
+                    Text("Alerts")
                 }
-                LabeledContent("Permission", value: model.notificationStatusLabel)
-            } header: {
-                Text("Alerts")
             }
 
             Section {
                 if let providers = model.snapshot?.providers {
                     ForEach(providerRows(providers), id: \.id) { row in
                         HStack {
-                            ProviderMark(providerID: row.id, providerName: row.name, size: 28, cornerRadius: 8)
+                            ProviderMark(size: 28, cornerRadius: 8)
                             Text(row.name)
                             Spacer()
                             Toggle(
@@ -66,20 +68,43 @@ struct SettingsView: View {
                 Text("Hiding a provider removes it from the widget and stops its alerts.")
             }
 
-            Section {
-                NavigationLink { ReadinessView() } label: {
-                    Label("Delivery", systemImage: "iphone.radiowaves.left.and.right")
+            if model.isConfigured {
+                Section {
+                    NavigationLink { ReadinessView() } label: {
+                        Label("Delivery", systemImage: "iphone.radiowaves.left.and.right")
+                    }
+                } header: {
+                    Text("This iPhone")
+                } footer: {
+                    Text("Checks that alerts and the widget can reach this phone.")
                 }
-            } header: {
-                Text("This iPhone")
-            } footer: {
-                Text("Checks that alerts and the widget can reach this phone.")
             }
 
             if let err = model.errorMessage {
                 Section {
                     Text(err).foregroundStyle(.red).font(.footnote)
                 }
+            }
+
+            if model.homeSurface == .samplePreview {
+                Section {
+                    Button("Exit sample preview") {
+                        model.exitSamplePreview()
+                    }
+                } footer: {
+                    Text("Return to server setup. Sample data is not saved.")
+                }
+            }
+
+            Section {
+                Link(destination: AppConstants.privacyPolicyURL) {
+                    Label("Privacy Policy", systemImage: "hand.raised")
+                }
+                Link(destination: AppConstants.supportURL) {
+                    Label("Support", systemImage: "questionmark.circle")
+                }
+            } footer: {
+                Text(AppConstants.affiliationDisclaimer)
             }
         }
         .navigationTitle("Settings")

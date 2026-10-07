@@ -178,6 +178,7 @@ public enum DataFreshness: Equatable, Sendable {
     case current
     case stale
     case unavailable
+    case sample
 }
 
 public struct ServerSettings: Codable, Equatable, Sendable {
@@ -368,6 +369,9 @@ public struct PollResult: Codable, Equatable, Sendable {
 public enum AppConstants {
     public static let appGroupID = "group.systems.edmundlim.usagewidget"
     public static let keychainService = "systems.edmundlim.UsageWidget"
+    public static let privacyPolicyURL = URL(string: "https://github.com/EdmundLimBoEn/UsageWidget/blob/master/PRIVACY.md")!
+    public static let supportURL = URL(string: "https://github.com/EdmundLimBoEn/UsageWidget/issues")!
+    public static let affiliationDisclaimer = "UsageWidget is not affiliated with, endorsed by, or sponsored by the providers whose usage it can display."
     public static var keychainAccessGroup: String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: "UsageWidgetKeychainAccessGroup") as? String,
               !value.isEmpty, !value.contains("$(") else { return nil }

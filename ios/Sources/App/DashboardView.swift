@@ -7,6 +7,10 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
+                if model.homeSurface == .samplePreview {
+                    sampleBanner
+                }
+
                 freshnessButton
 
                 if model.visibleProviders.isEmpty {
@@ -37,21 +41,26 @@ struct DashboardView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("Capacity")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    if model.isLoading {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "arrow.clockwise")
+            if model.homeSurface != .samplePreview {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        if model.isLoading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
                     }
+                    .disabled(model.isLoading)
+                    .accessibilityLabel("Refresh usage")
                 }
-                .disabled(model.isLoading)
-                .accessibilityLabel("Refresh usage")
             }
         }
-        .refreshable { await model.refresh() }
+        .refreshable {
+            guard model.homeSurface != .samplePreview else { return }
+            await model.refresh()
+        }
         .sheet(isPresented: $showDiagnostics) {
             NavigationStack {
                 HealthDiagnosticsView()
@@ -62,6 +71,21 @@ struct DashboardView: View {
                     }
             }
         }
+    }
+
+    private var sampleBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Sample data", systemImage: "eye")
+                .font(.subheadline.weight(.semibold))
+            Text("This dashboard shows example capacity so you can try the app before connecting a server. It is not your usage.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Sample data. This dashboard shows example capacity, not your usage.")
     }
 
     private var freshnessButton: some View {
@@ -81,15 +105,18 @@ struct DashboardView: View {
                         .lineLimit(2)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                if model.homeSurface != .samplePreview {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
             .padding(14)
             .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Shows collection and widget delivery details")
+        .disabled(model.homeSurface == .samplePreview)
+        .accessibilityHint(model.homeSurface == .samplePreview ? "Sample data is not collected from a server" : "Shows collection and widget delivery details")
     }
 
     private var freshnessTitle: String {
@@ -98,10 +125,14 @@ struct DashboardView: View {
         case .current: "Usage is current"
         case .stale: "Showing last known usage"
         case .unavailable: "Usage unavailable"
+        case .sample: "Sample data"
         }
     }
 
     private var freshnessDetail: String {
+        if model.homeSurface == .samplePreview {
+            return "Example remaining capacity and reset windows"
+        }
         if let detail = model.health?.collector?.lastError, model.freshness != .current {
             return detail
         }
@@ -114,6 +145,7 @@ struct DashboardView: View {
         case .current: "checkmark.circle.fill"
         case .stale: "clock.badge.exclamationmark"
         case .unavailable: "exclamationmark.circle.fill"
+        case .sample: "eye"
         }
     }
 
@@ -123,6 +155,7 @@ struct DashboardView: View {
         case .current: .green
         case .stale: .orange
         case .unavailable: .red
+        case .sample: .secondary
         }
     }
 }
@@ -135,7 +168,7 @@ struct ProviderCapacityCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 11) {
-                providerMark
+                ProviderMark(size: 34, cornerRadius: 9)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider.name)
                         .font(.headline)
@@ -188,10 +221,6 @@ struct ProviderCapacityCard: View {
         .padding(16)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityElement(children: .contain)
-    }
-
-    private var providerMark: some View {
-        ProviderMark(providerID: provider.id, providerName: provider.name, size: 34, cornerRadius: 9)
     }
 }
 

@@ -11,11 +11,24 @@ final class AppModel {
     var settings: ServerSettings = ServerSettings()
     var preferences: DisplayPreferences = DisplayPreferences()
     var isConfigured: Bool = false
+    var isPreviewingSample: Bool = false
     var isLoading: Bool = false
     var isTestingAction: Bool = false
     var errorMessage: String?
     var statusMessage: String?
     var notificationStatus: String = "unknown"
+
+    enum HomeSurface: Equatable {
+        case setup
+        case samplePreview
+        case live
+    }
+
+    var homeSurface: HomeSurface {
+        if isConfigured { return .live }
+        if isPreviewingSample { return .samplePreview }
+        return .setup
+    }
 
     var notificationStatusLabel: String {
         switch notificationStatus {
@@ -67,6 +80,7 @@ final class AppModel {
     }
 
     var freshness: DataFreshness {
+        if homeSurface == .samplePreview { return .sample }
         if isLoading { return .collecting }
         if snapshot == nil { return errorMessage == nil ? .collecting : .unavailable }
         if snapshot?.stale == true { return .stale }
@@ -92,13 +106,30 @@ final class AppModel {
         store.mirrorCredentials(nil)
         self.credentials = creds
         self.isConfigured = true
+        self.isPreviewingSample = false
         self.health = health
         self.errorMessage = nil
         await refresh()
         await registerTokensIfNeeded()
     }
 
+    func enterSamplePreview() {
+        isPreviewingSample = true
+        snapshot = SampleCapacity.snapshot
+        errorMessage = nil
+        statusMessage = nil
+    }
+
+    func exitSamplePreview() {
+        guard !isConfigured else { return }
+        isPreviewingSample = false
+        snapshot = store.loadSnapshot()
+        errorMessage = nil
+        statusMessage = nil
+    }
+
     func refresh() async {
+        guard isConfigured else { return }
         isLoading = true
         defer { isLoading = false }
         do {
@@ -127,6 +158,11 @@ final class AppModel {
     }
 
     func applySettings() async {
+        guard isConfigured else {
+            try? store.savePreferences(preferences)
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
         do {
             let client = try client()
             var next = settings
