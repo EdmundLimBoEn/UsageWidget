@@ -1,0 +1,262 @@
+# Hosted TestFlight path for UsageWidget.
+# Modeled on EdmundLimBoEn/lazy-mans-reminders .github/workflows/ios-testflight.yml.
+# Uses macos-latest + latest-stable Xcode (never Xcode-beta). App Store Connect
+# rejects Xcode beta uploads.
+#
+# CURRENT_PROJECT_VERSION is github.run_number + 1 so every archive is above the
+# existing 0.1 (1) floor in ios/project.yml. Export also sets
+# manageAppVersionAndBuildNumber so App Store Connect can still raise
+# CFBundleVersion if a number was already used.
+#
+# Deploy bot: set these repository secrets before the first green upload.
+# Do not commit values, .p8/.p12 files, or signing material. Secret names match
+# the working lazy-mans-reminders workflow so the same bot config applies.
+# If any secret is empty, the workflow notices and skips archive/upload so the
+# run stays green (needed so this file can land on master before the signing
+# Mac is online).
+#
+#   ASC_KEY_ID                     App Store Connect API Key ID
+#   ASC_ISSUER_ID                  App Store Connect Issuer ID
+#   ASC_PRIVATE_KEY_B64            base64 of the AuthKey_*.p8 (App Store Connect API)
+#   APPSTORE_CERTIFICATES_FILE_BASE64   base64 of the Apple Distribution .p12
+#   APPSTORE_CERTIFICATES_PASSWORD      password for that .p12
+#
+# Team DUU8J39BA7 is a public identifier (also in ios/project.yml).
+# The App Store Connect app id is resolved at upload time from bundle id
+# systems.edmundlim.UsageWidget. The same API key is used for
+# xcodebuild -allowProvisioningUpdates and `asc builds upload`.
+
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-testflight.yml"
+
+concurrency:
+  group: ios-testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  secrets:
+    name: Check signing secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check signing and App Store Connect secrets
+        id: check
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+          APPSTORE_CERTIFICATES_FILE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          APPSTORE_CERTIFICATES_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+        run: |
+          set -euo pipefail
+          configured=true
+          for name in \
+            ASC_KEY_ID \
+            ASC_ISSUER_ID \
+            ASC_PRIVATE_KEY_B64 \
+            APPSTORE_CERTIFICATES_FILE_BASE64 \
+            APPSTORE_CERTIFICATES_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              configured=false
+            fi
+          done
+          if [ "${configured}" = true ]; then
+            echo "configured=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::notice::TestFlight skipped: signing secrets not configured"
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+  testflight:
+    needs: secrets
+    if: needs.secrets.outputs.configured == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR_WAIT: "1"
+      APPLE_TEAM_ID: "DUU8J39BA7"
+      ASC_BUNDLE_ID: "systems.edmundlim.UsageWidget"
+      ASC_BYPASS_KEYCHAIN: "1"
+      ASC_NO_UPDATE: "1"
+      ASC_UPLOAD_TIMEOUT: 15m
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+      APPSTORE_CERTIFICATES_FILE_BASE64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+      APPSTORE_CERTIFICATES_PASSWORD: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require signing and App Store Connect secrets
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            ASC_KEY_ID \
+            ASC_ISSUER_ID \
+            ASC_PRIVATE_KEY_B64 \
+            APPSTORE_CERTIFICATES_FILE_BASE64 \
+            APPSTORE_CERTIFICATES_PASSWORD
+          do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required secret ${name}. See the comment at the top of .github/workflows/ios-testflight.yml and README.md."
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Select stable Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Confirm Xcode is not a beta
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcode-select -p
+          xcodebuild -showsdks
+          developer_dir="$(xcode-select -p)"
+          if echo "${developer_dir}" | grep -qi beta; then
+            echo "::error::Selected a beta Xcode at ${developer_dir}. App Store Connect will reject the upload."
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+
+      - name: Install asc
+        uses: rudrankriyam/setup-asc@v1
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate --spec project.yml
+
+      - name: Import Apple Distribution certificate
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.APPSTORE_CERTIFICATES_FILE_BASE64 }}
+          p12-password: ${{ secrets.APPSTORE_CERTIFICATES_PASSWORD }}
+
+      - name: Write App Store Connect API key
+        run: |
+          set -euo pipefail
+          key_dir="${RUNNER_TEMP}/private_keys"
+          mkdir -p "${key_dir}"
+          key_path="${key_dir}/AuthKey_${ASC_KEY_ID}.p8"
+          python3 -c 'import base64,os,pathlib,sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(os.environ["ASC_PRIVATE_KEY_B64"]))' "${key_path}"
+          chmod 600 "${key_path}"
+          echo "APP_STORE_CONNECT_API_KEY_PATH=${key_path}" >> "${GITHUB_ENV}"
+
+      - name: Resolve App Store Connect app id
+        run: |
+          set -euo pipefail
+          app_id="$(
+            asc api GET /v1/apps --query "filter[bundleId]=${ASC_BUNDLE_ID}" \
+              | python3 scripts/resolve-asc-app-id.py "${ASC_BUNDLE_ID}"
+          )"
+          echo "ASC_APP_ID=${app_id}" >> "${GITHUB_ENV}"
+          echo "Resolved App Store Connect app id ${app_id} for ${ASC_BUNDLE_ID}"
+
+      - name: Resolve packages
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project UsageWidget.xcodeproj \
+            -scheme UsageWidget
+
+      - name: Archive Release
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          # github.run_number starts at 1; existing App Store build is 0.1 (1).
+          build_number=$((GITHUB_RUN_NUMBER + 1))
+          archive_path="${RUNNER_TEMP}/UsageWidget.xcarchive"
+          echo "ARCHIVE_PATH=${archive_path}" >> "${GITHUB_ENV}"
+          echo "BUILD_NUMBER=${build_number}" >> "${GITHUB_ENV}"
+          echo "CURRENT_PROJECT_VERSION=${build_number}"
+          xcodebuild archive \
+            -project UsageWidget.xcodeproj \
+            -scheme UsageWidget \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "${archive_path}" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${APP_STORE_CONNECT_API_KEY_PATH}" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+            CURRENT_PROJECT_VERSION="${build_number}"
+
+      - name: Export IPA for App Store Connect
+        run: |
+          set -euo pipefail
+          export_path="${RUNNER_TEMP}/ipa"
+          options_path="${RUNNER_TEMP}/ExportOptions.plist"
+          mkdir -p "${export_path}"
+          cat > "${options_path}" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>destination</key>
+            <string>export</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>teamID</key>
+            <string>${APPLE_TEAM_ID}</string>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>manageAppVersionAndBuildNumber</key>
+            <true/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath "${ARCHIVE_PATH}" \
+            -exportPath "${export_path}" \
+            -exportOptionsPlist "${options_path}" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "${APP_STORE_CONNECT_API_KEY_PATH}" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}"
+          ipa_path="$(find "${export_path}" -name '*.ipa' -print -quit)"
+          if [ -z "${ipa_path}" ]; then
+            echo "::error::Export succeeded but no IPA was produced."
+            ls -la "${export_path}"
+            exit 1
+          fi
+          echo "IPA_PATH=${ipa_path}" >> "${GITHUB_ENV}"
+          echo "Exported ${ipa_path} (CURRENT_PROJECT_VERSION=${BUILD_NUMBER})"
+
+      - name: Upload build to App Store Connect
+        run: |
+          set -euo pipefail
+          asc builds upload --app "${ASC_APP_ID}" --ipa "${IPA_PATH}"

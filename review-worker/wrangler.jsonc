@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "usagewidget-apple-review",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-07",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  },
+  "routes": [
+    {
+      "pattern": "apple-review-testing.usagewidget.edmundlim.systems",
+      "custom_domain": true
+    }
+  ]
+}
