@@ -41,6 +41,23 @@ as production. A wrong token returns HTTP 401.
 
 Optional Tailscale-style prefix `https://apple-review-testing.usagewidget.edmundlim.systems/usagewidget` also works.
 
+## App Review notes and live check
+
+Paste `metadata/review/notes.txt` into App Store Connect > App Review
+Information > Notes. `tests/review_notes_test.sh` (runs in CI) fails if the
+notes' host or token drift from `src/token.ts`, or if a quoted UI label no
+longer exists in the app.
+
+Check the deployed host (manual, not part of CI):
+
+```bash
+scripts/check-review-host.sh                        # https://<REVIEW_HOST>/v1/health
+scripts/check-review-host.sh http://127.0.0.1:8787  # against `npx wrangler dev`
+```
+
+It exits 0 only for HTTP 200 with `"service":"ok"`, and explains 401 and
+Cloudflare 52x/530 (Worker not deployed / custom domain not attached).
+
 ## Verify locally
 
 ```bash
