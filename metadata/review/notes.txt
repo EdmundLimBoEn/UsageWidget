@@ -1,0 +1,19 @@
+UsageWidget is a free, self-hosted client. There is no account, no sign-in, no in-app purchase, no subscription, and no ads. The developer does not run a hosted service for users: each user installs the open-source UsageWidget companion server on a Linux, macOS, or Windows machine they control, and the iPhone app connects only to that server's URL with a bearer token the user's own server generates.
+
+HOW TO REVIEW WITHOUT A SERVER
+On first launch the Connect screen has a "Preview with sample data" button at the top. Tap it to open the dashboard with clearly labeled example capacity (not real usage). No network connection or credentials are needed for this path.
+
+HOW TO REVIEW THE FULL CONNECTED FLOW
+We run an always-on review server that serves the same API as the companion server, with static synthetic data. On the Connect screen, enter:
+
+Server URL: https://apple-review-testing.usagewidget.edmundlim.systems
+Bearer token: usagewidget-apple-review-only-not-a-secret
+
+Then tap "Test connection". The dashboard, the large Home Screen widget ("Capacity"), and Settings will show synthetic usage for sample providers. The token is a public demo credential that only unlocks this fake data; it is not a production secret. A wrong token is rejected with "Token rejected".
+
+OTHER NOTES
+- Camera: used only for the optional "Scan QR" setup button, which reads a setup QR printed by the user's own server installer. Manual entry works without the camera.
+- Notifications are optional. The dashboard and widget work without granting notification permission.
+- Provider names identify services the user already uses. UsageWidget is not affiliated with, endorsed by, or sponsored by those providers and ships no provider logos.
+- Privacy policy: https://github.com/EdmundLimBoEn/UsageWidget/blob/master/PRIVACY.md
+- Source and server installer: https://github.com/EdmundLimBoEn/UsageWidget
