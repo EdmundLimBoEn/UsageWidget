@@ -88,7 +88,9 @@ struct ProviderUsageWidget: Widget {
 struct ProviderWidgetView: View {
     let entry: ProviderEntry
 
-    private let maxRows = 4
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var maxRows: Int { CapacityLayout.widgetRowLimit(for: dynamicTypeSize) }
 
     var body: some View {
         let visible = ProviderDisplay.orderedVisible(
