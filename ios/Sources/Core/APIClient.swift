@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 public enum APIError: Error, Equatable {
     case invalidBaseURL
@@ -144,6 +145,60 @@ public struct APIClient: Sendable {
             return try JSONCoding.decoder.decode(T.self, from: data)
         } catch {
             throw APIError.decoding(String(describing: error))
+        }
+    }
+}
+
+/// Short, user-facing text for errors shown in the widget (and anywhere else a
+/// raw `String(describing: error)` would leak enum cases, HTTP bodies, or
+/// URLSession jargon). Keep every message short enough for one widget line.
+public enum FriendlyError {
+    public static let notSetUp = "Not set up"
+    public static let cantReachServer = "Can't reach server"
+    public static let tokenRejected = "Token rejected"
+    public static let wrongServerPath = "Server path not found"
+    public static let unexpectedResponse = "Unexpected server response"
+    public static let unlockToRefresh = "Unlock iPhone to refresh"
+    public static let generic = "Couldn't refresh"
+
+    public static func serverError(_ status: Int) -> String { "Server error (\(status))" }
+
+    public static func message(for error: Error) -> String {
+        switch error {
+        case let api as APIError:
+            return message(for: api)
+        case let keychain as KeychainError:
+            switch keychain {
+            case .unexpectedStatus(errSecInteractionNotAllowed):
+                return unlockToRefresh
+            case .unexpectedStatus, .missingValue:
+                return notSetUp
+            }
+        case is URLError:
+            return cantReachServer
+        case is DecodingError:
+            return unexpectedResponse
+        default:
+            return generic
+        }
+    }
+
+    private static func message(for error: APIError) -> String {
+        switch error {
+        case .invalidBaseURL:
+            return notSetUp
+        case .transport:
+            return cantReachServer
+        case let .httpStatus(status, _):
+            switch status {
+            case 401, 403: return tokenRejected
+            case 404: return wrongServerPath
+            // Cloudflare/tunnel origin errors mean the server itself is unreachable.
+            case 502, 503, 504, 521, 522, 523, 530: return cantReachServer
+            default: return serverError(status)
+            }
+        case .invalidResponse, .decoding:
+            return unexpectedResponse
         }
     }
 }

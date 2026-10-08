@@ -1,4 +1,5 @@
 import XCTest
+import Security
 @testable import UsageWidget
 
 final class ModelsAndStoreTests: XCTestCase {
@@ -219,5 +220,111 @@ final class APIClientRequestTests: XCTestCase {
     func testNormalizedBaseURLStripsTrailingSlash() {
         let url = APIClient.normalizedBaseURL("https://host.example/usagewidget/")
         XCTAssertEqual(url?.absoluteString, "https://host.example/usagewidget")
+    }
+}
+
+/// Serves canned failures keyed by host so APIClient can be driven through its
+/// real request/response/decoding path without a network or shared mutable state.
+final class FailureStubProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url!
+        func respond(_ status: Int, _ body: String) {
+            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        switch url.host {
+        case "unauthorized.test": respond(401, #"{"error":"unauthorized"}"#)
+        case "tunnel-down.test": respond(530, "error code: 1033")
+        case "boom.test": respond(500, "panic: secret stack trace")
+        case "garbage.test": respond(200, "<html>captive portal</html>")
+        case "missing.test": respond(404, "404 page not found")
+        default: client?.urlProtocol(self, didFailWithError: URLError(.cannotFindHost))
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+final class FriendlyErrorTests: XCTestCase {
+    private func stubbedClient(host: String) -> APIClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [FailureStubProtocol.self]
+        return APIClient(baseURL: URL(string: "https://\(host)/usagewidget")!, token: "t", session: URLSession(configuration: config), timeout: 5)
+    }
+
+    private func widgetMessage(host: String) async -> String {
+        do {
+            _ = try await stubbedClient(host: host).fetchSnapshot()
+            return "no error"
+        } catch {
+            return FriendlyError.message(for: error)
+        }
+    }
+
+    func testAPIClientFailuresProduceFriendlyWidgetText() async {
+        let cases: [(host: String, expected: String)] = [
+            ("unauthorized.test", "Token rejected"),
+            ("tunnel-down.test", "Can't reach server"),
+            ("unreachable.test", "Can't reach server"),
+            ("boom.test", "Server error (500)"),
+            ("garbage.test", "Unexpected server response"),
+            ("missing.test", "Server path not found"),
+        ]
+        for c in cases {
+            let message = await widgetMessage(host: c.host)
+            XCTAssertEqual(message, c.expected, "host \(c.host)")
+        }
+    }
+
+    func testConcreteErrorsMapToConcreteStrings() {
+        let cases: [(Error, String)] = [
+            (APIError.httpStatus(401, nil), "Token rejected"),
+            (APIError.httpStatus(403, "forbidden"), "Token rejected"),
+            (APIError.httpStatus(502, nil), "Can't reach server"),
+            (APIError.httpStatus(418, nil), "Server error (418)"),
+            (APIError.transport("The request timed out."), "Can't reach server"),
+            (APIError.invalidBaseURL, "Not set up"),
+            (APIError.invalidResponse, "Unexpected server response"),
+            (APIError.decoding("keyNotFound(providers)"), "Unexpected server response"),
+            (KeychainError.missingValue, "Not set up"),
+            (KeychainError.unexpectedStatus(errSecItemNotFound), "Not set up"),
+            (KeychainError.unexpectedStatus(errSecInteractionNotAllowed), "Unlock iPhone to refresh"),
+            (URLError(.timedOut), "Can't reach server"),
+            (CocoaError(.fileReadCorruptFile), "Couldn't refresh"),
+        ]
+        for (error, expected) in cases {
+            XCTAssertEqual(FriendlyError.message(for: error), expected, "\(error)")
+        }
+    }
+
+    func testRealDecodingFailureIsUnexpectedResponse() {
+        do {
+            _ = try JSONCoding.decoder.decode(Snapshot.self, from: Data(#"{"stale":false}"#.utf8))
+            XCTFail("decode should fail")
+        } catch {
+            XCTAssertEqual(FriendlyError.message(for: error), "Unexpected server response")
+        }
+    }
+
+    func testMessagesNeverEchoServerBodiesAndStayShort() {
+        let leaky: [Error] = [
+            APIError.httpStatus(401, "Bearer usagewidget-secret-token rejected"),
+            APIError.httpStatus(500, "panic: /home/user/.config/usagewidget/env"),
+            APIError.decoding("typeMismatch(Swift.Double, Swift.DecodingError.Context(codingPath: ...))"),
+            APIError.transport("A server with the specified hostname could not be found."),
+        ]
+        for error in leaky {
+            let message = FriendlyError.message(for: error)
+            XCTAssertFalse(message.contains("secret"), message)
+            XCTAssertFalse(message.contains("/home"), message)
+            XCTAssertFalse(message.contains("Swift."), message)
+            XCTAssertFalse(message.contains("hostname"), message)
+            XCTAssertLessThanOrEqual(message.count, 28, "widget line too long: \(message)")
+        }
     }
 }
