@@ -58,6 +58,26 @@ jobs:
         run: npx wrangler deploy --dry-run --outdir "${RUNNER_TEMP}/review-worker-dist"
         env:
           WRANGLER_SEND_METRICS: "false"
+      - name: Boot the Worker locally (wrangler dev) and check /v1/health
+        # Catches Workers that bundle fine but cannot start in workerd. Local only;
+        # this never touches the deployed review host.
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          set -euo pipefail
+          log="${RUNNER_TEMP}/wrangler-dev.log"
+          npx wrangler dev --port 8787 --ip 127.0.0.1 >"${log}" 2>&1 &
+          pid=$!
+          trap 'kill "${pid}" 2>/dev/null || true; pkill -x workerd || true' EXIT
+          for _ in $(seq 1 60); do
+            curl -s -o /dev/null http://127.0.0.1:8787/ && break
+            kill -0 "${pid}" 2>/dev/null || break
+            sleep 1
+          done
+          if ! ../scripts/check-review-host.sh http://127.0.0.1:8787; then
+            echo "::group::wrangler dev log"; cat "${log}"; echo "::endgroup::"
+            exit 1
+          fi
 
   scripts:
     name: Shell and install worker tests

@@ -13,7 +13,7 @@ Then tap "Test connection". The dashboard, the large Home Screen widget ("Capaci
 
 OTHER NOTES
 - Camera: used only for the optional "Scan QR" setup button, which reads a setup QR printed by the user's own server installer. Manual entry works without the camera.
-- Notifications are optional. The dashboard and widget work without granting notification permission.
+- Notifications are optional. The dashboard and widget work without granting notification permission. Push alerts only exist when a user runs their own server with APNs credentials; otherwise Settings > Delivery shows "Dashboard-only" and the app never asks for notification permission. The review server simulates an APNs-configured server so the alert settings are visible; its device test does not send a real push.
 - Provider names identify services the user already uses. UsageWidget is not affiliated with, endorsed by, or sponsored by those providers and ships no provider logos.
 - Privacy policy: https://github.com/EdmundLimBoEn/UsageWidget/blob/master/PRIVACY.md
 - Source and server installer: https://github.com/EdmundLimBoEn/UsageWidget
