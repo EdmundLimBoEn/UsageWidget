@@ -328,3 +328,103 @@ final class FriendlyErrorTests: XCTestCase {
         }
     }
 }
+
+final class DeliveryStateTests: XCTestCase {
+    /// What usagewidgetd returns from /v1/health and /v1/readiness when no APNs key is configured.
+    private let dashboardOnlyHealthJSON = #"{"service":"ok","codexbar":true,"database":true,"polling":true,"apns":false}"#
+    private let dashboardOnlyReadinessJSON = """
+    {"ready":false,"checkedAt":"2026-10-08T03:00:00Z","checks":[
+      {"id":"collector","title":"Collector","status":"pass","detail":"Collector is healthy","core":true},
+      {"id":"snapshot","title":"Latest snapshot","status":"pass","detail":"The latest snapshot is current","core":true},
+      {"id":"apns","title":"APNs configuration","status":"fail","detail":"APNs is not configured; dashboard-only mode is available","core":true},
+      {"id":"device","title":"Device registration","status":"pass","detail":"This device is registered","core":true},
+      {"id":"alert_token","title":"Alert token","status":"fail","detail":"No alert token is registered","core":true},
+      {"id":"widget_token","title":"Widget token","status":"warning","detail":"No widget push token is registered","core":true},
+      {"id":"delivery_test","title":"Recent device test","status":"fail","detail":"No device-specific test has been recorded","core":true}
+    ]}
+    """
+
+    private func health(apns: Bool) -> Health {
+        Health(service: "ok", codexbar: true, database: true, polling: true, apns: apns)
+    }
+
+    private func readiness(ready: Bool) throws -> Readiness {
+        let json = #"{"ready":\#(ready),"checkedAt":"2026-10-08T03:00:00Z","checks":[]}"#
+        return try JSONCoding.decoder.decode(Readiness.self, from: Data(json.utf8))
+    }
+
+    func testServerWithoutAPNsIsDashboardOnlyNotNeedsAttention() throws {
+        let health = try JSONCoding.decoder.decode(Health.self, from: Data(dashboardOnlyHealthJSON.utf8))
+        let readiness = try JSONCoding.decoder.decode(Readiness.self, from: Data(dashboardOnlyReadinessJSON.utf8))
+        XCTAssertFalse(readiness.ready, "server marks readiness false without APNs")
+        for authorized in [false, true] {
+            let state = DeliveryState.evaluate(health: health, readiness: readiness, notificationsAuthorized: authorized)
+            XCTAssertEqual(state, .dashboardOnly)
+            XCTAssertNotEqual(state.title, "Needs attention")
+        }
+        // Also before readiness has loaded: health alone decides.
+        XCTAssertEqual(DeliveryState.evaluate(health: health, readiness: nil, notificationsAuthorized: false), .dashboardOnly)
+        XCTAssertFalse(DeliveryState.offersNotificationPermission(health: health))
+    }
+
+    func testDashboardOnlyHidesPushOnlyChecksButKeepsFixableOnes() throws {
+        let readiness = try JSONCoding.decoder.decode(Readiness.self, from: Data(dashboardOnlyReadinessJSON.utf8))
+        XCTAssertEqual(DeliveryState.dashboardOnly.relevantChecks(readiness.checks).map(\.id), ["collector", "snapshot", "device"])
+        XCTAssertEqual(DeliveryState.needsAttention.relevantChecks(readiness.checks).count, 7)
+    }
+
+    func testAPNsServerStates() throws {
+        let push = health(apns: true)
+        XCTAssertEqual(DeliveryState.evaluate(health: push, readiness: try readiness(ready: true), notificationsAuthorized: true), .ready)
+        XCTAssertEqual(DeliveryState.evaluate(health: push, readiness: try readiness(ready: true), notificationsAuthorized: false), .needsAttention)
+        XCTAssertEqual(DeliveryState.evaluate(health: push, readiness: try readiness(ready: false), notificationsAuthorized: true), .needsAttention)
+        XCTAssertEqual(DeliveryState.evaluate(health: push, readiness: nil, notificationsAuthorized: true), .checking)
+        XCTAssertTrue(DeliveryState.offersNotificationPermission(health: push))
+    }
+
+    func testUnknownHealthIsCheckingAndStillOffersPermission() {
+        XCTAssertEqual(DeliveryState.evaluate(health: nil, readiness: nil, notificationsAuthorized: false), .checking)
+        XCTAssertTrue(DeliveryState.offersNotificationPermission(health: nil))
+    }
+
+    func testDashboardOnlyCopyExplainsWidgetScheduleAndNoAlerts() {
+        XCTAssertEqual(DeliveryState.dashboardOnly.title, "Dashboard-only")
+        let text = DeliveryState.dashboardOnly.explanation
+        XCTAssertTrue(text.contains("widget refreshes on its own schedule"), text)
+        XCTAssertTrue(text.contains("no alerts"), text)
+        XCTAssertTrue(text.contains("APNs"), text)
+    }
+}
+
+@MainActor
+final class AppModelDeliveryTests: XCTestCase {
+    private func makeModel() -> AppModel {
+        AppModel(
+            keychain: KeychainStore(service: "usagewidget.tests.\(UUID().uuidString)", accessGroup: nil),
+            store: SnapshotStore.temporary()
+        )
+    }
+
+    func testModelUsesHealthToPickDashboardOnly() {
+        let model = makeModel()
+        model.notificationStatus = "denied"
+        XCTAssertEqual(model.deliveryState, .checking)
+        XCTAssertTrue(model.offersNotificationPermission)
+
+        model.health = Health(service: "ok", codexbar: true, database: true, polling: true, apns: false)
+        XCTAssertEqual(model.deliveryState, .dashboardOnly)
+        XCTAssertFalse(model.offersNotificationPermission)
+
+        model.health?.apns = true
+        XCTAssertEqual(model.deliveryState, .checking, "APNs server still needs readiness before Ready/Needs attention")
+        XCTAssertTrue(model.offersNotificationPermission)
+    }
+
+    func testNotificationsAuthorizedMatchesLocalStatuses() {
+        let model = makeModel()
+        for (status, expected) in [("authorized", true), ("provisional", true), ("ephemeral", true), ("denied", false), ("not determined", false), ("unknown", false)] {
+            model.notificationStatus = status
+            XCTAssertEqual(model.notificationsAuthorized, expected, status)
+        }
+    }
+}

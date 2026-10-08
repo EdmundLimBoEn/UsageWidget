@@ -173,6 +173,66 @@ public struct WidgetDeliveryHealth: Codable, Equatable, Sendable {
     public var lastError: String?
 }
 
+/// How this iPhone gets updates from the connected server.
+///
+/// A self-hosted server without APNs credentials reports `apns == false` in
+/// `/v1/health`. That is a supported setup, not a fault: the dashboard and
+/// widget still work, there are just no push alerts. Only a server with APNs
+/// configured should ever lead to a notification-permission prompt.
+public enum DeliveryState: Equatable, Sendable {
+    /// Health/readiness not loaded yet.
+    case checking
+    /// Server has no APNs credentials: no alerts, widget refreshes on iOS's schedule.
+    case dashboardOnly
+    /// APNs configured, readiness checks pass, and notifications are allowed.
+    case ready
+    /// APNs configured but something (permission, collector, device test) fails.
+    case needsAttention
+
+    public static func evaluate(health: Health?, readiness: Readiness?, notificationsAuthorized: Bool) -> DeliveryState {
+        guard let health else { return .checking }
+        guard health.apns else { return .dashboardOnly }
+        guard let readiness else { return .checking }
+        return readiness.ready && notificationsAuthorized ? .ready : .needsAttention
+    }
+
+    /// Server readiness checks (see server/api.go) that only matter when pushes are sent.
+    public static let pushOnlyCheckIDs: Set<String> = ["apns", "alert_token", "widget_token", "delivery_test"]
+
+    /// In dashboard-only mode the push-only checks always "fail" by design; hide them so
+    /// the list only shows things the user can actually fix (collector, snapshot, ...).
+    public func relevantChecks(_ checks: [ReadinessCheck]) -> [ReadinessCheck] {
+        guard self == .dashboardOnly else { return checks }
+        return checks.filter { !Self.pushOnlyCheckIDs.contains($0.id) }
+    }
+
+    /// Never ask for notification permission when the server has told us it cannot
+    /// send pushes. While health is unknown (not loaded yet, offline) keep offering it.
+    public static func offersNotificationPermission(health: Health?) -> Bool {
+        health?.apns != false
+    }
+
+    public var title: String {
+        switch self {
+        case .checking: "Checking delivery"
+        case .dashboardOnly: "Dashboard-only"
+        case .ready: "Ready"
+        case .needsAttention: "Needs attention"
+        }
+    }
+
+    public var explanation: String {
+        switch self {
+        case .checking:
+            "Loading delivery checks from your server."
+        case .dashboardOnly:
+            "Your server isn't set up to send push notifications, so there are no alerts. The dashboard updates when you open the app. The widget refreshes on its own schedule, which iOS controls, so it can lag behind the dashboard. Alerts need a self-hosted server with APNs configured."
+        case .ready, .needsAttention:
+            "Alerts and the widget need notification permission, a working collector, and a recent APNs test."
+        }
+    }
+}
+
 public enum DataFreshness: Equatable, Sendable {
     case collecting
     case current
