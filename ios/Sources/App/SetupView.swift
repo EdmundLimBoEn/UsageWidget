@@ -124,7 +124,7 @@ struct SetupView: View {
             }
         } catch {
             statusOK = false
-            statusText = String(describing: error)
+            statusText = FriendlyError.message(for: error)
         }
     }
 }

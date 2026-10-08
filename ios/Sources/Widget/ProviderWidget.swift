@@ -35,8 +35,15 @@ struct UsageTimelineProvider: TimelineProvider {
         let prefs = store.loadPreferences()
         let cached = store.loadSnapshot()
 
-        guard let creds = try? KeychainStore.shared.load() else {
-            return ProviderEntry(date: Date(), snapshot: cached, preferences: prefs, fetchError: "Not configured")
+        let creds: ConnectionCredentials
+        do {
+            guard let saved = try KeychainStore.shared.load() else {
+                return ProviderEntry(date: Date(), snapshot: cached, preferences: prefs, fetchError: FriendlyError.notSetUp)
+            }
+            creds = saved
+        } catch {
+            // e.g. errSecInteractionNotAllowed before first unlock: not the same as "never set up".
+            return ProviderEntry(date: Date(), snapshot: cached, preferences: prefs, fetchError: FriendlyError.message(for: error))
         }
 
         do {
@@ -49,7 +56,7 @@ struct UsageTimelineProvider: TimelineProvider {
             if stale != nil {
                 stale?.stale = true
             }
-            return ProviderEntry(date: Date(), snapshot: stale, preferences: prefs, fetchError: String(describing: error))
+            return ProviderEntry(date: Date(), snapshot: stale, preferences: prefs, fetchError: FriendlyError.message(for: error))
         }
     }
 
