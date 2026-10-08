@@ -28,13 +28,23 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    NavigationLink { AlertRulesView() } label: { Label("Alert rules", systemImage: "bell.and.waves.left.and.right") }
-                    Button("Request notification permission") {
-                        Task { await requestNotifications() }
+                    if model.deliveryState == .dashboardOnly {
+                        LabeledContent("Delivery", value: DeliveryState.dashboardOnly.title)
+                    } else {
+                        NavigationLink { AlertRulesView() } label: { Label("Alert rules", systemImage: "bell.and.waves.left.and.right") }
+                        if model.offersNotificationPermission {
+                            Button("Request notification permission") {
+                                Task { await requestNotifications() }
+                            }
+                        }
+                        LabeledContent("Permission", value: model.notificationStatusLabel)
                     }
-                    LabeledContent("Permission", value: model.notificationStatusLabel)
                 } header: {
                     Text("Alerts")
+                } footer: {
+                    if model.deliveryState == .dashboardOnly {
+                        Text("Your server isn't set up to send push notifications. The widget refreshes on its own schedule, which iOS controls. Alerts need a self-hosted server with APNs configured.")
+                    }
                 }
             }
 
@@ -140,6 +150,7 @@ struct SettingsView: View {
     }
 
     private func requestNotifications() async {
+        guard model.offersNotificationPermission else { return }
         do {
             let granted = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])

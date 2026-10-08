@@ -124,8 +124,46 @@ if "not affiliated" not in description:
 if "self-hosted" not in description and "companion server" not in description:
     fail("version description must describe the self-hosted companion server")
 
+# App Store users get dashboard-only delivery unless they run their own server
+# with APNs credentials. Metadata must not promise alerts unconditionally.
+push_words = re.compile(r"\b(alert|alerts|notification|notifications|push|notify)\b", re.I)
+raw_description = meta.get("description") or ""
+for sentence in re.split(r"(?<=[.!?])\s+|\n+", raw_description):
+    if push_words.search(sentence) and not ("apns" in sentence.lower() and "self-hosted" in sentence.lower()):
+        fail(f"description promises alerts without the self-hosted APNs condition: {sentence.strip()!r}")
+if "dashboard-only" not in description:
+    fail("description must say UsageWidget is dashboard-only without a self-hosted APNs setup")
+for field in ("promotionalText", "keywords"):
+    if push_words.search(meta.get(field) or ""):
+        fail(f"{field} must not advertise alerts/notifications: {meta.get(field)!r}")
+app_info = json.loads((root / "metadata/app-info/en-US.json").read_text())
+for field in ("name", "subtitle"):
+    if push_words.search(app_info.get(field) or ""):
+        fail(f"app-info {field} must not advertise alerts/notifications: {app_info.get(field)!r}")
+
+# The in-app dashboard-only state must exist and must gate the permission prompt.
+models = (root / "ios/Sources/Core/Models.swift").read_text()
+if 'case .dashboardOnly: "Dashboard-only"' not in models:
+    fail("Models.swift must define the Dashboard-only delivery title")
+if "health?.apns != false" not in models:
+    fail("offersNotificationPermission must be driven by Health.apns")
+for view in ("ios/Sources/App/ReadinessView.swift", "ios/Sources/App/SettingsView.swift"):
+    text = (root / view).read_text()
+    for call in re.finditer(r"requestAuthorization\(", text):
+        # The enclosing function must bail out when the server can't push.
+        func_start = text.rfind("func ", 0, call.start())
+        if "guard model.offersNotificationPermission" not in text[func_start:call.start()]:
+            fail(f"{view}: requestAuthorization is not guarded by model.offersNotificationPermission")
+    if "Request notification permission" in text and "if model.offersNotificationPermission" not in text:
+        fail(f"{view}: permission button is shown without checking offersNotificationPermission")
+for path in (root / "ios/Sources").rglob("*.swift"):
+    if path.name in ("ReadinessView.swift", "SettingsView.swift"):
+        continue
+    if "requestAuthorization(" in path.read_text():
+        fail(f"{path.relative_to(root)} requests notification permission outside the gated views")
+
 if errors:
     print("\n".join(f"FAIL: {item}" for item in errors), file=sys.stderr)
     sys.exit(1)
-print("ok: privacy manifest, project wiring, trademarks, and metadata 1.0")
+print("ok: privacy manifest, project wiring, trademarks, metadata 1.0, dashboard-only delivery")
 PY

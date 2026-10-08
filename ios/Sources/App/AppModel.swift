@@ -44,6 +44,18 @@ final class AppModel {
 
     var readiness: Readiness?
 
+    var notificationsAuthorized: Bool {
+        ["authorized", "provisional", "ephemeral"].contains(notificationStatus)
+    }
+
+    var offersNotificationPermission: Bool {
+        DeliveryState.offersNotificationPermission(health: health)
+    }
+
+    var deliveryState: DeliveryState {
+        DeliveryState.evaluate(health: health, readiness: readiness, notificationsAuthorized: notificationsAuthorized)
+    }
+
     private let keychain: KeychainStore
     private let store: SnapshotStore
     private(set) var credentials: ConnectionCredentials?
@@ -194,7 +206,13 @@ final class AppModel {
 
     func refreshReadiness() async {
         do {
-            readiness = try await client().fetchReadiness(deviceID: store.deviceID())
+            let client = try client()
+            let deviceID = store.deviceID()
+            async let healthTask = client.fetchHealth()
+            async let readinessTask = client.fetchReadiness(deviceID: deviceID)
+            let (latestHealth, latestReadiness) = try await (healthTask, readinessTask)
+            health = latestHealth
+            readiness = latestReadiness
             let local = await UNUserNotificationCenter.current().notificationSettings()
             switch local.authorizationStatus {
             case .authorized: notificationStatus = "authorized"
