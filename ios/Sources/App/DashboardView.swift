@@ -163,38 +163,29 @@ struct DashboardView: View {
 struct ProviderCapacityCard: View {
     let provider: Provider
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     private var leadingWindow: UsageWindow? { provider.windows.first }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 11) {
-                ProviderMark(size: 34, cornerRadius: 9)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(provider.name)
-                        .font(.headline)
-                    if provider.stale && !provider.windows.isEmpty {
-                        Text("Showing last known usage")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    } else if let error = provider.error, !error.isEmpty {
-                        Text("Source needs attention")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    } else if let credits = provider.credits {
-                        Text("\(credits.availableCount) reset credits")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            if CapacityLayout.stacksCardHeader(for: dynamicTypeSize) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 11) {
+                        ProviderMark(size: 34, cornerRadius: 9)
+                        nameBlock
+                    }
+                    if let window = leadingWindow {
+                        percentBlock(window, alignment: .leading)
                     }
                 }
-                Spacer()
-                if let window = leadingWindow {
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(String(format: "%.0f%%", window.remainingPercent))
-                            .font(.system(size: 30, weight: .semibold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(capacityTint(window.remainingPercent))
-                        Text("remaining")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 11) {
+                    ProviderMark(size: 34, cornerRadius: 9)
+                    nameBlock
+                    Spacer()
+                    if let window = leadingWindow {
+                        percentBlock(window, alignment: .trailing)
                     }
                 }
             }
@@ -221,6 +212,55 @@ struct ProviderCapacityCard: View {
         .padding(16)
         .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityElement(children: .contain)
+    }
+
+    private var nameBlock: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(provider.name)
+                .font(.headline)
+            if provider.stale && !provider.windows.isEmpty {
+                Text("Showing last known usage")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if let error = provider.error, !error.isEmpty {
+                Text("Source needs attention")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if let credits = provider.credits {
+                Text("\(credits.availableCount) reset credits")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func percentBlock(_ window: UsageWindow, alignment: HorizontalAlignment) -> some View {
+        VStack(alignment: alignment, spacing: 0) {
+            CapacityPercentText(remaining: window.remainingPercent)
+            Text("remaining")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// The big "NN%" on each dashboard card. Sized with @ScaledMetric so it follows
+/// Dynamic Type (it used to be a fixed 30pt that ignored the user's text size).
+struct CapacityPercentText: View {
+    let remaining: Double
+
+    @ScaledMetric(relativeTo: .largeTitle) private var size: CGFloat = CapacityLayout.percentBaseSize
+
+    init(remaining: Double) {
+        self.remaining = remaining
+    }
+
+    var body: some View {
+        Text(String(format: "%.0f%%", remaining))
+            .font(.system(size: size, weight: .semibold, design: .rounded).monospacedDigit())
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .foregroundStyle(capacityTint(remaining))
     }
 }
 
