@@ -70,26 +70,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Pick iOS Simulator destination
-        id: sim
-        run: |
-          set -euo pipefail
-          destination="$(python3 scripts/pick-ios-simulator.py)"
-          echo "destination=${destination}" >> "${GITHUB_OUTPUT}"
-
       - name: Run unit tests
-        working-directory: ios
-        run: |
-          set -euo pipefail
-          xcodebuild test \
-            -project UsageWidget.xcodeproj \
-            -scheme UsageWidget \
-            -configuration Debug \
-            -destination "${{ steps.sim.outputs.destination }}" \
-            -derivedDataPath "${RUNNER_TEMP}/DerivedData" \
-            -resultBundlePath "${RUNNER_TEMP}/ios-tests.xcresult" \
-            -only-testing:UsageWidgetCoreTests \
-            CODE_SIGNING_ALLOWED=NO
+        env:
+          RESULT_BUNDLE_PATH: ${{ runner.temp }}/ios-tests.xcresult
+          DERIVED_DATA_PATH: ${{ runner.temp }}/DerivedData
+        run: ./scripts/ios-unit-tests.sh
 
       - name: Test result summary
         if: always()

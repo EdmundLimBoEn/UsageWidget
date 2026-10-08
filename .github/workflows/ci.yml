@@ -1,0 +1,82 @@
+# Linux checks for everything that does not need a Mac: Go server tests,
+# the App Review worker (tests + wrangler dry-run bundle), shell tests, and the
+# install worker test. Needs no secrets and deploys nothing.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  go:
+    name: Go tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: go vet
+        working-directory: server
+        run: go vet ./...
+      - name: go test
+        working-directory: server
+        run: go test ./...
+
+  review-worker:
+    name: Review worker tests and dry-run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: review-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: review-worker/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - name: wrangler deploy --dry-run (bundle only, no deploy)
+        run: npx wrangler deploy --dry-run --outdir "${RUNNER_TEMP}/review-worker-dist"
+        env:
+          WRANGLER_SEND_METRICS: "false"
+
+  scripts:
+    name: Shell and install worker tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: bash -n
+        run: bash -n server-install.sh server-setup.sh cli/usagewidget scripts/*.sh tests/*.sh
+      - name: tests/*.sh
+        run: |
+          set -euo pipefail
+          for t in tests/*.sh; do
+            echo "::group::${t}"
+            bash "${t}"
+            echo "::endgroup::"
+          done
+      - name: Install worker test
+        run: node tests/install_worker_test.mjs
