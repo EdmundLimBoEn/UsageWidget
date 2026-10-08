@@ -35,6 +35,8 @@ on:
     paths:
       - "ios/**"
       - ".github/workflows/ios-testflight.yml"
+      - "scripts/ios-unit-tests.sh"
+      - "scripts/pick-ios-simulator.py"
 
 concurrency:
   group: ios-testflight-${{ github.ref }}
@@ -186,6 +188,12 @@ jobs:
           xcodebuild -resolvePackageDependencies \
             -project UsageWidget.xcodeproj \
             -scheme UsageWidget
+
+      - name: Run unit tests (gate before archive)
+        env:
+          RESULT_BUNDLE_PATH: ${{ runner.temp }}/ios-tests.xcresult
+          DERIVED_DATA_PATH: ${{ runner.temp }}/DerivedDataTests
+        run: ./scripts/ios-unit-tests.sh
 
       - name: Archive Release
         working-directory: ios
