@@ -16,9 +16,10 @@ struct UsageTimelineProvider: AppIntentTimelineProvider {
 
     func snapshot(for configuration: ProviderWidgetIntent, in context: Context) async -> ProviderEntry {
         if context.isPreview {
+            let store = SnapshotStore.shared
             return ProviderEntry(
-                date: Date(), snapshot: Self.sampleSnapshot,
-                preferences: SnapshotStore.shared.loadPreferences(), fetchError: nil,
+                date: Date(), snapshot: store.loadSnapshot() ?? Self.sampleSnapshot,
+                preferences: store.loadPreferences(), fetchError: nil,
                 selectedProviderIDs: configuration.selectedIDs
             )
         }
