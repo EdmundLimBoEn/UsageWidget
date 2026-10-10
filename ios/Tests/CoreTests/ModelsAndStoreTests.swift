@@ -428,3 +428,107 @@ final class AppModelDeliveryTests: XCTestCase {
         }
     }
 }
+
+
+final class ProviderAvailabilityTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testAllProvidersAppearBeforeFirstSnapshot() {
+        let rows = ProviderCatalog.settingsRows(snapshot: nil, order: [], confirmed: false)
+        XCTAssertEqual(rows.map(\.id), ProviderCatalog.defaultOrder)
+        XCTAssertFalse(rows.contains { $0.available })
+        XCTAssertTrue(rows.allSatisfy { $0.status == "missing" })
+    }
+
+    func testLegacySnapshotDecodesWithoutCatalog() throws {
+        let data = Data("""
+        {"fetchedAt":"2026-07-17T12:00:00Z","stale":false,"pollIntervalMinutes":5,"providers":[]}
+        """.utf8)
+        let snapshot = try JSONCoding.decoder.decode(Snapshot.self, from: data)
+        XCTAssertNil(snapshot.providerCatalog)
+        let rows = ProviderCatalog.settingsRows(snapshot: snapshot, order: [], confirmed: true, now: now)
+        XCTAssertEqual(rows.map(\.id), ProviderCatalog.defaultOrder)
+        XCTAssertFalse(rows.contains { $0.available })
+    }
+
+    func testCatalogDecodesHiddenAndMissingProviders() throws {
+        let data = Data("""
+        {"fetchedAt":"2026-07-17T12:00:00Z","stale":false,"pollIntervalMinutes":5,"providers":[],
+         "providerCatalog":[{"id":"claude_code","name":"Claude Code","available":true,"status":"available"}]}
+        """.utf8)
+        let snapshot = try JSONCoding.decoder.decode(Snapshot.self, from: data)
+        let rows = ProviderCatalog.settingsRows(snapshot: snapshot, order: ["claude", "claude_code", "unknown"], confirmed: true, now: snapshot.fetchedAt)
+        XCTAssertEqual(rows.count, ProviderCatalog.defaultOrder.count)
+        XCTAssertEqual(rows.first?.id, "claude_code")
+        XCTAssertEqual(rows.first?.available, true)
+        XCTAssertEqual(rows.first?.statusText, "Connected on backend")
+        XCTAssertFalse(rows.first { $0.id == "cursor" }!.available)
+    }
+
+    func testCachedStaleOrFailedRefreshDoesNotUnlockCatalog() {
+        var snapshot = Snapshot(fetchedAt: now, stale: false, providers: [], pollIntervalMinutes: 5,
+            providerCatalog: [ProviderAvailability(id: "codex", name: "Codex", available: true, status: "available")])
+        func available(_ confirmed: Bool, _ time: Date) -> Bool {
+            ProviderCatalog.settingsRows(snapshot: snapshot, order: [], confirmed: confirmed, now: time).first { $0.id == "codex" }!.available
+        }
+        XCTAssertTrue(available(true, now))
+        XCTAssertFalse(available(false, now))
+        XCTAssertFalse(available(true, now.addingTimeInterval(601)))
+        snapshot.stale = true
+        XCTAssertFalse(available(true, now))
+        snapshot.stale = false
+        snapshot.providerCatalog?[0].available = false
+        snapshot.providerCatalog?[0].status = "error"
+        XCTAssertFalse(available(true, now))
+    }
+
+    func testLegacyFreshUsageConfirmsOnlyReturnedProvider() {
+        let provider = Provider(id: "claude", name: "Claude", windows: [
+            UsageWindow(id: "claude.session", key: "session", title: "Session", usedPercent: 20, remainingPercent: 80)
+        ])
+        var snapshot = Snapshot(fetchedAt: now, stale: false, providers: [provider], pollIntervalMinutes: 5)
+        func row() -> ProviderAvailability {
+            ProviderCatalog.settingsRows(snapshot: snapshot, order: [], confirmed: true, now: now).first { $0.id == "claude_code" }!
+        }
+        XCTAssertTrue(row().available)
+        snapshot.providers[0].stale = true
+        XCTAssertFalse(row().available)
+        snapshot.providers[0].stale = false
+        snapshot.providers[0].error = "login expired"
+        XCTAssertFalse(row().available)
+        snapshot.providers = []
+        XCTAssertFalse(row().available)
+    }
+
+    func testUnavailableCatalogNeverEntersVisibleUsage() {
+        let snapshot = Snapshot(fetchedAt: now, stale: false, providers: [], pollIntervalMinutes: 5,
+            providerCatalog: ProviderCatalog.entries)
+        XCTAssertEqual(ProviderCatalog.settingsRows(snapshot: snapshot, order: [], confirmed: true, now: now).count, 7)
+        XCTAssertTrue(ProviderDisplay.orderedVisible(providers: snapshot.providers, order: ProviderCatalog.defaultOrder, hidden: []).isEmpty)
+    }
+}
+
+@MainActor
+final class AppModelProviderAvailabilityTests: XCTestCase {
+    func testUnavailableRowCannotChangeHiddenPreference() {
+        let model = AppModel(keychain: KeychainStore(service: "tests.availability.\(UUID().uuidString)", accessGroup: nil), store: SnapshotStore.temporary())
+        model.preferences.hiddenProviders = ["codex"]
+        model.snapshot = SampleCapacity.snapshot
+        model.setHidden("codex", hidden: false)
+        XCTAssertEqual(model.preferences.hiddenProviders, ["codex"])
+        XCTAssertFalse(model.providerRows.contains { $0.available })
+    }
+
+    func testLoginDoesNotAutoToggleHiddenChoiceAndRowsCanMove() {
+        let model = AppModel(keychain: KeychainStore(service: "tests.availability.\(UUID().uuidString)", accessGroup: nil), store: SnapshotStore.temporary())
+        model.preferences.hiddenProviders = ["codex"]
+        model.enterSamplePreview()
+        XCTAssertTrue(model.providerRows.first { $0.id == "codex" }!.available)
+        XCTAssertEqual(model.preferences.hiddenProviders, ["codex"])
+        model.preferences.providerOrder = ["grok"]
+        let rows = model.providerRows.map(\.id)
+        model.moveProvider(from: IndexSet(integer: 1), to: rows.count)
+        XCTAssertEqual(model.preferences.providerOrder, [rows[0]] + Array(rows.dropFirst(2)) + [rows[1]])
+        XCTAssertEqual(model.preferences.hiddenProviders, ["codex"])
+    }
+}

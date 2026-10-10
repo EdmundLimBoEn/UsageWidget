@@ -148,6 +148,7 @@ func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
 	snapshot, err := Normalize(body, settings.PollIntervalMinutes, result.PolledAt)
 	if err != nil {
 		log.Printf("poller: normalize failed: %v", err)
+		p.markStale()
 		result.Error = err.Error()
 		return result
 	}

@@ -6,13 +6,15 @@ public struct Snapshot: Codable, Equatable, Sendable {
     public var providers: [Provider]
     public var pollIntervalMinutes: Int
     public var sourceKind: String?
+    public var providerCatalog: [ProviderAvailability]?
 
-    public init(fetchedAt: Date, stale: Bool, providers: [Provider], pollIntervalMinutes: Int, sourceKind: String? = nil) {
+    public init(fetchedAt: Date, stale: Bool, providers: [Provider], pollIntervalMinutes: Int, sourceKind: String? = nil, providerCatalog: [ProviderAvailability]? = nil) {
         self.fetchedAt = fetchedAt
         self.stale = stale
         self.providers = providers
         self.pollIntervalMinutes = pollIntervalMinutes
         self.sourceKind = sourceKind
+        self.providerCatalog = providerCatalog
     }
 }
 
@@ -500,8 +502,78 @@ public enum ForecastText {
     }
 }
 
+public struct ProviderAvailability: Codable, Equatable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    public var available: Bool
+    public var status: String
+
+    public init(id: String, name: String, available: Bool = false, status: String = "missing") {
+        self.id = id
+        self.name = name
+        self.available = available
+        self.status = status
+    }
+
+    public var statusText: String {
+        switch status {
+        case "available": "Connected on backend"
+        case "stale": "Refresh backend to check availability"
+        case "error": "Check login and collection on backend"
+        default: "Log in on the machine running CrossUsage"
+        }
+    }
+}
+
 public enum ProviderCatalog {
-    public static let defaultOrder = ["cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"]
+    public static let entries = [
+        ProviderAvailability(id: "cursor", name: "Cursor"),
+        ProviderAvailability(id: "codex", name: "Codex"),
+        ProviderAvailability(id: "claude_code", name: "Claude Code"),
+        ProviderAvailability(id: "copilot", name: "Copilot"),
+        ProviderAvailability(id: "gemini_cli", name: "Gemini"),
+        ProviderAvailability(id: "grok", name: "Grok"),
+        ProviderAvailability(id: "devin", name: "Devin"),
+    ]
+    public static let defaultOrder = entries.map(\.id)
+
+    public static func canonicalID(_ id: String) -> String {
+        let normalized = id.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .replacingOccurrences(of: "-", with: "_").replacingOccurrences(of: " ", with: "_")
+        switch normalized {
+        case "cursor_ai", "cursor_ide": return "cursor"
+        case "codex_cli": return "codex"
+        case "claude": return "claude_code"
+        case "github_copilot": return "copilot"
+        case "gemini", "antigravity": return "gemini_cli"
+        case "xai": return "grok"
+        case "cognition", "windsurf", "codeium": return "devin"
+        default: return normalized
+        }
+    }
+
+    public static func settingsRows(snapshot: Snapshot?, order: [String], confirmed: Bool, now: Date = Date()) -> [ProviderAvailability] {
+        let freshLimit = max(10, (snapshot?.pollIntervalMinutes ?? 5) * 2) * 60
+        let current = confirmed && snapshot.map { !$0.stale && now.timeIntervalSince($0.fetchedAt) <= Double(freshLimit) } == true
+        var rows = entries
+        for i in rows.indices {
+            let id = rows[i].id
+            if let metadata = snapshot?.providerCatalog {
+                if let row = metadata.first(where: { canonicalID($0.id) == id }) {
+                    rows[i].available = current && row.available && row.status == "available"
+                    rows[i].status = !current && row.available ? "stale" : row.status
+                }
+            } else if let provider = snapshot?.providers.first(where: { canonicalID($0.id) == id }) {
+                // Legacy servers have no catalog; fresh returned usage can confirm
+                // availability, while hidden providers remain discoverable but locked.
+                rows[i].available = current && !provider.stale && provider.error == nil && !provider.windows.isEmpty
+                rows[i].status = rows[i].available ? "available" : (provider.error != nil ? "error" : "stale")
+            }
+        }
+        var seen = Set<String>()
+        let ids = (order.map(canonicalID) + rows.map(\.id)).filter { seen.insert($0).inserted }
+        return ids.compactMap { id in rows.first { $0.id == id } }
+    }
 }
 
 public enum ProviderDisplay {

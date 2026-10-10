@@ -7,6 +7,7 @@ import UserNotifications
 @Observable
 final class AppModel {
     var snapshot: Snapshot?
+    private(set) var availabilityConfirmed = false
     var health: Health?
     var settings: ServerSettings = ServerSettings()
     var preferences: DisplayPreferences = DisplayPreferences()
@@ -77,6 +78,10 @@ final class AppModel {
         }
     }
 
+    var providerRows: [ProviderAvailability] {
+        ProviderCatalog.settingsRows(snapshot: snapshot, order: preferences.providerOrder, confirmed: availabilityConfirmed || homeSurface == .samplePreview)
+    }
+
     var visibleProviders: [Provider] {
         guard let snapshot else { return [] }
         return ProviderDisplay.orderedVisible(
@@ -116,6 +121,7 @@ final class AppModel {
         let health = try await client.fetchHealth()
         try keychain.save(creds)
         store.mirrorCredentials(nil)
+        self.availabilityConfirmed = false
         self.credentials = creds
         self.isConfigured = true
         self.isPreviewingSample = false
@@ -151,6 +157,7 @@ final class AppModel {
             async let settingsTask = client.fetchSettings()
             let (snap, health, settings) = try await (snapTask, healthTask, settingsTask)
             self.snapshot = snap
+            self.availabilityConfirmed = health.upstreamOK && (health.collector?.consecutiveFailures ?? 0) == 0
             self.health = health
             self.settings = settings
             self.preferences = DisplayPreferences(
@@ -162,6 +169,7 @@ final class AppModel {
             errorMessage = nil
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
+            availabilityConfirmed = false
             if let cached = store.loadSnapshot() {
                 snapshot = cached
             }
@@ -236,18 +244,14 @@ final class AppModel {
     }
 
     func moveProvider(from source: IndexSet, to destination: Int) {
-        var order = preferences.providerOrder
-        if let providers = snapshot?.providers {
-            for p in providers where !order.contains(p.id) {
-                order.append(p.id)
-            }
-        }
+        var order = providerRows.map(\.id)
         order.move(fromOffsets: source, toOffset: destination)
         preferences.providerOrder = order
         Task { await applySettings() }
     }
 
     func setHidden(_ id: String, hidden: Bool) {
+        guard providerRows.contains(where: { $0.id == id && $0.available }) else { return }
         var hiddenList = preferences.hiddenProviders
         if hidden {
             if !hiddenList.contains(id) { hiddenList.append(id) }
@@ -292,6 +296,7 @@ final class AppModel {
             }
             await refresh()
         } catch {
+            availabilityConfirmed = false
             errorMessage = String(describing: error)
             statusMessage = nil
         }

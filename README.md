@@ -212,8 +212,18 @@ If the key is unset, Devin is omitted and the rest of the poll still runs. If
 the key is set and the request fails, Devin appears as that provider error
 instead of failing Cursor, Codex, and the other plugins.
 
-Providers without usage-limit gauges are omitted instead of becoming permanent
-noise rows.
+Settings lists every supported plan provider: Cursor, Codex, Claude Code,
+Copilot, Gemini (CrossUsage's `antigravity` plugin), Grok, and Devin. These plugin
+IDs are verified against the [pinned CrossUsage v1.4.4 catalog](https://github.com/barramee27/crossusage/tree/v1.4.4/plugins).
+Providers without fresh usage-limit gauges stay gray with a disabled visibility
+toggle. Sign in on the machine running CrossUsage (as the collector account on
+Linux), then use **Refresh provider availability** in Settings. No installation
+or login check runs on the iPhone. Login changes availability without changing
+your saved hidden-provider choices.
+
+The dashboard and widget keep the last-known stale usage during collection
+failures. Missing providers do not add placeholder bars or alerts. Settings
+keeps hidden providers discoverable after every refresh.
 
 ## Connect the iPhone
 
@@ -273,13 +283,22 @@ Every main API route requires
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/v1/health` | Redacted service, collector, database, polling, APNs, and delivery health |
-| `GET` | `/v1/snapshot` | Visible normalized providers, windows, forecasts, and freshness |
+| `GET` | `/v1/snapshot` | Visible normalized usage plus the supported provider availability catalog |
 | `GET` / `PUT` | `/v1/settings` | Polling, provider display, and alert-rule settings |
 | `POST` | `/v1/devices` | Register or rotate APNs and WidgetKit tokens |
 | `DELETE` | `/v1/devices/{deviceID}` | Remove a registered device |
 | `POST` | `/v1/poll` | Force one collection cycle |
 | `GET` | `/v1/readiness/{deviceID}` | Get redacted server and device readiness checks |
 | `POST` | `/v1/readiness/{deviceID}/test` | Send a targeted audible alert and widget delivery test |
+
+`/v1/snapshot` adds optional `providerCatalog` metadata for Settings. Each row
+contains `id`, `name`, `available`, and `status` (`available`, `missing`, `error`,
+or `stale`). The catalog is independent of `hiddenProviders`; the existing
+`providers` array stays filtered for widget/display usage. Availability requires
+current, error-free usage-limit data, and expires with snapshot/collector
+freshness. This additive field is ignored by older clients. New clients decode
+older snapshots and show the full built-in catalog, but a hidden provider's
+availability requires an updated backend to confirm it.
 
 ## Alerts and forecasts
 

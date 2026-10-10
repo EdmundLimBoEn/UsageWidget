@@ -23,6 +23,7 @@ type limitsV1Envelope struct {
 
 type limitsV1Provider struct {
 	DisplayName string                      `json:"displayName"`
+	FetchedAt   string                      `json:"fetchedAt"`
 	Plan        string                      `json:"plan"`
 	Stale       bool                        `json:"stale"`
 	Resources   map[string]limitsV1Resource `json:"resources"`
@@ -207,25 +208,33 @@ func normalizeLimitsV1(body []byte, pollIntervalMinutes int, fetchedAt time.Time
 		if id == "" || !inProviderCatalog(id) {
 			continue
 		}
+		if raw.FetchedAt != "" {
+			providerFetchedAt, valid := parseLimitsTime(raw.FetchedAt)
+			freshLimit := time.Duration(max(10, pollIntervalMinutes*2)) * time.Minute
+			raw.Stale = raw.Stale || !valid || fetchedAt.Sub(providerFetchedAt) > freshLimit
+		}
 		p := limitsProviderToDomain(id, raw, fetchedAt)
 		if !keepPlanProvider(p) {
 			continue
 		}
-		byID[id] = p
+		if prior, found := byID[id]; !found || preferProvider(p, prior) {
+			byID[id] = p
+		}
 	}
 	for _, e := range env.Errors {
 		id := canonicalProviderID(e.ProviderID)
 		if id == "" || !inProviderCatalog(id) {
 			continue
 		}
-		if _, ok := byID[id]; ok {
-			continue
-		}
 		msg := strings.TrimSpace(e.Message)
 		if msg == "" {
 			msg = "authentication required"
 		}
-		p := Provider{ID: id, Name: displayNameForProvider(id), Error: msg}
+		p, found := byID[id]
+		if !found {
+			p = Provider{ID: id, Name: displayNameForProvider(id)}
+		}
+		p.Error = msg
 		if keepPlanProvider(p) {
 			byID[id] = p
 		}
@@ -547,6 +556,7 @@ func usageLinesToLimits(body []byte) ([]byte, error) {
 		}
 		env.Providers[id] = limitsV1Provider{
 			DisplayName: snap.DisplayName,
+			FetchedAt:   snap.FetchedAt,
 			Plan:        snap.Plan,
 			Stale:       snap.Stale,
 			Resources:   resources,

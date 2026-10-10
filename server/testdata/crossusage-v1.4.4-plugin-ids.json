@@ -1,0 +1,33 @@
+{
+  "source": "https://github.com/barramee27/crossusage/tree/v1.4.4/plugins",
+  "version": "1.4.4",
+  "pluginIDs": [
+    "amp",
+    "antigravity-cli",
+    "antigravity-ide",
+    "antigravity",
+    "claude",
+    "codex",
+    "command-code",
+    "copilot",
+    "crofai",
+    "cursor-nightly",
+    "cursor",
+    "deepseek",
+    "devin",
+    "factory",
+    "fireworks-ai",
+    "grok",
+    "jetbrains-ai-assistant",
+    "kimi",
+    "kiro",
+    "minimax",
+    "neuralwatt",
+    "ollama",
+    "opencode-go",
+    "openrouter",
+    "perplexity",
+    "synthetic",
+    "zai"
+  ]
+}

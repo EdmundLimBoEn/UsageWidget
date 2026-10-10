@@ -61,7 +61,9 @@ public struct APIClient: Sendable {
     }
 
     public func forcePoll() async throws -> PollResult {
-        let request = try makeRequest(path: "/v1/poll", method: "POST")
+        var request = try makeRequest(path: "/v1/poll", method: "POST")
+        // Collection can take up to 250 seconds on the backend.
+        request.timeoutInterval = max(timeout, 270)
         let data: Data
         let response: URLResponse
         do {

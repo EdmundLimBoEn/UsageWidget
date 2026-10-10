@@ -49,33 +49,45 @@ struct SettingsView: View {
             }
 
             Section {
-                if let providers = model.snapshot?.providers {
-                    ForEach(providerRows(providers), id: \.id) { row in
-                        HStack {
-                            ProviderMark(size: 28, cornerRadius: 8)
+                ForEach(model.providerRows) { row in
+                    HStack {
+                        ProviderMark(size: 28, cornerRadius: 8)
+                            .opacity(row.available ? 1 : 0.4)
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(row.name)
-                            Spacer()
-                            Toggle(
-                                "Visible",
-                                isOn: Binding(
-                                    get: { !model.preferences.hiddenSet.contains(row.id) },
-                                    set: { model.setHidden(row.id, hidden: !$0) }
-                                )
-                            )
-                            .labelsHidden()
+                                .foregroundStyle(row.available ? .primary : .secondary)
+                            Text(row.statusText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        Toggle(
+                            "Show \(row.name)",
+                            isOn: Binding(
+                                get: { row.available && !model.preferences.hiddenSet.contains(row.id) },
+                                set: { model.setHidden(row.id, hidden: !$0) }
+                            )
+                        )
+                        .labelsHidden()
+                        .disabled(!row.available)
+                        .accessibilityLabel("Show \(row.name)")
+                        .accessibilityValue(row.available ? (model.preferences.hiddenSet.contains(row.id) ? "Hidden" : "Visible") : "Unavailable")
+                        .accessibilityHint(row.statusText)
                     }
-                    .onMove { source, dest in
-                        model.moveProvider(from: source, to: dest)
+                }
+                .onMove { source, dest in
+                    model.moveProvider(from: source, to: dest)
+                }
+                if model.isConfigured {
+                    Button("Refresh provider availability") {
+                        Task { await model.forcePoll() }
                     }
-                } else {
-                    Text("No providers yet")
-                        .foregroundStyle(.secondary)
+                    .disabled(model.isTestingAction || model.isLoading)
                 }
             } header: {
                 Text("Providers")
             } footer: {
-                Text("Hiding a provider removes it from the widget and stops its alerts.")
+                Text("All supported providers appear here. Log in on the machine running CrossUsage, then refresh to enable a provider. Hiding a provider removes it from the widget and stops its alerts.")
             }
 
             if model.isConfigured {
@@ -134,19 +146,6 @@ struct SettingsView: View {
         .task {
             await refreshNotificationStatus()
         }
-    }
-
-    private struct Row: Identifiable {
-        let id: String
-        let name: String
-    }
-
-    private func providerRows(_ providers: [Provider]) -> [Row] {
-        ProviderDisplay.orderedVisible(
-            providers: providers,
-            order: model.preferences.providerOrder,
-            hidden: []
-        ).map { Row(id: $0.id, name: $0.name) }
     }
 
     private func requestNotifications() async {
