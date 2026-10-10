@@ -458,10 +458,15 @@ func (a *API) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 	if freshLimit < 10*time.Minute {
 		freshLimit = 10 * time.Minute
 	}
-	if snap.Stale || time.Since(fetchedAt) > freshLimit {
+	a.mu.Lock()
+	collectorFailed := a.consecutiveFailures > 0
+	a.mu.Unlock()
+	current := !snap.Stale && !collectorFailed && time.Since(fetchedAt) <= freshLimit
+	if !current {
 		clearForecasts(&snap)
 	}
 	snap.Providers = projectCatalogProviders(snap.Providers)
+	snap.ProviderCatalog = providerAvailability(snap.Providers, current)
 	snap.Providers = filterHidden(snap.Providers, settings.HiddenProviders)
 	for i := range snap.Providers {
 		snap.Providers[i].Raw = nil

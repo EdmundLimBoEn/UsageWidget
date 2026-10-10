@@ -12,6 +12,8 @@ type providerCatalogEntry struct {
 	CLI     string
 }
 
+// The supported plan providers map to plugins in CrossUsage v1.4.4, pinned in
+// release-manifest.json. API-only providers remain outside this plan catalog.
 var providerCatalog = []providerCatalogEntry{
 	{ID: "cursor", Name: "Cursor", Aliases: []string{"cursor_ai", "cursor_ide"}, CLI: "cursor"},
 	{ID: "codex", Name: "Codex", Aliases: []string{"codex_cli"}, CLI: "codex"},
@@ -165,7 +167,7 @@ func projectCatalogProviders(providers []Provider) []Provider {
 			p.Name = name
 		}
 		if existing, ok := byID[id]; ok {
-			if len(p.Windows) > len(existing.Windows) {
+			if preferProvider(p, existing) {
 				byID[id] = p
 			}
 			continue
@@ -178,4 +180,44 @@ func projectCatalogProviders(providers []Provider) []Provider {
 		out = append(out, byID[id])
 	}
 	return out
+}
+
+// Settings discovery is separate from usage windows and visibility preferences.
+// Cached usage is useful for display, but never proves current authentication.
+type ProviderAvailability struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Available bool   `json:"available"`
+	Status    string `json:"status"`
+}
+
+func providerAvailability(providers []Provider, current bool) []ProviderAvailability {
+	byID := make(map[string]Provider)
+	for _, p := range projectCatalogProviders(providers) {
+		byID[p.ID] = p
+	}
+	out := make([]ProviderAvailability, 0, len(providerCatalog))
+	for _, entry := range providerCatalog {
+		row := ProviderAvailability{ID: entry.ID, Name: entry.Name, Status: "missing"}
+		if p, found := byID[entry.ID]; found {
+			switch {
+			case !current || p.Stale:
+				row.Status = "stale"
+			case p.Error != "":
+				row.Status = "error"
+			case len(p.Windows) > 0:
+				row.Status = "available"
+				row.Available = true
+			}
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func preferProvider(candidate, existing Provider) bool {
+	if candidate.Stale != existing.Stale {
+		return !candidate.Stale
+	}
+	return len(candidate.Windows) > len(existing.Windows)
 }

@@ -8,11 +8,12 @@ import (
 )
 
 type Snapshot struct {
-	FetchedAt           time.Time  `json:"fetchedAt"`
-	Stale               bool       `json:"stale"`
-	Providers           []Provider `json:"providers"`
-	PollIntervalMinutes int        `json:"pollIntervalMinutes"`
-	SourceKind          string     `json:"sourceKind,omitempty"`
+	FetchedAt           time.Time              `json:"fetchedAt"`
+	Stale               bool                   `json:"stale"`
+	Providers           []Provider             `json:"providers"`
+	PollIntervalMinutes int                    `json:"pollIntervalMinutes"`
+	SourceKind          string                 `json:"sourceKind,omitempty"`
+	ProviderCatalog     []ProviderAvailability `json:"providerCatalog,omitempty"`
 }
 
 type Provider struct {
