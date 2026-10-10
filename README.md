@@ -1,6 +1,6 @@
 # UsageWidget
 
-UsageWidget is a self-hosted iOS 26+ app and large Home Screen widget for
+UsageWidget is a self-hosted iOS 26+ app and configurable Home Screen widget for
 monitoring AI coding capacity. A small Go service runs on Linux, macOS, or
 Windows, normalizes CrossUsage limits into quota-style windows, stores history
 in SQLite, and sends APNs alerts and WidgetKit refreshes to the phone.
@@ -225,8 +225,22 @@ open UsageWidget.xcodeproj
 
 Select your Apple Development team and build to an iOS 26+ device. In the app,
 scan the installer QR or enter the Tailscale HTTPS base URL and bearer token,
-then test the connection. Grant notification permission and add the **Usage**
-large widget from the Home Screen gallery.
+then test the connection. Grant notification permission and add **Capacity**
+from the Home Screen widget gallery. Choose small for one provider, medium for
+up to two, or large for up to four. iOS sets each family's fixed dimensions;
+provider selection does not resize a widget. To use less Home Screen space,
+choose a smaller size in the gallery or the Home Screen's widget size controls.
+
+Touch and hold an instance and choose **Edit Widget**. **Use app providers** is
+on by default, following the app's saved provider order and hidden choices,
+including existing widgets after upgrading. Turn it off and select **Providers**
+to give that instance its own list, in selection order. Different instances can
+show different providers. Hidden or unavailable providers stay omitted; an empty
+custom selection asks you to choose providers instead of showing unrelated ones.
+The picker uses the last cached snapshot, so open and refresh the app first if a
+provider is missing. Larger accessibility text shows fewer providers, with a
+`+N more` count for those that do not fit; compact widgets keep reset details
+available to VoiceOver.
 
 Unsigned CI build:
 

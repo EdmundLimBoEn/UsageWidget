@@ -6,28 +6,36 @@ struct ProviderEntry: TimelineEntry {
     let snapshot: Snapshot?
     let preferences: DisplayPreferences
     let fetchError: String?
+    var selectedProviderIDs: [String]? = nil
 }
 
-struct UsageTimelineProvider: TimelineProvider {
+struct UsageTimelineProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> ProviderEntry {
         ProviderEntry(date: Date(), snapshot: Self.sampleSnapshot, preferences: DisplayPreferences(), fetchError: nil)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (ProviderEntry) -> Void) {
-        let finish = UncheckedBox(completion)
-        Task {
-            finish.value(await Self.loadEntry())
+    func snapshot(for configuration: ProviderWidgetIntent, in context: Context) async -> ProviderEntry {
+        if context.isPreview {
+            return ProviderEntry(
+                date: Date(), snapshot: Self.sampleSnapshot,
+                preferences: SnapshotStore.shared.loadPreferences(), fetchError: nil,
+                selectedProviderIDs: configuration.selectedIDs
+            )
         }
+        return await entry(for: configuration)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<ProviderEntry>) -> Void) {
-        let finish = UncheckedBox(completion)
-        Task {
-            let entry = await Self.loadEntry()
-            let minutes = max(entry.snapshot?.pollIntervalMinutes ?? 5, 1)
-            let next = Date().addingTimeInterval(TimeInterval(minutes * 60))
-            finish.value(Timeline(entries: [entry], policy: .after(next)))
-        }
+    func timeline(for configuration: ProviderWidgetIntent, in context: Context) async -> Timeline<ProviderEntry> {
+        let entry = await entry(for: configuration)
+        let minutes = max(entry.snapshot?.pollIntervalMinutes ?? 5, 1)
+        let next = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        return Timeline(entries: [entry], policy: .after(next))
+    }
+
+    private func entry(for configuration: ProviderWidgetIntent) async -> ProviderEntry {
+        var entry = await Self.loadEntry()
+        entry.selectedProviderIDs = configuration.selectedIDs
+        return entry
     }
 
     private static func loadEntry() async -> ProviderEntry {
@@ -74,13 +82,13 @@ struct ProviderUsageWidget: Widget {
     let kind = "ProviderUsageWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: UsageTimelineProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: ProviderWidgetIntent.self, provider: UsageTimelineProvider()) { entry in
             ProviderWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Capacity")
-        .description("Remaining AI capacity and when it resets.")
-        .supportedFamilies([.systemLarge])
+        .description("Choose providers and a small, medium, or large Home Screen size.")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .pushHandler(UsageWidgetPushHandler.self)
     }
 }
@@ -89,40 +97,89 @@ struct ProviderWidgetView: View {
     let entry: ProviderEntry
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.widgetFamily) private var family
 
-    private var maxRows: Int { CapacityLayout.widgetRowLimit(for: dynamicTypeSize) }
+    private var size: WidgetCapacityLayout.Size {
+        switch family {
+        case .systemSmall: return .small
+        case .systemMedium: return .medium
+        default: return .large
+        }
+    }
+
+    private var textScale: WidgetCapacityLayout.TextScale {
+        if dynamicTypeSize >= .accessibility3 { return .largestAccessibility }
+        if dynamicTypeSize.isAccessibilitySize { return .accessibility }
+        if dynamicTypeSize >= .xxLarge { return .extraLarge }
+        return .standard
+    }
+
+    private var maxRows: Int { WidgetCapacityLayout.providerLimit(size: size, textScale: textScale) }
+
+    private var emptyMessage: String {
+        if entry.selectedProviderIDs?.isEmpty == true { return "Edit Widget to choose providers" }
+        if let error = entry.fetchError { return error }
+        if entry.selectedProviderIDs != nil { return "Selected providers unavailable" }
+        return "No providers"
+    }
 
     var body: some View {
-        let visible = ProviderDisplay.orderedVisible(
-            providers: entry.snapshot?.providers ?? [],
-            order: entry.preferences.providerOrder,
-            hidden: entry.preferences.hiddenSet
+        let visible = WidgetProviderSelection.providers(
+            from: entry.snapshot?.providers ?? [],
+            preferences: entry.preferences,
+            selectedIDs: entry.selectedProviderIDs
         )
-        let overflow = max(0, visible.count - maxRows)
+        let overflow = WidgetCapacityLayout.overflowCount(providerCount: visible.count, size: size, textScale: textScale)
         let shown = Array(visible.prefix(maxRows))
 
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Capacity")
-                    .font(.headline)
-                Spacer()
-                ageLabel
+        VStack(alignment: .leading, spacing: family == .systemLarge ? 10 : 6) {
+            if family == .systemLarge || (family == .systemMedium && !dynamicTypeSize.isAccessibilitySize) {
+                HStack {
+                    Text("Capacity")
+                        .font(.headline)
+                    Spacer()
+                    ageLabel
+                }
             }
 
             if shown.isEmpty {
-                Spacer()
-                Text(entry.fetchError ?? "No providers")
-                    .font(.subheadline)
+                Spacer(minLength: 0)
+                Text(emptyMessage)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
+                Spacer(minLength: 0)
             } else {
-                ForEach(shown) { provider in
-                    ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true)
-                }
-                if overflow > 0 {
-                    OverflowRow(count: overflow)
+                if family == .systemLarge {
+                    ForEach(shown) { provider in
+                        ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true || provider.stale)
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(shown) { provider in
+                            CompactProviderWidgetView(
+                                provider: provider,
+                                isStale: entry.snapshot?.stale == true || provider.stale
+                            )
+                        }
+                    }
                 }
                 Spacer(minLength: 0)
+            }
+
+            if overflow > 0 || (family == .systemSmall && !dynamicTypeSize.isAccessibilitySize) {
+                HStack {
+                    if family == .systemSmall && !dynamicTypeSize.isAccessibilitySize {
+                        ageLabel
+                    }
+                    if overflow > 0 {
+                        Text("+\(overflow) more")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                            .accessibilityLabel("\(overflow) more providers. Choose a larger widget or edit the provider selection.")
+                    }
+                }
             }
         }
         .padding(2)
@@ -149,8 +206,78 @@ struct ProviderWidgetView: View {
             Text(text)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .accessibilityLabel(entry.snapshot?.stale == true ? "Stale, updated \(text)" : "Updated \(text)")
+    }
+}
+
+private struct CompactProviderWidgetView: View {
+    let provider: Provider
+    let isStale: Bool
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var primary: UsageWindow? { provider.windows.first }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(provider.name)
+                    .font(.caption2.weight(.semibold))
+                    .lineLimit(1)
+                if isStale {
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+            if let primary {
+                Text(String(format: dynamicTypeSize.isAccessibilitySize ? "%.0f%%" : "%.0f%% left", primary.remainingPercent))
+                    .font(dynamicTypeSize.isAccessibilitySize ? .headline : .title2.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(widgetCapacityTint(primary.remainingPercent, stale: isStale))
+                    .lineLimit(1)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(ForecastText.string(for: primary) ?? resetText(primary))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    ProgressView(value: min(max(primary.usedPercent / 100, 0), 1))
+                        .tint(widgetCapacityTint(primary.remainingPercent, stale: isStale))
+                }
+            } else {
+                Text(errorText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var errorText: String {
+        guard let error = provider.error, !error.isEmpty else { return "No usage data" }
+        return error
+    }
+
+    private var accessibilityText: String {
+        var parts = [provider.name]
+        if isStale { parts.append("Stale") }
+        if let primary {
+            parts.append(String(format: "%.0f percent remaining", primary.remainingPercent))
+            parts.append(resetText(primary))
+            if let forecast = ForecastText.string(for: primary) { parts.append(forecast) }
+        } else {
+            parts.append(errorText)
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private func resetText(_ window: UsageWindow) -> String {
+        guard let reset = window.resetsAt else { return window.title }
+        return "Resets \(RelativeTime.string(for: reset))"
     }
 }
 
@@ -240,10 +367,4 @@ struct OverflowRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel("\(count) more providers")
     }
-}
-
-/// Bridges WidgetKit completion handlers into Swift 6 tasks without data-race diagnostics.
-private struct UncheckedBox<T>: @unchecked Sendable {
-    let value: T
-    init(_ value: T) { self.value = value }
 }

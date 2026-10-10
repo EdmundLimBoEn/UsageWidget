@@ -36,6 +36,11 @@
 		CF461735946D08B2AA35F607 /* SampleCapacity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD24F513724BE6908813D4E5 /* SampleCapacity.swift */; };
 		8B02D3F15029C47E66F1B2C3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7A91C2E04F18B36D55E0A1B2 /* PrivacyInfo.xcprivacy */; };
 		9C13E402613AD58F7702C3D4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7A91C2E04F18B36D55E0A1B2 /* PrivacyInfo.xcprivacy */; };
+		6BE97EF219C3454890C1E9C9 /* WidgetProviderSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04A607F799EA1912DD5D7249 /* WidgetProviderSelection.swift */; };
+		55A8599869C3C9605B3E9EF2 /* WidgetProviderSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04A607F799EA1912DD5D7249 /* WidgetProviderSelection.swift */; };
+		B402A8BC48C5ADD4AD24E22B /* ProviderWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAA768E9A0F2382D45DB9EA /* ProviderWidgetIntent.swift */; };
+		603866A88BF7339F8EFC8784 /* ProviderWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBAA768E9A0F2382D45DB9EA /* ProviderWidgetIntent.swift */; };
+		18854042C1E917BEB94B7D5E /* WidgetProviderSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518FF3D44ECF227378312449 /* WidgetProviderSelectionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -93,6 +98,9 @@
 		C9413AB842939E4D04BCF4CC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		D197429C0EF4FAD719F815C3 /* AlertRulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertRulesView.swift; sourceTree = "<group>"; };
 		E35713D140F89FB01716BC28 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		04A607F799EA1912DD5D7249 /* WidgetProviderSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetProviderSelection.swift; sourceTree = "<group>"; };
+		FBAA768E9A0F2382D45DB9EA /* ProviderWidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderWidgetIntent.swift; sourceTree = "<group>"; };
+		518FF3D44ECF227378312449 /* WidgetProviderSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetProviderSelectionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -114,6 +122,8 @@
 		3E9CD0B5EEDDEE0BFE433D5C /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				04A607F799EA1912DD5D7249 /* WidgetProviderSelection.swift */,
+				FBAA768E9A0F2382D45DB9EA /* ProviderWidgetIntent.swift */,
 				13FAEA3D5DA9CD700832B6C7 /* APIClient.swift */,
 				201D218A913911D9205F095E /* Keychain.swift */,
 				4387E300CF78B6B0A031E35A /* Models.swift */,
@@ -174,6 +184,7 @@
 		CF773552DD79386A828B11FA /* CoreTests */ = {
 			isa = PBXGroup;
 			children = (
+				518FF3D44ECF227378312449 /* WidgetProviderSelectionTests.swift */,
 				D0572846A57E19C3BB460718 /* AppStoreComplianceTests.swift */,
 				2A1476BAA8770C6ED3F76DFA /* ModelsAndStoreTests.swift */,
 			);
@@ -323,6 +334,8 @@
 				40CBAB71472205F39864DC27 /* Models.swift in Sources */,
 				2CCF22BD11B2247F766BB013 /* ProviderMark.swift in Sources */,
 				CF461735946D08B2AA35F607 /* SampleCapacity.swift in Sources */,
+				55A8599869C3C9605B3E9EF2 /* WidgetProviderSelection.swift in Sources */,
+				603866A88BF7339F8EFC8784 /* ProviderWidgetIntent.swift in Sources */,
 				40200372AB308C2FF15A607F /* ProviderWidget.swift in Sources */,
 				4D28281CB32FC0EDC9BDCBC1 /* SnapshotStore.swift in Sources */,
 				4BFE63AD2E85F9CA71F49737 /* UsageWidgetBundle.swift in Sources */,
@@ -333,6 +346,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6BE97EF219C3454890C1E9C9 /* WidgetProviderSelection.swift in Sources */,
+				B402A8BC48C5ADD4AD24E22B /* ProviderWidgetIntent.swift in Sources */,
 				5A8D34E32DEDE40F4CCFB5A6 /* APIClient.swift in Sources */,
 				3BD8ACC8EC60A8E3D8734284 /* AlertRulesView.swift in Sources */,
 				5CDBC8FF4BD8153C5F933B26 /* AppModel.swift in Sources */,
@@ -354,6 +369,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				18854042C1E917BEB94B7D5E /* WidgetProviderSelectionTests.swift in Sources */,
 				D161B72732B0CA48E4928482 /* ModelsAndStoreTests.swift in Sources */,
 				E1683957B68F20D4CC571829 /* AppStoreComplianceTests.swift in Sources */,
 			);
