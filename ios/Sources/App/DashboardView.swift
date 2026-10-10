@@ -31,7 +31,7 @@ struct DashboardView: View {
                     }
                 } else {
                     ForEach(model.visibleProviders) { provider in
-                        ProviderCapacityCard(provider: provider)
+                        ProviderCapacityRow(provider: provider)
                     }
                 }
             }
@@ -160,7 +160,7 @@ struct DashboardView: View {
     }
 }
 
-struct ProviderCapacityCard: View {
+struct ProviderCapacityRow: View {
     let provider: Provider
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -209,8 +209,7 @@ struct ProviderCapacityCard: View {
                 }
             }
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.vertical, 12)
         .accessibilityElement(children: .contain)
     }
 
@@ -244,7 +243,7 @@ struct ProviderCapacityCard: View {
     }
 }
 
-/// The big "NN%" on each dashboard card. Sized with @ScaledMetric so it follows
+/// The big "NN%" on each dashboard provider row. Sized with @ScaledMetric so it follows
 /// Dynamic Type (it used to be a fixed 30pt that ignored the user's text size).
 struct CapacityPercentText: View {
     let remaining: Double
