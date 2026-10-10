@@ -151,7 +151,14 @@ struct ProviderWidgetView: View {
             } else {
                 if family == .systemLarge {
                     ForEach(shown) { provider in
-                        ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true || provider.stale)
+                        if dynamicTypeSize.isAccessibilitySize {
+                            CompactProviderWidgetView(
+                                provider: provider,
+                                isStale: entry.snapshot?.stale == true || provider.stale
+                            )
+                        } else {
+                            ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true || provider.stale)
+                        }
                     }
                 } else {
                     HStack(alignment: .top, spacing: 12) {
@@ -249,7 +256,7 @@ private struct CompactProviderWidgetView: View {
                 Text(errorText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 1 : 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
