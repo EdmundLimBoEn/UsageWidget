@@ -8,7 +8,7 @@ CONFIG_DIR=/etc/usagewidget
 DATA_DIR=/var/lib/usagewidget
 ENV_FILE="$CONFIG_DIR/env"
 COLLECTOR_ENV="$CONFIG_DIR/collector.env"
-BACKUP_DIR="$DATA_DIR/backups"
+BACKUP_DIR=/var/backups/usagewidget
 LOCAL_URL=http://127.0.0.1:8377
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST="$SCRIPT_DIR/release-manifest.json"
@@ -340,7 +340,7 @@ do_doctor() {
 }
 
 do_backup() {
-  need sqlite3; install -d -m 0700 "$BACKUP_DIR"; local stamp work archive; stamp="$(date -u +%Y%m%dT%H%M%SZ)"; work="$(mktemp -d)"; archive="$BACKUP_DIR/usagewidget-$stamp.tar.gz"
+  need sqlite3; install -d -m 0700 -o root -g root "$BACKUP_DIR"; local stamp work archive; stamp="$(date -u +%Y%m%dT%H%M%SZ)"; work="$(mktemp -d)"; archive="$BACKUP_DIR/usagewidget-$stamp.tar.gz"
   sqlite3 "$DATA_DIR/usagewidget.db" ".backup '$work/usagewidget.db'"; install -m 0600 "$ENV_FILE" "$work/env"
   if $INCLUDE_APNS; then local key; key="$(read_env APNS_KEY_PATH || true)"; [[ -n $key && -r $key ]] && install -m 0600 "$key" "$work/apns-key.p8"; fi
   tar -czf "$archive" -C "$work" .; rm -rf -- "$work"; say "$archive"
@@ -350,8 +350,12 @@ do_restore() {
   [[ -n $RESTORE_FILE ]] || RESTORE_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'usagewidget-*.tar.gz' -print | sort | tail -1)"
   [[ -f $RESTORE_FILE ]] || die "backup archive not found"
   if tar -tzf "$RESTORE_FILE" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then die "backup contains unsafe paths"; fi
-  local work; work="$(mktemp -d)"; tar -xzf "$RESTORE_FILE" -C "$work"; [[ -f $work/usagewidget.db ]] || die "backup has no database"
-  systemctl stop usagewidget; install -m 0600 -o usagewidget -g usagewidget "$work/usagewidget.db" "$DATA_DIR/usagewidget.db"; [[ -f $work/env ]] && install -m 0600 -o root -g usagewidget "$work/env" "$ENV_FILE"; [[ -f $work/apns-key.p8 ]] && install -m 0640 -o root -g usagewidget "$work/apns-key.p8" "$CONFIG_DIR/AuthKey.p8"; systemctl start usagewidget; rm -rf -- "$work"; wait_for_health 30 || die "restored server failed health check"; say "Restore complete"
+  local work listing
+  listing="$(tar -tvf "$RESTORE_FILE")" || die "cannot list backup archive"
+  if grep -qvE '^[-d]' <<<"$listing"; then die "backup contains unsupported entry types"; fi
+  # main requires root; keep the fresh staging directory root-owned during extraction.
+  work="$(mktemp -d)"; tar -xzf "$RESTORE_FILE" --no-same-owner -C "$work"; [[ -f $work/usagewidget.db && ! -L $work/usagewidget.db ]] || die "backup has no database"
+  systemctl stop usagewidget; install -m 0600 -o usagewidget -g usagewidget "$work/usagewidget.db" "$DATA_DIR/usagewidget.db"; [[ -f $work/env && ! -L $work/env ]] && install -m 0600 -o root -g usagewidget "$work/env" "$ENV_FILE"; [[ -f $work/apns-key.p8 && ! -L $work/apns-key.p8 ]] && install -m 0640 -o root -g usagewidget "$work/apns-key.p8" "$CONFIG_DIR/AuthKey.p8"; systemctl start usagewidget; rm -rf -- "$work"; wait_for_health 30 || die "restored server failed health check"; say "Restore complete"
 }
 
 do_rotate_token() {
