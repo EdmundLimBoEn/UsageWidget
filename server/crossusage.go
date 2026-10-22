@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os/exec"
@@ -61,7 +62,11 @@ func (c *CrossUsageClient) SourceName() string { return c.Source }
 
 func (c *CrossUsageClient) Fetch(ctx context.Context) ([]byte, error) {
 	if len(c.Cmd) == 1 {
-		return CollectCrossUsageLimits(ctx, c.Cmd[0])
+		body, err := CollectCrossUsageLimits(ctx, c.Cmd[0])
+		if err != nil {
+			return nil, c.failure("command failed", err.Error())
+		}
+		return body, nil
 	}
 	if len(c.Cmd) > 0 {
 		return c.fetchCmd(ctx)
@@ -86,7 +91,7 @@ func (c *CrossUsageClient) fetchCmd(ctx context.Context) ([]byte, error) {
 		if body, ok := extractJSONDocument(stdout.Bytes()); ok {
 			return attachDevinLimits(ctx, body), nil
 		}
-		return nil, fmt.Errorf("crossusage: run %q: %w: %s", strings.Join(c.Cmd, " "), err, strings.TrimSpace(stderr.String()))
+		return nil, c.failure("command failed", stderr.String())
 	}
 	body, ok := extractJSONDocument(stdout.Bytes())
 	if !ok {
@@ -98,27 +103,38 @@ func (c *CrossUsageClient) fetchCmd(ctx context.Context) ([]byte, error) {
 func (c *CrossUsageClient) fetchHTTP(ctx context.Context) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("crossusage: build request: %w", err)
+		return nil, c.failure("build request failed", "invalid request URL")
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("crossusage: fetch: %w", err)
+		return nil, c.failure("fetch failed", "HTTP transport failed")
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, collectorMaxResponseBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("crossusage: read body: %w", err)
+		return nil, c.failure("read body failed", "HTTP response read failed")
 	}
 	if len(body) > collectorMaxResponseBytes {
 		return nil, fmt.Errorf("crossusage: response too large")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("crossusage: unexpected status %d: %s", resp.StatusCode, string(body))
+		return nil, c.failure("unexpected HTTP status", fmt.Sprintf("status %d: %s", resp.StatusCode, body))
 	}
 	if extracted, ok := extractJSONDocument(body); ok {
 		return attachDevinLimits(ctx, extracted), nil
 	}
 	return attachDevinLimits(ctx, body), nil
+}
+
+// Diagnostics stay in server logs; returned errors are safe for poll outcomes and APIs.
+func (c *CrossUsageClient) failure(category, diagnostic string) error {
+	for _, arg := range c.Cmd {
+		if arg != "" {
+			diagnostic = strings.ReplaceAll(diagnostic, arg, "[redacted]")
+		}
+	}
+	log.Printf("crossusage: %s: %s", category, truncateDiagnostic(diagnostic, 180))
+	return fmt.Errorf("crossusage: %s", category)
 }

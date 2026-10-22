@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -18,6 +19,13 @@ func main() {
 	binary := firstNonEmpty(strings.TrimSpace(os.Getenv("CROSSUSAGE_BIN")), "crossusage-cli")
 
 	httpAddr := strings.TrimSpace(os.Getenv("COLLECTOR_HTTP_ADDR"))
+	if httpAddr != "" {
+		var err error
+		httpAddr, err = collectorHTTPAddress(httpAddr, os.Getenv("COLLECTOR_ALLOW_REMOTE"))
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	socketPath := server.CanonicalCollectorSocket(os.Getenv("COLLECTOR_SOCKET"))
 	if httpAddr == "" && socketPath == "" {
 		socketPath = "/run/usagewidget/collector.sock"
@@ -51,7 +59,7 @@ func main() {
 		srv := newCollectorHTTPServer(handler)
 		servers = append(servers, srv)
 		go func() {
-			log.Printf("collector listening on %s (%s %v)", socketPath, binary, collector.Args)
+			log.Printf("collector listening on %s", socketPath)
 			errCh <- srv.Serve(listener)
 		}()
 	}
@@ -60,7 +68,7 @@ func main() {
 		srv.Addr = httpAddr
 		servers = append(servers, srv)
 		go func() {
-			log.Printf("collector listening on http://%s (%s %v)", httpAddr, binary, collector.Args)
+			log.Printf("collector listening on http://%s", httpAddr)
 			errCh <- srv.ListenAndServe()
 		}()
 	}
@@ -98,4 +106,16 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// Return the resolved address so the listener binds exactly the IP we checked.
+func collectorHTTPAddress(address, allowRemote string) (string, error) {
+	resolved, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return "", fmt.Errorf("COLLECTOR_HTTP_ADDR: cannot resolve listen address")
+	}
+	if allowRemote != "1" && !resolved.IP.IsLoopback() {
+		return "", fmt.Errorf("COLLECTOR_HTTP_ADDR must resolve to a loopback address; set COLLECTOR_ALLOW_REMOTE=1 to explicitly allow unauthenticated remote access")
+	}
+	return resolved.String(), nil
 }
