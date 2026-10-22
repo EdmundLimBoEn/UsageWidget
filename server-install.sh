@@ -80,7 +80,7 @@ read_env() { local key=$1; [[ -r $ENV_FILE ]] || return 1; sed -n "s/^${key}=//p
 health_ok() {
   local token code
   token="$(read_env USAGEWIDGET_TOKEN || true)"; [[ ${#token} -ge 32 ]] || return 1
-  code="$(curl -s --max-time 12 -o /tmp/usagewidget-health.$$ -w '%{http_code}' -H "Authorization: Bearer $token" "$LOCAL_URL/v1/health" || true)"
+  code="$(curl -s --max-time 12 -o /tmp/usagewidget-health.$$ -w '%{http_code}' -H @- "$LOCAL_URL/v1/health" <<<"Authorization: Bearer $token" || true)"
   [[ $code == 200 ]] && jq -e '.service=="ok" and .database==true' /tmp/usagewidget-health.$$ >/dev/null 2>&1
   local result=$?; rm -f /tmp/usagewidget-health.$$; return "$result"
 }
@@ -333,7 +333,7 @@ do_update() {
 do_doctor() {
   local service=false database=false schema=0 version=unknown collector=unknown apns=false
   systemctl is-active --quiet usagewidget 2>/dev/null && service=true
-  if health_ok; then local token; token="$(read_env USAGEWIDGET_TOKEN)"; local health; health="$(curl -fsS -H "Authorization: Bearer $token" "$LOCAL_URL/v1/health")"; schema="$(jq -r '.schemaVersion // 0' <<<"$health")"; version="$(jq -r '.version // "unknown"' <<<"$health")"; collector="$(jq -r '.collector.status // "unknown"' <<<"$health")"; apns="$(jq -r '.apns' <<<"$health")"; database=true; fi
+  if health_ok; then local token; token="$(read_env USAGEWIDGET_TOKEN)"; local health; health="$(curl -fsS -H @- "$LOCAL_URL/v1/health" <<<"Authorization: Bearer $token")"; schema="$(jq -r '.schemaVersion // 0' <<<"$health")"; version="$(jq -r '.version // "unknown"' <<<"$health")"; collector="$(jq -r '.collector.status // "unknown"' <<<"$health")"; apns="$(jq -r '.apns' <<<"$health")"; database=true; fi
   if $JSON; then jq -n --argjson service "$service" --argjson database "$database" --argjson schema "$schema" --arg version "$version" --arg collector "$collector" --argjson apns "$apns" '{service:$service,database:$database,schemaVersion:$schema,version:$version,collector:$collector,apns:$apns,credentials:"redacted"}'
   else say "service: $service"; say "database: $database (schema $schema)"; say "version: $version"; say "collector: $collector"; say "apns: $apns"; say "credentials: redacted"; fi
   $service && $database
@@ -360,8 +360,8 @@ do_restore() {
 
 do_rotate_token() {
   local old new tmp; old="$(read_env USAGEWIDGET_TOKEN)"; new="$(openssl rand -hex 32)"; tmp="$(mktemp "$CONFIG_DIR/env.XXXXXX")"
-  awk -v token="$new" 'BEGIN{done=0} /^USAGEWIDGET_TOKEN=/{print "USAGEWIDGET_TOKEN=" token; done=1; next} {print} END{if(!done) print "USAGEWIDGET_TOKEN=" token}' "$ENV_FILE" >"$tmp"; chown root:usagewidget "$tmp"; chmod 0600 "$tmp"; mv -f "$tmp" "$ENV_FILE"; systemctl restart usagewidget
-  if ! wait_for_health 30; then awk -v token="$old" '/^USAGEWIDGET_TOKEN=/{print "USAGEWIDGET_TOKEN=" token; next} {print}' "$ENV_FILE" >"$tmp"; mv -f "$tmp" "$ENV_FILE"; systemctl restart usagewidget; die "token rotation failed and was rolled back"; fi
+  USAGEWIDGET_ROTATION_TOKEN="$new" awk 'BEGIN{token=ENVIRON["USAGEWIDGET_ROTATION_TOKEN"]; done=0} /^USAGEWIDGET_TOKEN=/{print "USAGEWIDGET_TOKEN=" token; done=1; next} {print} END{if(!done) print "USAGEWIDGET_TOKEN=" token}' "$ENV_FILE" >"$tmp"; chown root:usagewidget "$tmp"; chmod 0600 "$tmp"; mv -f "$tmp" "$ENV_FILE"; systemctl restart usagewidget
+  if ! wait_for_health 30; then USAGEWIDGET_ROTATION_TOKEN="$old" awk 'BEGIN{token=ENVIRON["USAGEWIDGET_ROTATION_TOKEN"]} /^USAGEWIDGET_TOKEN=/{print "USAGEWIDGET_TOKEN=" token; next} {print}' "$ENV_FILE" >"$tmp"; mv -f "$tmp" "$ENV_FILE"; systemctl restart usagewidget; die "token rotation failed and was rolled back"; fi
   say "Token rotated. Every existing phone is now invalidated; scan the replacement QR."
   print_qr
 }

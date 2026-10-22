@@ -72,10 +72,10 @@ api() {
   tmp="$(mktemp)"
   local code
   code="$(curl -sS -o "$tmp" -w "%{http_code}" -X "$method" \
-    -H "Authorization: Bearer ${USAGEWIDGET_TOKEN}" \
+    -H @- \
     -H "Accept: application/json" \
     "$@" \
-    "$url")" || { rm -f "$tmp"; die "request failed: $method $url"; }
+    "$url" <<<"Authorization: Bearer ${USAGEWIDGET_TOKEN}")" || { rm -f "$tmp"; die "request failed: $method $url"; }
   cat "$tmp"
   echo
   rm -f "$tmp"
