@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -64,7 +65,7 @@ func (c *CrossUsageClient) Fetch(ctx context.Context) ([]byte, error) {
 	if len(c.Cmd) == 1 {
 		body, err := CollectCrossUsageLimits(ctx, c.Cmd[0])
 		if err != nil {
-			return nil, c.failure("command failed", err.Error())
+			return nil, c.failure("command failed", err.Error(), err)
 		}
 		return body, nil
 	}
@@ -91,7 +92,10 @@ func (c *CrossUsageClient) fetchCmd(ctx context.Context) ([]byte, error) {
 		if body, ok := extractJSONDocument(stdout.Bytes()); ok {
 			return attachDevinLimits(ctx, body), nil
 		}
-		return nil, c.failure("command failed", stderr.String())
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		return nil, c.failure("command failed", stderr.String(), err)
 	}
 	body, ok := extractJSONDocument(stdout.Bytes())
 	if !ok {
@@ -103,24 +107,26 @@ func (c *CrossUsageClient) fetchCmd(ctx context.Context) ([]byte, error) {
 func (c *CrossUsageClient) fetchHTTP(ctx context.Context) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL, nil)
 	if err != nil {
-		return nil, c.failure("build request failed", "invalid request URL")
+		return nil, c.failure("build request failed", "invalid request URL", nil)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, c.failure("fetch failed", "HTTP transport failed")
+		return nil, c.failure("fetch failed", "HTTP transport failed", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, collectorMaxResponseBytes+1))
 	if err != nil {
-		return nil, c.failure("read body failed", "HTTP response read failed")
+		return nil, c.failure("read body failed", "HTTP response read failed", err)
 	}
 	if len(body) > collectorMaxResponseBytes {
 		return nil, fmt.Errorf("crossusage: response too large")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, c.failure("unexpected HTTP status", fmt.Sprintf("status %d: %s", resp.StatusCode, body))
+		failure := c.failure("unexpected HTTP status", fmt.Sprintf("status %d: %s", resp.StatusCode, body), nil)
+		failure.retryable = resp.StatusCode == http.StatusRequestTimeout || resp.StatusCode == http.StatusGatewayTimeout
+		return nil, failure
 	}
 	if extracted, ok := extractJSONDocument(body); ok {
 		return attachDevinLimits(ctx, extracted), nil
@@ -128,13 +134,44 @@ func (c *CrossUsageClient) fetchHTTP(ctx context.Context) ([]byte, error) {
 	return attachDevinLimits(ctx, body), nil
 }
 
+// crossUsageError carries retry policy without exposing the underlying diagnostic.
+type crossUsageError struct {
+	message   string
+	retryable bool
+}
+
+func (e *crossUsageError) Error() string { return e.message }
+
+func isRetryablePollError(err error) bool {
+	var fetchErr *crossUsageError
+	if errors.As(err, &fetchErr) {
+		return fetchErr.retryable
+	}
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return retryablePollError(err.Error())
+}
+
 // Diagnostics stay in server logs; returned errors are safe for poll outcomes and APIs.
-func (c *CrossUsageClient) failure(category, diagnostic string) error {
+func (c *CrossUsageClient) failure(category, diagnostic string, cause error) *crossUsageError {
+	retryable := isRetryablePollError(cause)
+	// Command stderr can describe transient failures even when exit status cannot.
+	if category == "command failed" && !errors.Is(cause, context.Canceled) {
+		retryable = retryable || retryablePollError(diagnostic)
+	}
 	for _, arg := range c.Cmd {
 		if arg != "" {
 			diagnostic = strings.ReplaceAll(diagnostic, arg, "[redacted]")
 		}
 	}
 	log.Printf("crossusage: %s: %s", category, truncateDiagnostic(diagnostic, 180))
-	return fmt.Errorf("crossusage: %s", category)
+	return &crossUsageError{message: "crossusage: " + category, retryable: retryable}
 }

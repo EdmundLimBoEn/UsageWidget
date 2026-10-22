@@ -802,20 +802,7 @@ func (a *API) handlePostDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, _, err := a.store.GetDevice(req.DeviceID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	resp := deviceResponse{DeviceID: req.DeviceID, APNsToken: existing.APNsToken, WidgetToken: existing.WidgetToken}
-	if req.APNsToken != nil {
-		resp.APNsToken = *req.APNsToken
-	}
-	if req.WidgetToken != nil {
-		resp.WidgetToken = *req.WidgetToken
-	}
-
-	if err := a.store.UpsertDevice(resp.DeviceID, resp.APNsToken, resp.WidgetToken); err != nil {
+	if err := a.store.upsertDevice(req.DeviceID, req.APNsToken, req.WidgetToken); err != nil {
 		if errors.Is(err, ErrDeviceLimit) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
@@ -823,7 +810,12 @@ func (a *API) handlePostDevice(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	device, _, err := a.store.GetDevice(req.DeviceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, deviceResponse{DeviceID: req.DeviceID, APNsToken: device.APNsToken, WidgetToken: device.WidgetToken})
 }
 
 func (a *API) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
@@ -875,12 +867,16 @@ func (a *API) handleForcePoll(w http.ResponseWriter, r *http.Request) {
 		a.manualPoll = call
 		a.lastManualPollAt = time.Now()
 		a.mu.Unlock()
-		call.result = a.poller.PollNow(r.Context())
-		a.mu.Lock()
-		a.manualPoll = nil
-		a.lastManualPoll = call
-		close(call.done)
-		a.mu.Unlock()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), sharedPollTimeout)
+			defer cancel()
+			call.result = a.poller.PollNow(ctx)
+			a.mu.Lock()
+			a.manualPoll = nil
+			a.lastManualPoll = call
+			close(call.done)
+			a.mu.Unlock()
+		}()
 	} else {
 		a.mu.Unlock()
 	}
