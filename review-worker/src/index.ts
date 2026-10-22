@@ -11,6 +11,13 @@ import {
 } from "./synthetic";
 import { REVIEW_TOKEN } from "./token";
 
+const MAX_BODY_BYTES = 16 * 1024;
+// iOS Models.swift has seven default providers and provider/window overrides.
+const MAX_SETTINGS_ITEMS = 64;
+const MAX_SETTINGS_STRING_LENGTH = 128;
+// iOS serializes APNs and WidgetKit token Data as hex; leave ample headroom.
+const MAX_DEVICE_TOKEN_LENGTH = 1024;
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -39,6 +46,19 @@ function mergeSettings(body: unknown): ServerSettings | null {
     return null;
   }
   const patch = body as Record<string, unknown>;
+  const tooLong = (value: unknown): boolean =>
+    typeof value === "string" && value.length > MAX_SETTINGS_STRING_LENGTH;
+  for (const key of ["providerOrder", "hiddenProviders", "alertOverrides"]) {
+    const items = patch[key];
+    if (Array.isArray(items) && (items.length > MAX_SETTINGS_ITEMS || items.some(tooLong))) {
+      return null;
+    }
+  }
+  if (Array.isArray(patch.alertOverrides) && patch.alertOverrides.some((item) =>
+    item && typeof item === "object" && (tooLong(item.providerID) || tooLong(item.windowID))
+  )) {
+    return null;
+  }
   const next = defaultSettings();
   if (typeof patch.pollIntervalMinutes === "number") {
     next.pollIntervalMinutes = patch.pollIntervalMinutes;
@@ -72,6 +92,9 @@ function mergeSettings(body: unknown): ServerSettings | null {
     if (typeof quiet.endMinute === "number") {
       next.quietHours.endMinute = quiet.endMinute;
     }
+    if (tooLong(quiet.timeZone)) {
+      return null;
+    }
     if (typeof quiet.timeZone === "string") {
       next.quietHours.timeZone = quiet.timeZone;
     }
@@ -83,7 +106,27 @@ function mergeSettings(body: unknown): ServerSettings | null {
 }
 
 async function readJson(request: Request): Promise<unknown | undefined> {
-  const text = await request.text();
+  if (!request.body) {
+    return undefined;
+  }
+  const reader = request.body.getReader();
+  const bytes = new Uint8Array(MAX_BODY_BYTES);
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > MAX_BODY_BYTES - size) {
+        await reader.cancel();
+        return jsonResponse(413, { error: "request body too large" });
+      }
+      bytes.set(value, size);
+      size += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const text = new TextDecoder().decode(bytes.subarray(0, size));
   if (text.trim() === "") {
     return undefined;
   }
@@ -147,6 +190,7 @@ export default {
     }
     if (method === "PUT" && path === "/v1/settings") {
       const body = await readJson(request);
+      if (body instanceof Response) return body;
       const merged = mergeSettings(body);
       if (!merged) {
         return jsonResponse(400, { error: "invalid JSON body" });
@@ -155,12 +199,18 @@ export default {
     }
     if (method === "POST" && path === "/v1/devices") {
       const body = await readJson(request);
+      if (body instanceof Response) return body;
       if (body === null || typeof body !== "object" || Array.isArray(body)) {
         return jsonResponse(400, { error: "invalid JSON body" });
       }
       const record = body as Record<string, unknown>;
       if (typeof record.deviceID !== "string" || record.deviceID === "" || record.deviceID.length > 128) {
         return jsonResponse(400, { error: "deviceID is required" });
+      }
+      for (const key of ["apnsToken", "widgetToken"]) {
+        if (typeof record[key] === "string" && record[key].length > MAX_DEVICE_TOKEN_LENGTH) {
+          return jsonResponse(400, { error: `${key} is too long` });
+        }
       }
       const asString = (value: unknown): string => (typeof value === "string" ? value : "");
       return jsonResponse(200, {
