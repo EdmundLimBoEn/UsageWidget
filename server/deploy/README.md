@@ -298,7 +298,7 @@ sudo usagewidget-admin update
 sudo usagewidget-admin update --version VERSION
 sudo usagewidget-admin backup
 sudo usagewidget-admin backup --include-apns-key
-sudo usagewidget-admin restore --file /var/lib/usagewidget/backups/ARCHIVE.tar.gz
+sudo usagewidget-admin restore --file /var/backups/usagewidget/ARCHIVE.tar.gz
 sudo usagewidget-admin rotate-token
 sudo usagewidget-admin qr
 sudo usagewidget-admin uninstall
