@@ -14,6 +14,11 @@ func main() {
 	serverURL := flag.String("url", os.Getenv("USAGEWIDGET_PUBLIC_URL"), "private HTTPS UsageWidget server URL")
 	token := flag.String("token", os.Getenv("USAGEWIDGET_TOKEN"), "UsageWidget bearer token")
 	flag.Parse()
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "token" {
+			fmt.Fprintln(os.Stderr, "usagewidget: -token is deprecated; use USAGEWIDGET_TOKEN to keep the bearer token out of process arguments")
+		}
+	})
 	if !strings.HasPrefix(*serverURL, "https://") || len(*token) < 32 {
 		fmt.Fprintln(os.Stderr, "usagewidget: a private HTTPS URL and bearer token of at least 32 characters are required")
 		os.Exit(2)

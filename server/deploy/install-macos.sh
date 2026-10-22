@@ -71,4 +71,4 @@ for _ in {1..30}; do
 done
 curl -fsS -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/health >/dev/null || die "installed server failed its health check"
 printf 'UsageWidget is healthy at %s\n' "$public_url"
-exec "$ROOT/bin/usagewidget-qr" -url "$public_url" -token "$USAGEWIDGET_TOKEN"
+USAGEWIDGET_TOKEN="$USAGEWIDGET_TOKEN" exec "$ROOT/bin/usagewidget-qr" -url "$public_url"
