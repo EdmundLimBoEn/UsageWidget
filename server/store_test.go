@@ -214,14 +214,14 @@ func TestStoreClearsTokensIndependently(t *testing.T) {
 	if err := s.UpsertDevice("dev-1", "apns", "widget"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ClearWidgetToken("dev-1"); err != nil {
+	if err := s.ClearWidgetToken("dev-1", "widget"); err != nil {
 		t.Fatal(err)
 	}
 	device, ok, err := s.GetDevice("dev-1")
 	if err != nil || !ok || device.APNsToken != "apns" || device.WidgetToken != "" {
 		t.Fatalf("unexpected device after widget clear: %+v ok=%v err=%v", device, ok, err)
 	}
-	if err := s.ClearAPNsToken("dev-1"); err != nil {
+	if err := s.ClearAPNsToken("dev-1", "apns"); err != nil {
 		t.Fatal(err)
 	}
 	device, _, _ = s.GetDevice("dev-1")

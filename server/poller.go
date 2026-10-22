@@ -11,7 +11,8 @@ import (
 	"time"
 )
 
-const sharedPollTimeout = 2 * time.Minute
+// Allow the full collection budget plus time to persist and dispatch the result.
+const sharedPollTimeout = crossUsageFetchTimeout + 50*time.Second
 
 type PollResult struct {
 	retryable       bool      // Internal scheduling metadata, never a public diagnostic.
@@ -295,7 +296,7 @@ func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool) dis
 				log.Printf("poller: send alert to %s: %v", device.DeviceID, err)
 				var apnsErr *APNSError
 				if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
-					if clearErr := p.store.ClearAPNsToken(device.DeviceID); clearErr != nil {
+					if clearErr := p.store.ClearAPNsToken(device.DeviceID, device.APNsToken); clearErr != nil {
 						log.Printf("poller: clear APNs token for %s: %v", device.DeviceID, clearErr)
 					}
 				}
@@ -322,7 +323,7 @@ func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool) dis
 				log.Printf("poller: widget refresh to %s: %v", device.DeviceID, err)
 				var apnsErr *APNSError
 				if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
-					if clearErr := p.store.ClearWidgetToken(device.DeviceID); clearErr != nil {
+					if clearErr := p.store.ClearWidgetToken(device.DeviceID, device.WidgetToken); clearErr != nil {
 						log.Printf("poller: clear widget token for %s: %v", device.DeviceID, clearErr)
 					}
 				}
