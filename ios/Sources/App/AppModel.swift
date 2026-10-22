@@ -68,6 +68,7 @@ final class AppModel {
         if let creds = try? keychain.load() {
             self.credentials = creds
             self.isConfigured = true
+            store.mirrorCredentials(nil)
         } else if let mirrored = store.mirroredCredentials() {
             self.credentials = mirrored
             self.isConfigured = true

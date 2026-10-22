@@ -397,6 +397,33 @@ final class DeliveryStateTests: XCTestCase {
 }
 
 @MainActor
+final class AppModelCredentialTests: XCTestCase {
+    func testLoadingKeychainCredentialsClearsLegacyMirror() throws {
+        let name = "usagewidget.tests.\(UUID().uuidString)"
+        let keychain = KeychainStore(service: name, accessGroup: nil)
+        let store = SnapshotStore(suiteName: name)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer {
+            try? keychain.clear()
+            defaults.removePersistentDomain(forName: name)
+        }
+        let credentials = ConnectionCredentials(serverURL: "https://current.example", token: "current-test-token")
+        try keychain.save(credentials)
+        store.mirrorCredentials(ConnectionCredentials(serverURL: "https://legacy.example", token: "legacy-test-token"))
+        XCTAssertNotNil(defaults.object(forKey: "mirroredServerURL"))
+        XCTAssertNotNil(defaults.object(forKey: "mirroredBearerToken"))
+
+        let model = AppModel(keychain: keychain, store: store)
+
+        XCTAssertTrue(model.isConfigured)
+        XCTAssertEqual(model.credentials, credentials)
+        XCTAssertEqual(try keychain.load(), credentials)
+        XCTAssertNil(defaults.object(forKey: "mirroredServerURL"))
+        XCTAssertNil(defaults.object(forKey: "mirroredBearerToken"))
+    }
+}
+
+@MainActor
 final class AppModelDeliveryTests: XCTestCase {
     private func makeModel() -> AppModel {
         AppModel(
