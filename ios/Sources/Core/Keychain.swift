@@ -16,7 +16,13 @@ public struct ConnectionCredentials: Equatable, Sendable {
     }
 }
 
-public final class KeychainStore: @unchecked Sendable {
+/// The credential operations AppModel needs; lets tests run without Keychain entitlements.
+public protocol CredentialStoring: AnyObject {
+    func save(_ credentials: ConnectionCredentials) throws
+    func load() throws -> ConnectionCredentials?
+}
+
+public final class KeychainStore: CredentialStoring, @unchecked Sendable {
     public static let shared = KeychainStore(accessGroup: AppConstants.keychainAccessGroup)
 
     private let service: String

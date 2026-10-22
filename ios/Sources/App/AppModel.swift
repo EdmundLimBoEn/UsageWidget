@@ -56,11 +56,11 @@ final class AppModel {
         DeliveryState.evaluate(health: health, readiness: readiness, notificationsAuthorized: notificationsAuthorized)
     }
 
-    private let keychain: KeychainStore
+    private let keychain: any CredentialStoring
     private let store: SnapshotStore
     private(set) var credentials: ConnectionCredentials?
 
-    init(keychain: KeychainStore = .shared, store: SnapshotStore = .shared) {
+    init(keychain: any CredentialStoring = KeychainStore.shared, store: SnapshotStore = .shared) {
         self.keychain = keychain
         self.store = store
         self.preferences = store.loadPreferences()
@@ -68,6 +68,7 @@ final class AppModel {
         if let creds = try? keychain.load() {
             self.credentials = creds
             self.isConfigured = true
+            store.mirrorCredentials(nil)
         } else if let mirrored = store.mirroredCredentials() {
             self.credentials = mirrored
             self.isConfigured = true
