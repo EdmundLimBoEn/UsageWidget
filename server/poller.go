@@ -46,7 +46,8 @@ type Poller struct {
 	notifier Notifier
 	api      *API
 
-	mu sync.Mutex
+	mu       sync.Mutex
+	inFlight *pollCall
 }
 
 func NewPoller(store *Store, source UsageSource, notifier Notifier, api *API) *Poller {
@@ -110,11 +111,37 @@ func (p *Poller) interval() time.Duration {
 	return time.Duration(settings.PollIntervalMinutes) * time.Minute
 }
 
-// PollNow runs one poll cycle. Concurrent callers serialize on p.mu.
+// pollCall publishes an immutable result when done is closed.
+type pollCall struct {
+	done   chan struct{}
+	result PollResult
+}
+
+func (c *pollCall) wait(ctx context.Context) PollResult {
+	select {
+	case <-c.done:
+		return c.result
+	case <-ctx.Done():
+		return PollResult{Error: ctx.Err().Error()}
+	}
+}
+
+// PollNow runs one poll cycle. Concurrent callers share the in-flight result.
 func (p *Poller) PollNow(ctx context.Context) PollResult {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.pollOnceUnlocked(ctx)
+	if call := p.inFlight; call != nil {
+		p.mu.Unlock()
+		return call.wait(ctx)
+	}
+	call := &pollCall{done: make(chan struct{})}
+	p.inFlight = call
+	p.mu.Unlock()
+	call.result = p.pollOnceUnlocked(ctx)
+	p.mu.Lock()
+	p.inFlight = nil
+	close(call.done)
+	p.mu.Unlock()
+	return call.result
 }
 
 func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
