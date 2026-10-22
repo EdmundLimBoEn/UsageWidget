@@ -52,4 +52,10 @@ for ($attempt=0; $attempt -lt 30; $attempt++) {
 }
 Invoke-RestMethod -Headers $headers -Uri "http://127.0.0.1:8377/v1/health" | Out-Null
 Write-Host "UsageWidget is healthy at $publicUrl"
-& $qr -url $publicUrl -token $config.USAGEWIDGET_TOKEN
+$previousToken = $env:USAGEWIDGET_TOKEN
+try {
+    $env:USAGEWIDGET_TOKEN = $config.USAGEWIDGET_TOKEN
+    & $qr -url $publicUrl
+} finally {
+    $env:USAGEWIDGET_TOKEN = $previousToken
+}
