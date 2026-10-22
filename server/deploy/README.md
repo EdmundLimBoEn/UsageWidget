@@ -235,6 +235,7 @@ Server variables:
 | `COLLECTOR_SOCKET` | `/run/usagewidget/collector.sock` | Production collector socket |
 | `DB_PATH` | `./usagewidget.db` | SQLite path; installer sets the data-directory path |
 | `LISTEN_ADDR` | `127.0.0.1:8377` | Main API listener |
+| `MAX_DEVICES` | `50` | Positive registration cap; existing device updates remain allowed |
 | `CROSSUSAGE_URL` | unset | CrossUsage HTTP source, usually `/v1/limits` |
 | `CROSSUSAGE_BIN` | unset | Exact `crossusage-cli` path |
 | `CROSSUSAGE_CMD` | unset | Full CrossUsage command override |

@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	store, err := server.OpenStore(cfg.DBPath)
+	store, err := server.OpenStoreWithDeviceLimit(cfg.DBPath, cfg.MaxDevices)
 	if err != nil {
 		log.Fatalf("store: %v", err)
 	}

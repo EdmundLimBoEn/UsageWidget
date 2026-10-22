@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -37,6 +38,9 @@ type API struct {
 	lastPollError       string
 	widgetDelivery      widgetDeliveryHealth
 	readinessTestAt     map[string]time.Time
+	manualPoll          *pollCall
+	lastManualPoll      *pollCall
+	lastManualPollAt    time.Time
 }
 
 func NewAPI(cfg Config, store *Store, source UsageSource) *API {
@@ -266,11 +270,25 @@ func (a *API) handleReadinessTest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid deviceID"})
 		return
 	}
+	device, found, err := a.store.GetDevice(deviceID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	now := time.Now().UTC()
 	a.mu.Lock()
-	last := a.readinessTestAt[deviceID]
-	if !last.IsZero() && now.Sub(last) < time.Minute {
-		retry := int(time.Minute.Seconds() - now.Sub(last).Seconds())
+	for id, at := range a.readinessTestAt {
+		if now.Sub(at) >= time.Minute {
+			delete(a.readinessTestAt, id)
+		}
+	}
+	if !found {
+		a.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "device is not registered"})
+		return
+	}
+	if last, ok := a.readinessTestAt[deviceID]; ok {
+		retry := int((time.Minute - now.Sub(last) + time.Second - 1) / time.Second)
 		a.mu.Unlock()
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "readiness test is limited to once per minute"})
@@ -278,15 +296,6 @@ func (a *API) handleReadinessTest(w http.ResponseWriter, r *http.Request) {
 	}
 	a.readinessTestAt[deviceID] = now
 	a.mu.Unlock()
-	device, found, err := a.store.GetDevice(deviceID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	if !found {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "device is not registered"})
-		return
-	}
 	result := DeviceTestResult{DeviceID: deviceID, AttemptedAt: now}
 	var details []string
 	if device.APNsToken != "" {
@@ -807,6 +816,10 @@ func (a *API) handlePostDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := a.store.UpsertDevice(resp.DeviceID, resp.APNsToken, resp.WidgetToken); err != nil {
+		if errors.Is(err, ErrDeviceLimit) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
@@ -850,7 +863,28 @@ func (a *API) handleForcePoll(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "poller not available"})
 		return
 	}
-	result := a.poller.PollNow(r.Context())
+	a.mu.Lock()
+	call := a.manualPoll
+	const interval = 10 * time.Second
+	if call == nil && a.lastManualPoll != nil && time.Since(a.lastManualPollAt) < interval {
+		// Repeated taps within the interval get the latest result instead of a new upstream poll.
+		call = a.lastManualPoll
+	}
+	if call == nil {
+		call = &pollCall{done: make(chan struct{})}
+		a.manualPoll = call
+		a.lastManualPollAt = time.Now()
+		a.mu.Unlock()
+		call.result = a.poller.PollNow(r.Context())
+		a.mu.Lock()
+		a.manualPoll = nil
+		a.lastManualPoll = call
+		close(call.done)
+		a.mu.Unlock()
+	} else {
+		a.mu.Unlock()
+	}
+	result := call.wait(r.Context())
 	resp := pollResponse{
 		OK:              result.Success,
 		PolledAt:        result.PolledAt,

@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,7 +13,8 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db         *sql.DB
+	maxDevices int
 }
 
 const schema = `
@@ -109,7 +111,19 @@ func init() {
 	defaultSettings["provider_order"] = string(order)
 }
 
+const DefaultMaxDevices = 50
+
+var ErrDeviceLimit = errors.New("registered device limit reached")
+
 func OpenStore(dbPath string) (*Store, error) {
+	return OpenStoreWithDeviceLimit(dbPath, DefaultMaxDevices)
+}
+
+// OpenStoreWithDeviceLimit caps new registrations while permitting token updates.
+func OpenStoreWithDeviceLimit(dbPath string, maxDevices int) (*Store, error) {
+	if maxDevices <= 0 {
+		return nil, fmt.Errorf("store: device limit must be positive")
+	}
 	// Snapshots and device push tokens are sensitive. Ensure ordinary filesystem
 	// database paths are never created with a process-default world-readable mode.
 	if dbPath != ":memory:" && !strings.HasPrefix(dbPath, "file:") {
@@ -147,7 +161,7 @@ func OpenStore(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: commit migrations: %w", err)
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, maxDevices: maxDevices}
 	if err := s.seedDefaultSettings(); err != nil {
 		db.Close()
 		return nil, err
@@ -446,14 +460,22 @@ func (s *Store) LatestSnapshot() (fetchedAt time.Time, payload []byte, ok bool, 
 }
 
 func (s *Store) UpsertDevice(deviceID, apnsToken, widgetToken string) error {
-	_, err := s.db.Exec(
+	result, err := s.db.Exec(
 		`INSERT INTO devices (device_id, apns_token, widget_token, updated_at)
-		 VALUES (?, ?, ?, ?)
+		 SELECT ?, ?, ?, ?
+		 WHERE (SELECT COUNT(*) FROM devices) < ? OR EXISTS (SELECT 1 FROM devices WHERE device_id = ?)
 		 ON CONFLICT(device_id) DO UPDATE SET apns_token = excluded.apns_token, widget_token = excluded.widget_token, updated_at = excluded.updated_at`,
-		deviceID, apnsToken, widgetToken, time.Now().UTC().Format(time.RFC3339),
+		deviceID, apnsToken, widgetToken, time.Now().UTC().Format(time.RFC3339), s.maxDevices, deviceID,
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert device: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: upsert device result: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w (maximum %d)", ErrDeviceLimit, s.maxDevices)
 	}
 	return nil
 }

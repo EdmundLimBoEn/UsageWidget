@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +15,7 @@ type Config struct {
 	CollectorSocket string
 	DBPath          string
 	ListenAddr      string
+	MaxDevices      int
 
 	APNsKeyPath  string
 	APNsKeyID    string
@@ -35,7 +37,12 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("USAGEWIDGET_TOKEN must not have surrounding whitespace")
 	}
 
+	maxDevices, err := strconv.Atoi(envOr("MAX_DEVICES", strconv.Itoa(DefaultMaxDevices)))
+	if err != nil || maxDevices <= 0 {
+		return Config{}, fmt.Errorf("MAX_DEVICES must be a positive integer")
+	}
 	return Config{
+		MaxDevices:      maxDevices,
 		Token:           token,
 		CrossUsageURL:   strings.TrimSpace(os.Getenv("CROSSUSAGE_URL")),
 		CrossUsageCmd:   strings.TrimSpace(os.Getenv("CROSSUSAGE_CMD")),
