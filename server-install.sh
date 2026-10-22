@@ -227,7 +227,8 @@ strip_obsolete_env_keys() {
 }
 
 write_initial_env() {
-  install -d -m 0750 -o usagewidget -g usagewidget "$CONFIG_DIR" "$DATA_DIR"
+  install -d -m 0750 -o root -g usagewidget "$CONFIG_DIR"
+  install -d -m 0750 -o usagewidget -g usagewidget "$DATA_DIR"
   if [[ ! -e $ENV_FILE ]]; then
     local token; token="$(openssl rand -hex 32)"
     install -m 0600 -o root -g usagewidget /dev/null "$ENV_FILE"

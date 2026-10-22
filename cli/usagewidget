@@ -12,6 +12,24 @@ DEFAULT_REPO=""
 
 die() { echo "usagewidget: $*" >&2; exit 1; }
 
+load_server_env() {
+  local line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ $line == *=* ]] || continue
+    key=${line%%=*}
+    case "$key" in
+      USAGEWIDGET_TOKEN|USAGEWIDGET_URL|USAGEWIDGET_DEPLOY_HOST|USAGEWIDGET_REPO) ;;
+      *) continue ;;
+    esac
+    value=${line#*=}
+    # Strip one pair of optional quotes; never evaluate shell syntax.
+    if [[ ${#value} -ge 2 && ( $value == \"*\" || $value == \'*\' ) ]]; then
+      value=${value:1:${#value}-2}
+    fi
+    printf -v "$key" '%s' "$value"
+  done <"$SERVER_ENV"
+}
+
 load_config() {
   local default_url="$DEFAULT_URL"
   if [[ -f "$CONFIG_FILE" ]]; then
@@ -22,10 +40,7 @@ load_config() {
     set +a
   elif [[ -r "$SERVER_ENV" ]]; then
     # On the server, talk directly to the local daemon and reuse its service env.
-    set -a
-    # shellcheck disable=SC1090
-    source "$SERVER_ENV"
-    set +a
+    load_server_env
     default_url="$DEFAULT_LOCAL_URL"
   fi
   USAGEWIDGET_URL="${USAGEWIDGET_URL:-$default_url}"
