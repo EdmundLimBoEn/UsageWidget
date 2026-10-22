@@ -460,12 +460,17 @@ func (s *Store) LatestSnapshot() (fetchedAt time.Time, payload []byte, ok bool, 
 }
 
 func (s *Store) UpsertDevice(deviceID, apnsToken, widgetToken string) error {
+	return s.upsertDevice(deviceID, &apnsToken, &widgetToken)
+}
+
+// Nil tokens preserve existing values; pointers to empty strings clear them.
+func (s *Store) upsertDevice(deviceID string, apnsToken, widgetToken *string) error {
 	result, err := s.db.Exec(
 		`INSERT INTO devices (device_id, apns_token, widget_token, updated_at)
-		 SELECT ?, ?, ?, ?
+		 SELECT ?, COALESCE(?, ''), COALESCE(?, ''), ?
 		 WHERE (SELECT COUNT(*) FROM devices) < ? OR EXISTS (SELECT 1 FROM devices WHERE device_id = ?)
-		 ON CONFLICT(device_id) DO UPDATE SET apns_token = excluded.apns_token, widget_token = excluded.widget_token, updated_at = excluded.updated_at`,
-		deviceID, apnsToken, widgetToken, time.Now().UTC().Format(time.RFC3339), s.maxDevices, deviceID,
+		 ON CONFLICT(device_id) DO UPDATE SET apns_token = COALESCE(?, devices.apns_token), widget_token = COALESCE(?, devices.widget_token), updated_at = excluded.updated_at`,
+		deviceID, apnsToken, widgetToken, time.Now().UTC().Format(time.RFC3339), s.maxDevices, deviceID, apnsToken, widgetToken,
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert device: %w", err)
@@ -498,7 +503,7 @@ type DeviceTestResult struct {
 }
 
 func (s *Store) SaveDeviceTestResult(result DeviceTestResult) error {
-	_, err := s.db.Exec(`INSERT INTO device_test_results(device_id,attempted_at,alert_attempted,alert_accepted,widget_attempted,widget_accepted,detail) VALUES(?,?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET attempted_at=excluded.attempted_at,alert_attempted=excluded.alert_attempted,alert_accepted=excluded.alert_accepted,widget_attempted=excluded.widget_attempted,widget_accepted=excluded.widget_accepted,detail=excluded.detail`, result.DeviceID, result.AttemptedAt.UTC().Format(time.RFC3339Nano), result.AlertAttempted, result.AlertAccepted, result.WidgetAttempted, result.WidgetAccepted, truncateDiagnostic(result.Detail, 240))
+	_, err := s.db.Exec(`INSERT INTO device_test_results(device_id,attempted_at,alert_attempted,alert_accepted,widget_attempted,widget_accepted,detail) SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM devices WHERE device_id=?) ON CONFLICT(device_id) DO UPDATE SET attempted_at=excluded.attempted_at,alert_attempted=excluded.alert_attempted,alert_accepted=excluded.alert_accepted,widget_attempted=excluded.widget_attempted,widget_accepted=excluded.widget_accepted,detail=excluded.detail`, result.DeviceID, result.AttemptedAt.UTC().Format(time.RFC3339Nano), result.AlertAttempted, result.AlertAccepted, result.WidgetAttempted, result.WidgetAccepted, truncateDiagnostic(result.Detail, 240), result.DeviceID)
 	if err != nil {
 		return fmt.Errorf("store: save device test result: %w", err)
 	}
@@ -566,11 +571,18 @@ func (s *Store) ListDevices() ([]Device, error) {
 }
 
 func (s *Store) DeleteDevice(deviceID string) error {
-	_, err := s.db.Exec(`DELETE FROM devices WHERE device_id = ?`, deviceID)
+	tx, err := s.db.Begin()
 	if err != nil {
+		return fmt.Errorf("store: begin delete device: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM devices WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("store: delete device: %w", err)
 	}
-	return nil
+	if _, err := tx.Exec(`DELETE FROM device_test_results WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("store: delete device test result: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ClearAPNsToken(deviceID string) error {

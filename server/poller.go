@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
+const sharedPollTimeout = 2 * time.Minute
+
 type PollResult struct {
+	retryable       bool      // Internal scheduling metadata, never a public diagnostic.
 	PolledAt        time.Time `json:"polledAt"`
 	Success         bool      `json:"success"`
 	Events          int       `json:"events"`
@@ -64,7 +67,7 @@ func (p *Poller) Run(ctx context.Context) {
 	for {
 		cycleStarted := time.Now()
 		result := p.PollNow(ctx)
-		if !result.Success && retryablePollError(result.Error) {
+		if !result.Success && result.retryable {
 			retryAt := time.Now().Add(30 * time.Second)
 			p.setNextPollAt(retryAt)
 			if !waitUntil(ctx, retryAt) {
@@ -136,12 +139,16 @@ func (p *Poller) PollNow(ctx context.Context) PollResult {
 	call := &pollCall{done: make(chan struct{})}
 	p.inFlight = call
 	p.mu.Unlock()
-	call.result = p.pollOnceUnlocked(ctx)
-	p.mu.Lock()
-	p.inFlight = nil
-	close(call.done)
-	p.mu.Unlock()
-	return call.result
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), sharedPollTimeout)
+		defer cancel()
+		call.result = p.pollOnceUnlocked(ctx)
+		p.mu.Lock()
+		p.inFlight = nil
+		close(call.done)
+		p.mu.Unlock()
+	}()
+	return call.wait(ctx)
 }
 
 func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
@@ -168,6 +175,7 @@ func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
 	if err != nil {
 		log.Printf("poller: fetch failed, keeping last snapshot: %v", err)
 		p.markStale()
+		result.retryable = isRetryablePollError(err)
 		result.Error = err.Error()
 		return result
 	}
