@@ -585,16 +585,16 @@ func (s *Store) DeleteDevice(deviceID string) error {
 	return tx.Commit()
 }
 
-func (s *Store) ClearAPNsToken(deviceID string) error {
-	_, err := s.db.Exec(`UPDATE devices SET apns_token = '', updated_at = ? WHERE device_id = ?`, time.Now().UTC().Format(time.RFC3339), deviceID)
+func (s *Store) ClearAPNsToken(deviceID, failedToken string) error {
+	_, err := s.db.Exec(`UPDATE devices SET apns_token = '', updated_at = ? WHERE device_id = ? AND apns_token = ?`, time.Now().UTC().Format(time.RFC3339), deviceID, failedToken)
 	if err != nil {
 		return fmt.Errorf("store: clear APNs token: %w", err)
 	}
 	return nil
 }
 
-func (s *Store) ClearWidgetToken(deviceID string) error {
-	_, err := s.db.Exec(`UPDATE devices SET widget_token = '', updated_at = ? WHERE device_id = ?`, time.Now().UTC().Format(time.RFC3339), deviceID)
+func (s *Store) ClearWidgetToken(deviceID, failedToken string) error {
+	_, err := s.db.Exec(`UPDATE devices SET widget_token = '', updated_at = ? WHERE device_id = ? AND widget_token = ?`, time.Now().UTC().Format(time.RFC3339), deviceID, failedToken)
 	if err != nil {
 		return fmt.Errorf("store: clear widget token: %w", err)
 	}

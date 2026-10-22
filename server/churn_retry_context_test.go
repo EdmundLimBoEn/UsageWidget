@@ -232,7 +232,7 @@ func TestSharedPollSurvivesInitiatorCancellation(t *testing.T) {
 			if fetchCtx.Err() != nil {
 				t.Error("initiator canceled shared fetch")
 			}
-			if deadline, ok := fetchCtx.Deadline(); !ok || time.Until(deadline) > 2*time.Minute {
+			if deadline, ok := fetchCtx.Deadline(); !ok || time.Until(deadline) > sharedPollTimeout {
 				t.Error("shared fetch lacks bounded deadline")
 			}
 			// Release without closing, so deferred cleanup also releases on test failure.
