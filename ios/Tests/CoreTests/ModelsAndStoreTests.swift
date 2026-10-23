@@ -458,3 +458,140 @@ final class AppModelDeliveryTests: XCTestCase {
         }
     }
 }
+
+final class KeychainPairingTests: XCTestCase {
+    private var service = ""
+    private var store: KeychainStore!
+
+    override func setUp() {
+        super.setUp()
+        service = "usagewidget.pairing.tests.\(UUID().uuidString)"
+        store = KeychainStore(service: service, accessGroup: nil)
+    }
+
+    override func tearDownWithError() throws {
+        try store.clear()
+        store = nil
+        try super.tearDownWithError()
+    }
+
+    private func query(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
+    }
+
+    private func seedLegacy(_ credentials: ConnectionCredentials) throws {
+        for (account, value) in [("serverURL", credentials.serverURL), ("bearerToken", credentials.token)] {
+            var item = query(account)
+            item[kSecValueData as String] = Data(value.utf8)
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let status = SecItemAdd(item as CFDictionary, nil)
+            guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
+        }
+    }
+
+    private func pairReference() throws -> Data {
+        var item = query("connectionCredentials")
+        item[kSecReturnPersistentRef as String] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(item as CFDictionary, &result)
+        guard status == errSecSuccess, let reference = result as? Data else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+        return reference
+    }
+
+    private func assertLegacyAbsent() {
+        for account in ["serverURL", "bearerToken"] {
+            XCTAssertEqual(SecItemCopyMatching(query(account) as CFDictionary, nil), errSecItemNotFound)
+        }
+    }
+
+    func testSavingUpdatesOneItemWithoutReplacingIt() throws {
+        let first = ConnectionCredentials(serverURL: "https://a.example", token: "test-a")
+        let second = ConnectionCredentials(serverURL: "https://b.example", token: "test-b")
+        try store.save(first)
+        let reference = try pairReference()
+        try store.save(second)
+        XCTAssertEqual(try pairReference(), reference)
+        XCTAssertTrue(try store.load() == second, "Saved URL and token must round-trip together")
+        assertLegacyAbsent()
+    }
+
+    func testLegacyMigrationPersistsPairAndRemovesSeparateItems() throws {
+        let legacy = ConnectionCredentials(serverURL: "https://legacy.example", token: "test-legacy")
+        try seedLegacy(legacy)
+        XCTAssertTrue(try store.load() == legacy)
+        _ = try pairReference()
+        assertLegacyAbsent()
+        let widget = KeychainStore(service: service, accessGroup: nil)
+        XCTAssertTrue(try widget.load() == legacy)
+        try store.clear()
+        XCTAssertNil(try widget.load())
+    }
+
+    func testExistingPairTakesPrecedenceOverLegacyItems() throws {
+        let current = ConnectionCredentials(serverURL: "https://current.example", token: "test-current")
+        try store.save(current)
+        try seedLegacy(ConnectionCredentials(serverURL: "https://old.example", token: "test-old"))
+        XCTAssertTrue(try store.load() == current)
+        try store.clear()
+        assertLegacyAbsent()
+        XCTAssertNil(try store.load())
+    }
+
+    func testIncompleteLegacyPairIsNotReturned() throws {
+        try seedLegacy(ConnectionCredentials(serverURL: "https://old.example", token: "test-old"))
+        XCTAssertEqual(SecItemDelete(query("bearerToken") as CFDictionary), errSecSuccess)
+        XCTAssertNil(try store.load())
+    }
+
+    func testConcurrentServerChangesNeverReturnMixedOrMissingCredentials() throws {
+        let first = ConnectionCredentials(serverURL: "https://a.example", token: "test-a")
+        let second = ConnectionCredentials(serverURL: "https://b.example", token: "test-b")
+        try store.save(first)
+        // Separate instances model the app and widget: no shared in-process lock.
+        let writer = KeychainStore(service: service, accessGroup: nil)
+        let reader = KeychainStore(service: service, accessGroup: nil)
+        DispatchQueue.concurrentPerform(iterations: 200) { iteration in
+            do {
+                if iteration.isMultiple(of: 2) {
+                    try writer.save(iteration.isMultiple(of: 4) ? first : second)
+                } else {
+                    let loaded = try reader.load()
+                    XCTAssertTrue(loaded == first || loaded == second,
+                                  "Every read must return a complete saved pair")
+                }
+            } catch {
+                XCTFail("Concurrent credential access failed")
+            }
+        }
+    }
+
+    func testConcurrentMigrationCannotOverwriteNewServerCredentials() throws {
+        let legacy = ConnectionCredentials(serverURL: "https://old.example", token: "test-old")
+        let current = ConnectionCredentials(serverURL: "https://new.example", token: "test-new")
+        let writer = KeychainStore(service: service, accessGroup: nil)
+        let reader = KeychainStore(service: service, accessGroup: nil)
+        for _ in 0..<30 {
+            try store.clear()
+            try seedLegacy(legacy)
+            DispatchQueue.concurrentPerform(iterations: 2) { iteration in
+                do {
+                    if iteration == 0 {
+                        try writer.save(current)
+                    } else {
+                        let loaded = try reader.load()
+                        XCTAssertTrue(loaded == legacy || loaded == current,
+                                      "Migration must return a complete saved pair")
+                    }
+                } catch {
+                    XCTFail("Concurrent migration failed")
+                }
+            }
+            XCTAssertTrue(try store.load() == current, "Migration must not overwrite a newer save")
+            assertLegacyAbsent()
+        }
+    }
+}
