@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS device_test_results (
 );
 `
 
-const CurrentSchemaVersion = 1
+const CurrentSchemaVersion = 2
 
 var defaultSettings = map[string]string{
 	"poll_interval_minutes":           "5",
@@ -158,6 +158,33 @@ func OpenStoreWithDeviceLimit(dbPath string, maxDevices int) (*Store, error) {
 		tx.Rollback()
 		db.Close()
 		return nil, fmt.Errorf("store: apply schema: %w", err)
+	}
+	// Upgrade existing queues and delivery cadence atomically. Unknown-age legacy
+	// deliveries expire immediately rather than replaying historical alerts.
+	var version int
+	if err := tx.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").Scan(&version); err != nil {
+		tx.Rollback()
+		db.Close()
+		return nil, err
+	}
+	if version < 2 {
+		_, err := tx.Exec(`
+			ALTER TABLE pending_alerts ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE alert_delivery_state RENAME TO legacy_alert_delivery_state;
+			CREATE TABLE alert_delivery_state (
+				device_id TEXT NOT NULL, window_id TEXT NOT NULL, reset_epoch TEXT NOT NULL,
+				policy_fingerprint TEXT NOT NULL, last_delivered_at TEXT NOT NULL,
+				PRIMARY KEY(device_id, window_id, reset_epoch, policy_fingerprint));
+			INSERT INTO alert_delivery_state
+				SELECT d.device_id, a.* FROM legacy_alert_delivery_state a CROSS JOIN devices d;
+			DROP TABLE legacy_alert_delivery_state;
+			CREATE INDEX pending_alerts_created ON pending_alerts(created_at);
+		`)
+		if err != nil {
+			tx.Rollback()
+			db.Close()
+			return nil, err
+		}
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?) ON CONFLICT(version) DO NOTHING`, CurrentSchemaVersion, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		tx.Rollback()
@@ -268,23 +295,23 @@ func (s *Store) ReplaceAlertOverrides(overrides []AlertOverride) error {
 	return tx.Commit()
 }
 
-func (s *Store) DangerDeliveryDue(windowID, resetEpoch, fingerprint string, now time.Time, interval time.Duration) (bool, error) {
+func (s *Store) DangerDeliveryDue(deviceID, windowID, resetEpoch, fingerprint string, now time.Time, interval time.Duration) (bool, error) {
 	// A failed threshold alert or reminder already represents this danger period.
 	// Keep retrying it instead of building a backlog on every poll.
 	var pending bool
 	if err := s.eventDB().QueryRow(`SELECT EXISTS (
 		SELECT 1 FROM pending_alerts p JOIN devices d ON d.device_id = p.device_id
-		WHERE d.apns_token != '' AND json_extract(p.payload, '$.WindowID') = ?
+		WHERE d.apns_token != '' AND p.device_id = ? AND json_extract(p.payload, '$.WindowID') = ?
 		AND json_extract(p.payload, '$.DangerResetEpoch') = ?
 		AND json_extract(p.payload, '$.DangerPolicyFingerprint') = ?
-	)`, windowID, resetEpoch, fingerprint).Scan(&pending); err != nil {
+	)`, deviceID, windowID, resetEpoch, fingerprint).Scan(&pending); err != nil {
 		return false, fmt.Errorf("store: read pending danger delivery: %w", err)
 	}
 	if pending {
 		return false, nil
 	}
 	var raw string
-	err := s.eventDB().QueryRow(`SELECT last_delivered_at FROM alert_delivery_state WHERE window_id=? AND reset_epoch=? AND policy_fingerprint=?`, windowID, resetEpoch, fingerprint).Scan(&raw)
+	err := s.eventDB().QueryRow(`SELECT last_delivered_at FROM alert_delivery_state WHERE device_id=? AND window_id=? AND reset_epoch=? AND policy_fingerprint=?`, deviceID, windowID, resetEpoch, fingerprint).Scan(&raw)
 	if err != nil && err != sql.ErrNoRows {
 		return false, fmt.Errorf("store: read danger delivery: %w", err)
 	}
@@ -303,8 +330,8 @@ func (s *Store) DangerDeliveryDue(windowID, resetEpoch, fingerprint string, now 
 	return true, nil
 }
 
-func (s *Store) RecordDangerDelivery(windowID, resetEpoch, fingerprint string, now time.Time) error {
-	_, err := s.db.Exec(`INSERT INTO alert_delivery_state(window_id,reset_epoch,policy_fingerprint,last_delivered_at) VALUES(?,?,?,?) ON CONFLICT(window_id,reset_epoch,policy_fingerprint) DO UPDATE SET last_delivered_at=excluded.last_delivered_at`, windowID, resetEpoch, fingerprint, now.UTC().Format(time.RFC3339Nano))
+func (s *Store) RecordDangerDelivery(deviceID, windowID, resetEpoch, fingerprint string, now time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO alert_delivery_state(device_id,window_id,reset_epoch,policy_fingerprint,last_delivered_at) VALUES(?,?,?,?,?) ON CONFLICT(device_id,window_id,reset_epoch,policy_fingerprint) DO UPDATE SET last_delivered_at=excluded.last_delivered_at`, deviceID, windowID, resetEpoch, fingerprint, now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return fmt.Errorf("store: record danger delivery: %w", err)
 	}
@@ -569,7 +596,7 @@ func (s *Store) GetDevice(deviceID string) (Device, bool, error) {
 }
 
 func (s *Store) ListDevices() ([]Device, error) {
-	rows, err := s.db.Query(`SELECT device_id, apns_token, widget_token, updated_at FROM devices`)
+	rows, err := s.eventDB().Query(`SELECT device_id, apns_token, widget_token, updated_at FROM devices`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list devices: %w", err)
 	}
@@ -605,6 +632,9 @@ func (s *Store) DeleteDevice(deviceID string) error {
 	}
 	if _, err := tx.Exec(`DELETE FROM pending_alerts WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("store: delete pending alerts: %w", err)
+	}
+	if _, err := tx.Exec(`DELETE FROM alert_delivery_state WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("store: delete alert cadence: %w", err)
 	}
 	return tx.Commit()
 }
@@ -754,6 +784,7 @@ func setWindowState(db interface {
 func (s *Store) eventDB() interface {
 	Exec(string, ...any) (sql.Result, error)
 	QueryRow(string, ...any) *sql.Row
+	Query(string, ...any) (*sql.Rows, error)
 } {
 	if s.eventTx != nil {
 		return s.eventTx
@@ -766,9 +797,10 @@ func (s *Store) enqueueAlert(event Event) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.eventDB().Exec(`INSERT INTO pending_alerts(event_key, device_id, payload)
-        SELECT ?, device_id, ? FROM devices WHERE apns_token != ''
-        ON CONFLICT(event_key, device_id) DO NOTHING`, event.Key, string(payload))
+	_, err = s.eventDB().Exec(`INSERT INTO pending_alerts(event_key, device_id, payload, created_at)
+        SELECT ?, device_id, ?, ? FROM devices WHERE apns_token != ''
+		AND (? = '' OR device_id = ?)
+        ON CONFLICT(event_key, device_id) DO NOTHING`, event.Key, string(payload), time.Now().Unix(), event.recipientID, event.recipientID)
 	return err
 }
 
@@ -778,10 +810,21 @@ type pendingAlert struct {
 	Token    string
 }
 
+const pendingAlertRetention = 24 * time.Hour
+const pendingAlertBatchSize = 100
+
+func (s *Store) expireOldAlerts() error {
+	_, err := s.eventDB().Exec("DELETE FROM pending_alerts WHERE created_at <= ?", time.Now().Add(-pendingAlertRetention).Unix())
+	return err
+}
+
 func (s *Store) pendingAlerts() ([]pendingAlert, error) {
+	if err := s.expireOldAlerts(); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Query(`SELECT p.payload, d.device_id, d.apns_token
         FROM pending_alerts p JOIN devices d ON d.device_id = p.device_id
-        WHERE d.apns_token != '' ORDER BY p.rowid`)
+        WHERE d.apns_token != '' ORDER BY p.rowid LIMIT ?`, pendingAlertBatchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -803,5 +846,56 @@ func (s *Store) pendingAlerts() ([]pendingAlert, error) {
 
 func (s *Store) acknowledgeAlert(key, deviceID string) error {
 	_, err := s.db.Exec(`DELETE FROM pending_alerts WHERE event_key = ? AND device_id = ?`, key, deviceID)
+	return err
+}
+
+// deferAlert moves a failed delivery behind the rest of the queue without
+// changing its payload or retention deadline. Updating the rowid is atomic.
+func (s *Store) deferAlert(key, deviceID string) error {
+	_, err := s.db.Exec(`UPDATE pending_alerts
+		SET rowid = (SELECT MAX(rowid) + 1 FROM pending_alerts)
+		WHERE event_key = ? AND device_id = ?`, key, deviceID)
+	return err
+}
+
+// rejectAlert clears a terminal token and its queued deliveries only if that
+// token is still registered. A replacement token inherits the pending alert.
+func (s *Store) rejectAlert(deviceID, token string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec("UPDATE devices SET apns_token = '', updated_at = ? WHERE device_id = ? AND apns_token = ?", time.Now().UTC().Format(time.RFC3339), deviceID, token)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		if _, err := tx.Exec("DELETE FROM pending_alerts WHERE device_id = ?", deviceID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// Expire obsolete threshold events across the entire queue, including entries
+// outside this cycle's bounded delivery batch.
+func (s *Store) expireWindowAlerts(w Window, rule AlertRule) error {
+	epoch := ""
+	if w.ResetsAt != nil {
+		epoch = w.ResetsAt.Format(time.RFC3339Nano)
+	}
+	_, err := s.eventDB().Exec(`DELETE FROM pending_alerts
+		WHERE json_extract(payload, '$.WindowID') = ?
+		AND json_extract(payload, '$.Type') IN ('early_threshold', 'danger_threshold', 'danger_reminder')
+		AND (COALESCE(json_extract(payload, '$.ResetsAt'), '') != ?
+			OR (json_extract(payload, '$.Type') = 'early_threshold' AND ? < ?)
+			OR (json_extract(payload, '$.Type') IN ('danger_threshold', 'danger_reminder') AND ? > ?))`,
+		w.ID, epoch,
+		w.UsedPercent, rule.EarlyThresholdPct, w.RemainingPercent, rule.DangerThresholdPct)
 	return err
 }
