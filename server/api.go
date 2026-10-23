@@ -468,6 +468,7 @@ func (a *API) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 		freshLimit = 10 * time.Minute
 	}
 	if snap.Stale || time.Since(fetchedAt) > freshLimit {
+		snap.Stale = true
 		clearForecasts(&snap)
 	}
 	snap.Providers = projectCatalogProviders(snap.Providers)

@@ -667,7 +667,36 @@ func (s *Store) GetWindowState(windowID string) (WindowState, bool, error) {
 	return ws, true, nil
 }
 
+// SetCreditsState re-arms replenishment alerts on a decrease in the same
+// transaction as the baseline update, so a restart cannot lose the re-arm.
+func (s *Store) SetCreditsState(providerID string, count int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	prefix := "credits:" + providerID + ":"
+	_, err = tx.Exec(
+		`DELETE FROM events WHERE substr(event_key, 1, length(?)) = ?
+		 AND EXISTS (SELECT 1 FROM window_state WHERE window_id = ? AND credits_available > ?)`,
+		prefix, prefix, creditsWindowID(providerID), count,
+	)
+	if err != nil {
+		return fmt.Errorf("store: re-arm credit events: %w", err)
+	}
+	if err := setWindowState(tx, WindowState{WindowID: creditsWindowID(providerID), CreditsAvailable: &count}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) SetWindowState(ws WindowState) error {
+	return setWindowState(s.db, ws)
+}
+
+func setWindowState(db interface {
+	Exec(string, ...any) (sql.Result, error)
+}, ws WindowState) error {
 	var resetsAtStr any
 	if ws.ResetsAt != nil {
 		resetsAtStr = ws.ResetsAt.Format(time.RFC3339)
@@ -677,7 +706,7 @@ func (s *Store) SetWindowState(ws WindowState) error {
 		creditsAvailable = *ws.CreditsAvailable
 	}
 
-	_, err := s.db.Exec(
+	_, err := db.Exec(
 		`INSERT INTO window_state (window_id, used_percent, resets_at, credits_available, updated_at)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(window_id) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at,

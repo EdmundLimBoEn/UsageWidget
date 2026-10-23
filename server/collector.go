@@ -137,11 +137,10 @@ func extractJSONDocument(raw []byte) ([]byte, bool) {
 	default:
 		return nil, false
 	}
-	for end := len(s); end > start; end-- {
-		chunk := bytes.TrimSpace(s[start:end])
-		if json.Valid(chunk) {
-			return chunk, true
-		}
+	decoder := json.NewDecoder(bytes.NewReader(s[start:]))
+	var document json.RawMessage
+	if err := decoder.Decode(&document); err != nil {
+		return nil, false
 	}
-	return nil, false
+	return s[start : start+int(decoder.InputOffset())], true
 }

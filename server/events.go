@@ -150,10 +150,7 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 				}
 			}
 			count := p.Credits.AvailableCount
-			if err := e.store.SetWindowState(WindowState{
-				WindowID:         creditsID,
-				CreditsAvailable: &count,
-			}); err != nil {
+			if err := e.store.SetCreditsState(p.ID, count); err != nil {
 				return EventProcessResult{}, err
 			}
 		}

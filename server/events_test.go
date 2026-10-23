@@ -1,6 +1,7 @@
 package server
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -456,5 +457,32 @@ func TestRealProviderKeysRemainUnchanged(t *testing.T) {
 	}
 	if _, ok, err := s.GetWindowState("codex#credits"); err != nil || !ok {
 		t.Fatalf("real-provider credits key changed: ok=%v err=%v", ok, err)
+	}
+}
+
+// Each drop re-arms the next replenishment, including across database reopen.
+func TestCreditsRepeatedReplenishmentAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credits.db")
+	now := time.Now().UTC()
+	for i, count := range []int{1, 3, 3, 1, 3, 3, 1, 3} {
+		store, err := OpenStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events, err := NewEventEngine(store).Process(creditsSnap("codex", count, now), testSettings(), now)
+		store.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 0
+		if i == 1 || i == 4 || i == 7 {
+			want = 1
+		}
+		if len(events) != want {
+			t.Fatalf("step %d balance %d: got %d events, want %d", i, count, len(events), want)
+		}
+		if want == 1 && events[0].Type != "credits_increase" {
+			t.Fatalf("unexpected event: %+v", events[0])
+		}
 	}
 }

@@ -86,3 +86,39 @@ func TestRetryablePollErrorSkipsRateLimits(t *testing.T) {
 		t.Fatal("transport failures should receive one retry")
 	}
 }
+
+func TestExtractJSONDocument(t *testing.T) {
+	for _, tc := range []struct{ name, input, want string }{
+		{"object", "  {\"a\":[1,2]}  ", "{\"a\":[1,2]}"},
+		{"diagnostics", "warning\n{\"a\":1}\nfinished", "{\"a\":1}"},
+		{"array", "warning\n[1,{\"a\":2}]\nfinished", "[1,{\"a\":2}]"},
+		{"multiple documents", "{} []", "{}"},
+		{"scalar", "true", "true"},
+		{"empty", "", ""},
+		{"truncated", "{\"a\":\"unfinished", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := extractJSONDocument([]byte(tc.input))
+			if ok != (tc.want != "") || string(got) != tc.want {
+				t.Fatalf("got %q, %v; want %q", got, ok, tc.want)
+			}
+		})
+	}
+}
+
+func TestExtractJSONDocumentLargeTruncatedString(t *testing.T) {
+	raw := []byte("{\"value\":\"" + strings.Repeat("x", 4*1024*1024-10))
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := extractJSONDocument(raw)
+		done <- ok
+	}()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("accepted truncated JSON")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parsing a 4 MiB truncated string exceeded two seconds")
+	}
+}
