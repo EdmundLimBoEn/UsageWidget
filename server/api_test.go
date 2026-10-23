@@ -695,3 +695,46 @@ func TestForcePollFailureBadGateway(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", got)
 	}
 }
+
+func TestSnapshotFreshnessFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		age                    time.Duration
+		interval               int
+		storedStale, wantStale bool
+	}{
+		{"fresh", time.Minute, 5, false, false},
+		{"aged", 11 * time.Minute, 5, false, true},
+		{"minimum freshness", 9 * time.Minute, 1, false, false},
+		{"minimum expired", 11 * time.Minute, 1, false, true},
+		{"long interval fresh", 25 * time.Minute, 15, false, false},
+		{"long interval expired", 31 * time.Minute, 15, false, true},
+		{"already stale", time.Minute, 5, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api, store := newTestAPI(t)
+			if err := store.SetSetting("poll_interval_minutes", fmt.Sprint(tc.interval)); err != nil {
+				t.Fatal(err)
+			}
+			fetchedAt := time.Now().UTC().Add(-tc.age)
+			payload, err := json.Marshal(Snapshot{FetchedAt: fetchedAt, Stale: tc.storedStale})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveSnapshot(fetchedAt, payload); err != nil {
+				t.Fatal(err)
+			}
+			rec := doRequest(t, api, http.MethodGet, "/v1/snapshot", "secret-token", nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d", rec.Code)
+			}
+			var got Snapshot
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Stale != tc.wantStale {
+				t.Fatalf("stale = %v, want %v", got.Stale, tc.wantStale)
+			}
+		})
+	}
+}

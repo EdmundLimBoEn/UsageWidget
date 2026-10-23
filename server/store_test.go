@@ -286,3 +286,43 @@ func TestStoreWindowStateRoundTrip(t *testing.T) {
 		t.Fatalf("expected missing window state to report ok=false")
 	}
 }
+
+func TestCreditsRearmIsAtomicAndProviderScoped(t *testing.T) {
+	store := openTestStore(t)
+	if err := store.SetCreditsState("codex", 3); err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{creditsEventKey("codex", 3), creditsEventKey("claude", 3), "danger:codex.primary:epoch"}
+	for _, key := range keys {
+		if err := store.RecordEvent(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Force the baseline write to fail after the event deletion.
+	if _, err := store.db.Exec(`CREATE TRIGGER reject_credit_update BEFORE UPDATE ON window_state
+ BEGIN SELECT RAISE(ABORT, 'test baseline failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCreditsState("codex", 1); err == nil {
+		t.Fatal("expected baseline failure")
+	}
+	if notified, err := store.EventNotified(keys[0]); err != nil || !notified {
+		t.Fatalf("failed baseline update lost deduplication: notified=%v err=%v", notified, err)
+	}
+	if _, err := store.db.Exec("DROP TRIGGER reject_credit_update"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCreditsState("codex", 1); err != nil {
+		t.Fatal(err)
+	}
+	for i, key := range keys {
+		notified, err := store.EventNotified(key)
+		if err != nil || notified != (i != 0) {
+			t.Fatalf("key %q: notified=%v err=%v", key, notified, err)
+		}
+	}
+	state, ok, err := store.GetWindowState(creditsWindowID("codex"))
+	if err != nil || !ok || state.CreditsAvailable == nil || *state.CreditsAvailable != 1 {
+		t.Fatalf("baseline not updated: %+v, %v, %v", state, ok, err)
+	}
+}
