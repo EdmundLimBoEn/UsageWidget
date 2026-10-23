@@ -22,15 +22,50 @@ public protocol CredentialStoring: AnyObject {
     func load() throws -> ConnectionCredentials?
 }
 
+/// Item-level seam so tests exercise pairing and migration without Keychain entitlements.
+/// Implementations must make each operation atomic, just like the Security APIs.
+protocol KeychainItemStoring: Sendable {
+    func add(_ query: [String: Any]) -> OSStatus
+    func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus
+    func copyMatching(_ query: [String: Any]) -> (OSStatus, Data?)
+    func delete(_ query: [String: Any]) -> OSStatus
+}
+
+private struct SystemKeychainItems: KeychainItemStoring {
+    func add(_ query: [String: Any]) -> OSStatus {
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+    }
+
+    func copyMatching(_ query: [String: Any]) -> (OSStatus, Data?) {
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        return (status, item as? Data)
+    }
+
+    func delete(_ query: [String: Any]) -> OSStatus {
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
 public final class KeychainStore: CredentialStoring, @unchecked Sendable {
     public static let shared = KeychainStore(accessGroup: AppConstants.keychainAccessGroup)
 
     private let service: String
     private let accessGroup: String?
+    private let items: any KeychainItemStoring
 
-    public init(service: String = AppConstants.keychainService, accessGroup: String? = AppConstants.keychainAccessGroup) {
+    public convenience init(service: String = AppConstants.keychainService, accessGroup: String? = AppConstants.keychainAccessGroup) {
+        self.init(service: service, accessGroup: accessGroup, items: SystemKeychainItems())
+    }
+
+    init(service: String, accessGroup: String?, items: any KeychainItemStoring) {
         self.service = service
         self.accessGroup = accessGroup
+        self.items = items
     }
 
     private enum Account: String {
@@ -41,14 +76,14 @@ public final class KeychainStore: CredentialStoring, @unchecked Sendable {
 
     public func save(_ credentials: ConnectionCredentials) throws {
         let data = try JSONEncoder().encode(credentials)
-        let query = baseQuery(account: .credentials) as CFDictionary
-        let attributes = [kSecValueData as String: data] as CFDictionary
-        var status = SecItemUpdate(query, attributes)
+        let query = baseQuery(account: .credentials)
+        let attributes = [kSecValueData as String: data]
+        var status = items.update(query, attributes: attributes)
         if status == errSecItemNotFound {
             status = add(data)
             // Another process may have created the item since the update.
             if status == errSecDuplicateItem {
-                status = SecItemUpdate(query, attributes)
+                status = items.update(query, attributes: attributes)
             }
         }
         guard status == errSecSuccess else {
@@ -100,26 +135,25 @@ public final class KeychainStore: CredentialStoring, @unchecked Sendable {
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         query[kSecAttrSynchronizable as String] = false
-        return SecItemAdd(query as CFDictionary, nil)
+        return items.add(query)
     }
 
     private func get(account: Account) throws -> Data? {
         var query = baseQuery(account: account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        let (status, data) = items.copyMatching(query)
         if status == errSecItemNotFound {
             return nil
         }
-        guard status == errSecSuccess, let data = item as? Data else {
+        guard status == errSecSuccess, let data else {
             throw KeychainError.unexpectedStatus(status)
         }
         return data
     }
 
     private func delete(account: Account) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
+        let status = items.delete(baseQuery(account: account))
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }

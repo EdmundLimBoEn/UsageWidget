@@ -459,20 +459,90 @@ final class AppModelDeliveryTests: XCTestCase {
     }
 }
 
+/// Models atomic Security operations, not whole save/load transactions, so separate
+/// stores can still interleave their migration and save operations in these tests.
+private final class InMemoryKeychainItems: KeychainItemStoring, @unchecked Sendable {
+    private struct Key: Hashable {
+        let itemClass: String?
+        let service: String?
+        let accessGroup: String?
+        let account: String?
+
+        init(_ query: [String: Any]) {
+            itemClass = query[kSecClass as String] as? String
+            service = query[kSecAttrService as String] as? String
+            accessGroup = query[kSecAttrAccessGroup as String] as? String
+            account = query[kSecAttrAccount as String] as? String
+        }
+    }
+
+    private struct Item {
+        var data: Data
+        let reference = Data(UUID().uuidString.utf8)
+    }
+
+    private let lock = NSLock()
+    private var items: [Key: Item] = [:]
+
+    func add(_ query: [String: Any]) -> OSStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = Key(query)
+        guard items[key] == nil else { return errSecDuplicateItem }
+        guard let data = query[kSecValueData as String] as? Data else { return errSecParam }
+        items[key] = Item(data: data)
+        return errSecSuccess
+    }
+
+    func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = Key(query)
+        guard var item = items[key] else { return errSecItemNotFound }
+        guard let data = attributes[kSecValueData as String] as? Data else { return errSecParam }
+        item.data = data
+        items[key] = item
+        return errSecSuccess
+    }
+
+    func copyMatching(_ query: [String: Any]) -> (OSStatus, Data?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let item = items[Key(query)] else { return (errSecItemNotFound, nil) }
+        if query[kSecReturnPersistentRef as String] as? Bool == true {
+            return (errSecSuccess, item.reference)
+        }
+        return (errSecSuccess, item.data)
+    }
+
+    func delete(_ query: [String: Any]) -> OSStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        return items.removeValue(forKey: Key(query)) == nil ? errSecItemNotFound : errSecSuccess
+    }
+}
+
 final class KeychainPairingTests: XCTestCase {
     private var service = ""
     private var store: KeychainStore!
+    private var items: InMemoryKeychainItems!
 
     override func setUp() {
         super.setUp()
         service = "usagewidget.pairing.tests.\(UUID().uuidString)"
-        store = KeychainStore(service: service, accessGroup: nil)
+        items = InMemoryKeychainItems()
+        store = makeStore()
     }
 
     override func tearDownWithError() throws {
         try store.clear()
         store = nil
+        items = nil
         try super.tearDownWithError()
+    }
+
+    private func makeStore() -> KeychainStore {
+        KeychainStore(service: service, accessGroup: nil, items: items)
     }
 
     private func query(_ account: String) -> [String: Any] {
@@ -486,7 +556,7 @@ final class KeychainPairingTests: XCTestCase {
             var item = query(account)
             item[kSecValueData as String] = Data(value.utf8)
             item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let status = SecItemAdd(item as CFDictionary, nil)
+            let status = items.add(item)
             guard status == errSecSuccess else { throw KeychainError.unexpectedStatus(status) }
         }
     }
@@ -494,9 +564,8 @@ final class KeychainPairingTests: XCTestCase {
     private func pairReference() throws -> Data {
         var item = query("connectionCredentials")
         item[kSecReturnPersistentRef as String] = true
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(item as CFDictionary, &result)
-        guard status == errSecSuccess, let reference = result as? Data else {
+        let (status, result) = items.copyMatching(item)
+        guard status == errSecSuccess, let reference = result else {
             throw KeychainError.unexpectedStatus(status)
         }
         return reference
@@ -504,7 +573,7 @@ final class KeychainPairingTests: XCTestCase {
 
     private func assertLegacyAbsent() {
         for account in ["serverURL", "bearerToken"] {
-            XCTAssertEqual(SecItemCopyMatching(query(account) as CFDictionary, nil), errSecItemNotFound)
+            XCTAssertEqual(items.copyMatching(query(account)).0, errSecItemNotFound)
         }
     }
 
@@ -525,7 +594,7 @@ final class KeychainPairingTests: XCTestCase {
         XCTAssertTrue(try store.load() == legacy)
         _ = try pairReference()
         assertLegacyAbsent()
-        let widget = KeychainStore(service: service, accessGroup: nil)
+        let widget = makeStore()
         XCTAssertTrue(try widget.load() == legacy)
         try store.clear()
         XCTAssertNil(try widget.load())
@@ -543,7 +612,7 @@ final class KeychainPairingTests: XCTestCase {
 
     func testIncompleteLegacyPairIsNotReturned() throws {
         try seedLegacy(ConnectionCredentials(serverURL: "https://old.example", token: "test-old"))
-        XCTAssertEqual(SecItemDelete(query("bearerToken") as CFDictionary), errSecSuccess)
+        XCTAssertEqual(items.delete(query("bearerToken")), errSecSuccess)
         XCTAssertNil(try store.load())
     }
 
@@ -551,9 +620,9 @@ final class KeychainPairingTests: XCTestCase {
         let first = ConnectionCredentials(serverURL: "https://a.example", token: "test-a")
         let second = ConnectionCredentials(serverURL: "https://b.example", token: "test-b")
         try store.save(first)
-        // Separate instances model the app and widget: no shared in-process lock.
-        let writer = KeychainStore(service: service, accessGroup: nil)
-        let reader = KeychainStore(service: service, accessGroup: nil)
+        // Separate stores share only the backend's per-operation lock, not a transaction lock.
+        let writer = makeStore()
+        let reader = makeStore()
         DispatchQueue.concurrentPerform(iterations: 200) { iteration in
             do {
                 if iteration.isMultiple(of: 2) {
@@ -572,8 +641,8 @@ final class KeychainPairingTests: XCTestCase {
     func testConcurrentMigrationCannotOverwriteNewServerCredentials() throws {
         let legacy = ConnectionCredentials(serverURL: "https://old.example", token: "test-old")
         let current = ConnectionCredentials(serverURL: "https://new.example", token: "test-new")
-        let writer = KeychainStore(service: service, accessGroup: nil)
-        let reader = KeychainStore(service: service, accessGroup: nil)
+        let writer = makeStore()
+        let reader = makeStore()
         for _ in 0..<30 {
             try store.clear()
             try seedLegacy(legacy)
