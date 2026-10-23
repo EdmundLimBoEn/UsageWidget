@@ -53,13 +53,18 @@ func TestDispatchTerminalFailurePreservesRotatedToken(t *testing.T) {
 					}}
 					// Verify cleanup after the delayed response.
 					poller := NewPoller(store, nil, notifier, nil)
-					events := []Event{{}}
-					if widget {
-						events = nil
+					if !widget {
+						if err := store.enqueueAlert(Event{Key: "test"}); err != nil {
+							t.Fatal(err)
+						}
 					}
-					result := poller.dispatch(context.Background(), events, widget)
+					result := poller.dispatch(context.Background(), widget)
 					if result.Status != DeliveryWarning {
 						t.Fatalf("delivery=%+v", result)
+					}
+					var pending int
+					if err := store.db.QueryRow(`SELECT count(*) FROM pending_alerts`).Scan(&pending); err != nil || pending != 0 {
+						t.Fatalf("terminal delivery remains queued: count=%d err=%v", pending, err)
 					}
 					got, ok, err := store.GetDevice("phone")
 					wantAlert, wantWidget := "old-alert", "old-widget"

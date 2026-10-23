@@ -14,6 +14,7 @@ import (
 
 type Store struct {
 	db         *sql.DB
+	eventTx    *sql.Tx // Used only by the event engine transaction-local copy.
 	maxDevices int
 }
 
@@ -40,6 +41,12 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE TABLE IF NOT EXISTS events (
 	event_key TEXT PRIMARY KEY,
 	created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pending_alerts (
+	event_key TEXT NOT NULL,
+	device_id TEXT NOT NULL,
+	payload TEXT NOT NULL,
+	PRIMARY KEY(event_key, device_id)
 );
 CREATE TABLE IF NOT EXISTS window_state (
 	window_id TEXT PRIMARY KEY,
@@ -262,8 +269,22 @@ func (s *Store) ReplaceAlertOverrides(overrides []AlertOverride) error {
 }
 
 func (s *Store) DangerDeliveryDue(windowID, resetEpoch, fingerprint string, now time.Time, interval time.Duration) (bool, error) {
+	// A failed threshold alert or reminder already represents this danger period.
+	// Keep retrying it instead of building a backlog on every poll.
+	var pending bool
+	if err := s.eventDB().QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM pending_alerts p JOIN devices d ON d.device_id = p.device_id
+		WHERE d.apns_token != '' AND json_extract(p.payload, '$.WindowID') = ?
+		AND json_extract(p.payload, '$.DangerResetEpoch') = ?
+		AND json_extract(p.payload, '$.DangerPolicyFingerprint') = ?
+	)`, windowID, resetEpoch, fingerprint).Scan(&pending); err != nil {
+		return false, fmt.Errorf("store: read pending danger delivery: %w", err)
+	}
+	if pending {
+		return false, nil
+	}
 	var raw string
-	err := s.db.QueryRow(`SELECT last_delivered_at FROM alert_delivery_state WHERE window_id=? AND reset_epoch=? AND policy_fingerprint=?`, windowID, resetEpoch, fingerprint).Scan(&raw)
+	err := s.eventDB().QueryRow(`SELECT last_delivered_at FROM alert_delivery_state WHERE window_id=? AND reset_epoch=? AND policy_fingerprint=?`, windowID, resetEpoch, fingerprint).Scan(&raw)
 	if err != nil && err != sql.ErrNoRows {
 		return false, fmt.Errorf("store: read danger delivery: %w", err)
 	}
@@ -582,6 +603,9 @@ func (s *Store) DeleteDevice(deviceID string) error {
 	if _, err := tx.Exec(`DELETE FROM device_test_results WHERE device_id = ?`, deviceID); err != nil {
 		return fmt.Errorf("store: delete device test result: %w", err)
 	}
+	if _, err := tx.Exec(`DELETE FROM pending_alerts WHERE device_id = ?`, deviceID); err != nil {
+		return fmt.Errorf("store: delete pending alerts: %w", err)
+	}
 	return tx.Commit()
 }
 
@@ -603,7 +627,7 @@ func (s *Store) ClearWidgetToken(deviceID, failedToken string) error {
 
 func (s *Store) EventNotified(eventKey string) (bool, error) {
 	var exists int
-	err := s.db.QueryRow(`SELECT 1 FROM events WHERE event_key = ?`, eventKey).Scan(&exists)
+	err := s.eventDB().QueryRow(`SELECT 1 FROM events WHERE event_key = ?`, eventKey).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -614,7 +638,7 @@ func (s *Store) EventNotified(eventKey string) (bool, error) {
 }
 
 func (s *Store) RecordEvent(eventKey string) error {
-	_, err := s.db.Exec(
+	_, err := s.eventDB().Exec(
 		`INSERT INTO events (event_key, created_at) VALUES (?, ?) ON CONFLICT(event_key) DO NOTHING`,
 		eventKey, time.Now().UTC().Format(time.RFC3339),
 	)
@@ -638,7 +662,7 @@ func (s *Store) GetWindowState(windowID string) (WindowState, bool, error) {
 	var creditsAvailable sql.NullInt64
 	var updatedAtStr string
 
-	err := s.db.QueryRow(
+	err := s.eventDB().QueryRow(
 		`SELECT window_id, used_percent, resets_at, credits_available, updated_at FROM window_state WHERE window_id = ?`,
 		windowID,
 	).Scan(&ws.WindowID, &ws.UsedPercent, &resetsAtStr, &creditsAvailable, &updatedAtStr)
@@ -677,7 +701,7 @@ func (s *Store) SetWindowState(ws WindowState) error {
 		creditsAvailable = *ws.CreditsAvailable
 	}
 
-	_, err := s.db.Exec(
+	_, err := s.eventDB().Exec(
 		`INSERT INTO window_state (window_id, used_percent, resets_at, credits_available, updated_at)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(window_id) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at,
@@ -688,4 +712,60 @@ func (s *Store) SetWindowState(ws WindowState) error {
 		return fmt.Errorf("store: set window state: %w", err)
 	}
 	return nil
+}
+
+// eventDB keeps event claims, baselines and queued deliveries in one transaction.
+func (s *Store) eventDB() interface {
+	Exec(string, ...any) (sql.Result, error)
+	QueryRow(string, ...any) *sql.Row
+} {
+	if s.eventTx != nil {
+		return s.eventTx
+	}
+	return s.db
+}
+
+func (s *Store) enqueueAlert(event Event) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	_, err = s.eventDB().Exec(`INSERT INTO pending_alerts(event_key, device_id, payload)
+        SELECT ?, device_id, ? FROM devices WHERE apns_token != ''
+        ON CONFLICT(event_key, device_id) DO NOTHING`, event.Key, string(payload))
+	return err
+}
+
+type pendingAlert struct {
+	Event    Event
+	DeviceID string
+	Token    string
+}
+
+func (s *Store) pendingAlerts() ([]pendingAlert, error) {
+	rows, err := s.db.Query(`SELECT p.payload, d.device_id, d.apns_token
+        FROM pending_alerts p JOIN devices d ON d.device_id = p.device_id
+        WHERE d.apns_token != '' ORDER BY p.rowid`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var alerts []pendingAlert
+	for rows.Next() {
+		var alert pendingAlert
+		var payload string
+		if err := rows.Scan(&payload, &alert.DeviceID, &alert.Token); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(payload), &alert.Event); err != nil {
+			return nil, err
+		}
+		alerts = append(alerts, alert)
+	}
+	return alerts, rows.Err()
+}
+
+func (s *Store) acknowledgeAlert(key, deviceID string) error {
+	_, err := s.db.Exec(`DELETE FROM pending_alerts WHERE event_key = ? AND device_id = ?`, key, deviceID)
+	return err
 }
