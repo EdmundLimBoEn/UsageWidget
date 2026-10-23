@@ -11,6 +11,8 @@ export const SNAPSHOT_REQUIRED_KEYS = [
   "pollIntervalMinutes",
 ] as const;
 
+export const PROVIDER_AVAILABILITY_REQUIRED_KEYS = ["id", "name", "available", "status"] as const;
+
 export const PROVIDER_REQUIRED_KEYS = ["id", "name"] as const;
 
 export const WINDOW_REQUIRED_KEYS = [
@@ -96,6 +98,7 @@ export const READINESS_TEST_REQUIRED_KEYS = [
 export const SWIFT_STRUCT_FIELDS: Record<string, readonly string[]> = {
   Snapshot: SNAPSHOT_REQUIRED_KEYS,
   Provider: PROVIDER_REQUIRED_KEYS,
+  ProviderAvailability: PROVIDER_AVAILABILITY_REQUIRED_KEYS,
   UsageWindow: WINDOW_REQUIRED_KEYS,
   WindowForecast: FORECAST_REQUIRED_KEYS,
   Health: HEALTH_REQUIRED_KEYS,

@@ -17,6 +17,7 @@ const schema = fs.readFileSync(schemaPath, "utf8");
 const structs = {
   Snapshot: ["fetchedAt", "stale", "providers", "pollIntervalMinutes"],
   Provider: ["id", "name"],
+  ProviderAvailability: ["id", "name", "available", "status"],
   UsageWindow: ["id", "key", "title", "usedPercent", "remainingPercent"],
   WindowForecast: [
     "computedAt",

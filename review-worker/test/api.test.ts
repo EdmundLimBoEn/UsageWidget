@@ -8,6 +8,7 @@ import {
   HEALTH_REQUIRED_KEYS,
   POLL_REQUIRED_KEYS,
   PROVIDER_REQUIRED_KEYS,
+  PROVIDER_AVAILABILITY_REQUIRED_KEYS,
   QUIET_HOURS_REQUIRED_KEYS,
   READINESS_CHECK_REQUIRED_KEYS,
   READINESS_REQUIRED_KEYS,
@@ -41,6 +42,14 @@ function assertSnapshot(body: unknown): void {
   expect(snap.stale).toBe(false);
   expect(snap.pollIntervalMinutes).toBe(5);
   expect(Array.isArray(snap.providers)).toBe(true);
+  const catalog = snap.providerCatalog as unknown[];
+  expect(catalog).toHaveLength(7);
+  expect(new Set(catalog.map((row) => (row as { id: string }).id)).size).toBe(7);
+  for (const row of catalog) {
+    const provider = assertObjectWithKeys("ProviderAvailability", row, PROVIDER_AVAILABILITY_REQUIRED_KEYS);
+    expect(provider.available).toBe(true);
+    expect(provider.status).toBe("available");
+  }
   const providers = snap.providers as unknown[];
   expect(providers.length).toBeGreaterThan(0);
   for (const provider of providers) {

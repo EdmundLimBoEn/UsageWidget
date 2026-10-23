@@ -113,6 +113,15 @@ export function reviewSnapshot(now: Date, pollIntervalMinutes: number): Record<s
     stale: false,
     pollIntervalMinutes,
     sourceKind: "review",
+    providerCatalog: [
+      { id: "cursor", name: "Cursor" },
+      { id: "codex", name: "Codex" },
+      { id: "claude_code", name: "Claude Code" },
+      { id: "copilot", name: "Copilot" },
+      { id: "gemini_cli", name: "Gemini" },
+      { id: "grok", name: "Grok" },
+      { id: "devin", name: "Devin" },
+    ].map((provider) => ({ ...provider, available: true, status: "available" })),
     providers: [
       {
         id: "cursor",
