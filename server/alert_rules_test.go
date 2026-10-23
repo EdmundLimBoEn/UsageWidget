@@ -60,11 +60,11 @@ func TestDangerReminderStateSurvivesRestartAndPolicyChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
-	due, err := store.DangerDeliveryDue("codex.primary", "epoch-1", "policy-a", now, time.Hour)
+	due, err := store.DangerDeliveryDue("phone", "codex.primary", "epoch-1", "policy-a", now, time.Hour)
 	if err != nil || !due {
 		t.Fatalf("initial due=%v err=%v", due, err)
 	}
-	if err := store.RecordDangerDelivery("codex.primary", "epoch-1", "policy-a", now); err != nil {
+	if err := store.RecordDangerDelivery("phone", "codex.primary", "epoch-1", "policy-a", now); err != nil {
 		t.Fatal(err)
 	}
 	store.Close()
@@ -73,15 +73,15 @@ func TestDangerReminderStateSurvivesRestartAndPolicyChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	due, _ = store.DangerDeliveryDue("codex.primary", "epoch-1", "policy-a", now.Add(59*time.Minute), time.Hour)
+	due, _ = store.DangerDeliveryDue("phone", "codex.primary", "epoch-1", "policy-a", now.Add(59*time.Minute), time.Hour)
 	if due {
 		t.Fatal("reminder repeated early")
 	}
-	due, _ = store.DangerDeliveryDue("codex.primary", "epoch-1", "policy-a", now.Add(time.Hour), time.Hour)
+	due, _ = store.DangerDeliveryDue("phone", "codex.primary", "epoch-1", "policy-a", now.Add(time.Hour), time.Hour)
 	if !due {
 		t.Fatal("reminder not due at cadence")
 	}
-	due, _ = store.DangerDeliveryDue("codex.primary", "epoch-1", "policy-b", now.Add(time.Minute), time.Hour)
+	due, _ = store.DangerDeliveryDue("phone", "codex.primary", "epoch-1", "policy-b", now.Add(time.Minute), time.Hour)
 	if !due {
 		t.Fatal("policy edit did not establish new cadence")
 	}

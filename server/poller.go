@@ -316,29 +316,27 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 		event.Silent = settings.QuietHours.Contains(time.Now())
 		result.Delivery.Alerts.Attempted++
 		err := p.notifier.SendAlert(ctx, alert.Token, event)
-		terminal := false
 		if err != nil {
-			var apnsErr *APNSError
-			terminal = errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken()
-			if terminal {
-				if clearErr := p.store.ClearAPNsToken(alert.DeviceID, alert.Token); clearErr != nil {
-					result.Delivery.Alerts.Failed++
-					continue
-				}
-			}
 			result.Delivery.Alerts.Failed++
-			if !terminal {
-				continue
-			}
-		} else {
-			result.Delivery.Alerts.Succeeded++
-			if event.DangerPolicyFingerprint != "" {
-				if err := p.store.RecordDangerDelivery(event.WindowID, event.DangerResetEpoch, event.DangerPolicyFingerprint, time.Now().UTC()); err != nil {
-					log.Printf("poller: persist danger delivery: %v", err)
+			var apnsErr *APNSError
+			if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
+				if err := p.store.rejectAlert(alert.DeviceID, alert.Token); err != nil {
+					log.Printf("poller: reject alert: %v", err)
 				}
+			}
+			// Rotate any surviving delivery, including one inherited by a
+			// replacement token, so persistent failures cannot monopolize a batch.
+			if err := p.store.deferAlert(event.Key, alert.DeviceID); err != nil {
+				log.Printf("poller: defer alert: %v", err)
+			}
+			continue
+		}
+		result.Delivery.Alerts.Succeeded++
+		if event.DangerPolicyFingerprint != "" {
+			if err := p.store.RecordDangerDelivery(alert.DeviceID, event.WindowID, event.DangerResetEpoch, event.DangerPolicyFingerprint, time.Now().UTC()); err != nil {
+				log.Printf("poller: persist danger delivery: %v", err)
 			}
 		}
-		// Nonterminal failures remain durable and are retried on the next poll.
 		if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
 			log.Printf("poller: acknowledge alert: %v", err)
 		}

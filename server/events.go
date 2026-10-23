@@ -7,6 +7,7 @@ import (
 )
 
 type Event struct {
+	recipientID             string // Set only for reminders due to this device.
 	Key                     string
 	Type                    string
 	Title                   string
@@ -61,6 +62,9 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 	defer tx.Rollback()
 	local := *e.store
 	local.eventTx = tx
+	if err := local.expireOldAlerts(); err != nil {
+		return EventProcessResult{}, err
+	}
 	engine := NewEventEngine(&local)
 	result, err := engine.processDetailed(snap, s, now)
 	if err != nil {
@@ -92,6 +96,9 @@ func (e *EventEngine) processDetailed(snap Snapshot, s Settings, now time.Time) 
 
 		for _, w := range p.Windows {
 			rule := s.EffectiveRule(p.ID, w.ID)
+			if err := e.store.expireWindowAlerts(w, rule); err != nil {
+				return EventProcessResult{}, err
+			}
 			prev, had, err := e.store.GetWindowState(w.ID)
 			if err != nil {
 				return EventProcessResult{}, err
@@ -121,16 +128,26 @@ func (e *EventEngine) processDetailed(snap Snapshot, s Settings, now time.Time) 
 				}
 				if !dangerEmitted && w.RemainingPercent <= rule.DangerThresholdPct && rule.RepeatIntervalMinutes > 0 {
 					epoch, fingerprint := resetEpoch(w.ResetsAt), policyFingerprint(rule)
-					claimed, err := e.store.DangerDeliveryDue(w.ID, epoch, fingerprint, now, time.Duration(rule.RepeatIntervalMinutes)*time.Minute)
+					devices, err := e.store.ListDevices()
 					if err != nil {
 						return EventProcessResult{}, err
 					}
-					if claimed {
-						ev := mkEvent("danger_reminder", "Still almost out", fmt.Sprintf("danger-reminder:%s:%d", w.ID, now.Unix()), p, w)
-						ev.Silent = s.QuietHours.Contains(now)
-						ev.DangerResetEpoch = epoch
-						ev.DangerPolicyFingerprint = fingerprint
-						result.Emitted = append(result.Emitted, ev)
+					for _, device := range devices {
+						if device.APNsToken == "" {
+							continue
+						}
+						claimed, err := e.store.DangerDeliveryDue(device.DeviceID, w.ID, epoch, fingerprint, now, time.Duration(rule.RepeatIntervalMinutes)*time.Minute)
+						if err != nil {
+							return EventProcessResult{}, err
+						}
+						if claimed {
+							ev := mkEvent("danger_reminder", "Still almost out", fmt.Sprintf("danger-reminder:%s:%d", w.ID, now.Unix()), p, w)
+							ev.recipientID = device.DeviceID
+							ev.Silent = s.QuietHours.Contains(now)
+							ev.DangerResetEpoch = epoch
+							ev.DangerPolicyFingerprint = fingerprint
+							result.Emitted = append(result.Emitted, ev)
+						}
 					}
 				}
 			}

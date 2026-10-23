@@ -180,11 +180,11 @@ func TestPendingDangerAlertsSuppressReminderBacklog(t *testing.T) {
 			if result.Delivery.Alerts.Succeeded != 1 {
 				t.Fatalf("recovery: %+v", result)
 			}
-			due, err := store.DangerDeliveryDue("codex.session", "epoch", policyFingerprint(settings.GlobalRule()), time.Now().Add(59*time.Minute), time.Hour)
+			due, err := store.DangerDeliveryDue("retry-phone", "codex.session", "epoch", policyFingerprint(settings.GlobalRule()), time.Now().Add(59*time.Minute), time.Hour)
 			if err != nil || due {
 				t.Fatalf("repeated before interval: due=%v err=%v", due, err)
 			}
-			due, err = store.DangerDeliveryDue("codex.session", "epoch", policyFingerprint(settings.GlobalRule()), time.Now().Add(61*time.Minute), time.Hour)
+			due, err = store.DangerDeliveryDue("retry-phone", "codex.session", "epoch", policyFingerprint(settings.GlobalRule()), time.Now().Add(61*time.Minute), time.Hour)
 			if err != nil || !due {
 				t.Fatalf("not due after interval: due=%v err=%v", due, err)
 			}

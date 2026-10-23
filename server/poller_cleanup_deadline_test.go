@@ -62,8 +62,12 @@ func TestDispatchTerminalFailurePreservesRotatedToken(t *testing.T) {
 					if result.Status != DeliveryWarning {
 						t.Fatalf("delivery=%+v", result)
 					}
+					wantPending := 0
+					if rotate && !widget {
+						wantPending = 1
+					}
 					var pending int
-					if err := store.db.QueryRow(`SELECT count(*) FROM pending_alerts`).Scan(&pending); err != nil || pending != 0 {
+					if err := store.db.QueryRow(`SELECT count(*) FROM pending_alerts`).Scan(&pending); err != nil || pending != wantPending {
 						t.Fatalf("terminal delivery remains queued: count=%d err=%v", pending, err)
 					}
 					got, ok, err := store.GetDevice("phone")
