@@ -205,7 +205,7 @@ func (p *Poller) pollOnceUnlocked(ctx context.Context) (result PollResult) {
 		return result
 	}
 
-	delivery := p.dispatch(ctx, processed.Emitted, changed)
+	delivery := p.dispatch(ctx, changed)
 	if p.api != nil && changed {
 		p.api.RecordWidgetDelivery(delivery.Delivery.WidgetRefresh, delivery.Status, delivery.Detail)
 	}
@@ -271,7 +271,7 @@ type dispatchResult struct {
 	Detail   string
 }
 
-func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool) dispatchResult {
+func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 	result := dispatchResult{Status: DeliverySkipped}
 	if status, ok := p.notifier.(notifierStatus); ok && !status.Enabled() {
 		result.Detail = "APNs disabled"
@@ -285,31 +285,62 @@ func (p *Poller) dispatch(ctx context.Context, events []Event, changed bool) dis
 		return result
 	}
 
-	for _, event := range events {
-		var succeeded int
-		for _, device := range devices {
-			if device.APNsToken == "" {
-				continue
+	pending, err := p.store.pendingAlerts()
+	if err != nil {
+		result.Status = DeliveryWarning
+		result.Detail = "could not load pending alerts"
+		return result
+	}
+	settings, err := loadSettings(p.store)
+	if err != nil {
+		result.Status = DeliveryWarning
+		result.Detail = "could not load notification settings"
+		return result
+	}
+	hidden := make(map[string]bool, len(settings.HiddenProviders))
+	for _, id := range settings.HiddenProviders {
+		hidden[canonicalProviderID(id)] = true
+	}
+	for _, alert := range pending {
+		event := alert.Event
+		rule := settings.EffectiveRule(event.ProviderID, event.WindowID)
+		if !settings.NotificationsEnabled || !rule.Enabled || hidden[canonicalProviderID(event.ProviderID)] ||
+			(event.Type == "danger_reminder" && rule.RepeatIntervalMinutes <= 0) {
+			// Discard alerts made ineligible by current preferences so they cannot
+			// reappear later when notifications are enabled again.
+			if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
+				log.Printf("poller: discard ineligible alert: %v", err)
 			}
-			result.Delivery.Alerts.Attempted++
-			if err := p.notifier.SendAlert(ctx, device.APNsToken, event); err != nil {
-				log.Printf("poller: send alert to %s: %v", device.DeviceID, err)
-				var apnsErr *APNSError
-				if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
-					if clearErr := p.store.ClearAPNsToken(device.DeviceID, device.APNsToken); clearErr != nil {
-						log.Printf("poller: clear APNs token for %s: %v", device.DeviceID, clearErr)
-					}
-				}
-				result.Delivery.Alerts.Failed++
-				continue
-			}
-			result.Delivery.Alerts.Succeeded++
-			succeeded++
+			continue
 		}
-		if succeeded > 0 && event.DangerPolicyFingerprint != "" {
-			if err := p.store.RecordDangerDelivery(event.WindowID, event.DangerResetEpoch, event.DangerPolicyFingerprint, time.Now().UTC()); err != nil {
-				log.Printf("poller: persist danger delivery: %v", err)
+		event.Silent = settings.QuietHours.Contains(time.Now())
+		result.Delivery.Alerts.Attempted++
+		err := p.notifier.SendAlert(ctx, alert.Token, event)
+		terminal := false
+		if err != nil {
+			var apnsErr *APNSError
+			terminal = errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken()
+			if terminal {
+				if clearErr := p.store.ClearAPNsToken(alert.DeviceID, alert.Token); clearErr != nil {
+					result.Delivery.Alerts.Failed++
+					continue
+				}
 			}
+			result.Delivery.Alerts.Failed++
+			if !terminal {
+				continue
+			}
+		} else {
+			result.Delivery.Alerts.Succeeded++
+			if event.DangerPolicyFingerprint != "" {
+				if err := p.store.RecordDangerDelivery(event.WindowID, event.DangerResetEpoch, event.DangerPolicyFingerprint, time.Now().UTC()); err != nil {
+					log.Printf("poller: persist danger delivery: %v", err)
+				}
+			}
+		}
+		// Nonterminal failures remain durable and are retried on the next poll.
+		if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
+			log.Printf("poller: acknowledge alert: %v", err)
 		}
 	}
 

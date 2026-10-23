@@ -78,17 +78,17 @@ map_arch() {
 
 read_env() { local key=$1; [[ -r $ENV_FILE ]] || return 1; sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1; }
 health_ok() {
-  local token code
+  local token code expected_version="${1:-}"
   token="$(read_env USAGEWIDGET_TOKEN || true)"; [[ ${#token} -ge 32 ]] || return 1
   code="$(curl -s --max-time 12 -o /tmp/usagewidget-health.$$ -w '%{http_code}' -H @- "$LOCAL_URL/v1/health" <<<"Authorization: Bearer $token" || true)"
-  [[ $code == 200 ]] && jq -e '.service=="ok" and .database==true' /tmp/usagewidget-health.$$ >/dev/null 2>&1
+  [[ $code == 200 ]] && jq -e --arg version "$expected_version" '.service=="ok" and .database==true and ($version=="" or .version==$version)' /tmp/usagewidget-health.$$ >/dev/null 2>&1
   local result=$?; rm -f /tmp/usagewidget-health.$$; return "$result"
 }
 
 wait_for_health() {
-  local attempts="${1:-30}"
+  local attempts="${1:-30}" expected_version="${2:-}"
   for _ in $(seq 1 "$attempts"); do
-    if health_ok; then return 0; fi
+    if health_ok "$expected_version"; then return 0; fi
     sleep 1
   done
   return 1
@@ -271,10 +271,10 @@ install_release() {
   install -m 0644 "$release_dir/deploy/usagewidget-collector.service" /etc/systemd/system/usagewidget-collector.service
   install -d -m 0755 /etc/systemd/system/usagewidget-collector.service.d
   printf '[Service]\nUser=%s\nGroup=usagewidget\n' "$COLLECTOR_USER" >/etc/systemd/system/usagewidget-collector.service.d/user.conf
-  systemctl daemon-reload; systemctl enable --now usagewidget-collector usagewidget
-  if ! wait_for_health 30; then
-    if [[ -n $previous_target ]]; then warn "health check failed; rolling back to $previous_target"; ln -sfn "$previous_target" "$PREFIX/current.new"; mv -Tf "$PREFIX/current.new" "$PREFIX/current"; systemctl restart usagewidget-collector usagewidget; fi
-    die "installed version failed its local health check"
+  systemctl daemon-reload; systemctl enable usagewidget-collector usagewidget
+  if ! systemctl restart usagewidget-collector usagewidget || ! wait_for_health 30 "$version"; then
+    if [[ -n $previous_target ]]; then warn "restart or version health check failed; rolling back to $previous_target"; ln -sfn "$previous_target" "$PREFIX/current.new"; mv -Tf "$PREFIX/current.new" "$PREFIX/current"; systemctl restart usagewidget-collector usagewidget; fi
+    die "installed version failed to restart or pass its local version health check"
   fi
 }
 

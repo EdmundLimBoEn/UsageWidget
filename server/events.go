@@ -54,6 +54,30 @@ func (e *EventEngine) Process(snap Snapshot, s Settings, now time.Time) ([]Event
 }
 
 func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) (EventProcessResult, error) {
+	tx, err := e.store.db.Begin()
+	if err != nil {
+		return EventProcessResult{}, err
+	}
+	defer tx.Rollback()
+	local := *e.store
+	local.eventTx = tx
+	engine := NewEventEngine(&local)
+	result, err := engine.processDetailed(snap, s, now)
+	if err != nil {
+		return EventProcessResult{}, err
+	}
+	for _, event := range result.Emitted {
+		if err := local.enqueueAlert(event); err != nil {
+			return EventProcessResult{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return EventProcessResult{}, err
+	}
+	return result, nil
+}
+
+func (e *EventEngine) processDetailed(snap Snapshot, s Settings, now time.Time) (EventProcessResult, error) {
 	hidden := make(map[string]bool, len(s.HiddenProviders))
 	for _, id := range s.HiddenProviders {
 		hidden[canonicalProviderID(id)] = true

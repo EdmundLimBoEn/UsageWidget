@@ -21,7 +21,7 @@ check_argv() {
     fi
   done
 }
-curl() {
+argv_curl() {
   check_argv "$@" || return 1
   local output="" code=false header=false line
   while [[ $# -gt 0 ]]; do
@@ -40,12 +40,14 @@ curl() {
   if [[ -n $output ]]; then printf '%s' "$body" >"$output"; else printf '%s' "$body"; fi
   if $code; then printf '200'; fi
 }
+curl() { argv_curl "$@"; }
 awk() {
   check_argv "$@" || return 1
   echo awk >>"$ARGV_TEST_CALLS"
   command awk "$@"
 }
-export -f check_argv curl
+export -f check_argv curl argv_curl
+export ENV_FILE TEST_DIR
 # Keep all installer side effects inside the temporary directory.
 chown() { :; }
 systemctl() { :; }
@@ -54,7 +56,7 @@ print_qr() { :; }
 wait_for_health() { [[ $case_name != rollback ]]; }
 
 failed=false
-for case_name in cli health doctor rotate rollback; do
+for case_name in cli health doctor rotate rollback macos redeploy; do
   set +e
   (
     set -e
@@ -81,6 +83,36 @@ for case_name in cli health doctor rotate rollback; do
         grep -q 'token rotation failed and was rolled back' "$TEST_DIR/result"
         [[ $(read_env USAGEWIDGET_TOKEN) == "$ARGV_TEST_OLD" ]]
         [[ $(wc -l <"$ARGV_TEST_CALLS") -eq 2 ]] ;;
+      macos)
+        # Exercise the actual health-check section without installing services.
+        sleep() { :; }
+        export -f sleep
+        sed -n '/^set -a; source/,$p' "$ROOT/server/deploy/install-macos.sh" |
+          sed '/^printf '\''UsageWidget is healthy/,$d' >"$TEST_DIR/health.sh"
+        bash "$TEST_DIR/health.sh" >"$TEST_DIR/result"
+        [[ $(wc -l <"$ARGV_TEST_CALLS") -eq 2 ]] ;;
+      redeploy)
+        # Execute the actual SSH verification block locally with fake I/O only.
+        ssh() {
+          check_argv "$@" || return 1
+          bash -c "${*: -1}"
+        }
+        source() { builtin source "$ENV_FILE"; }
+        usagewidget() { [[ $1 == health ]]; }
+        curl() {
+          # Redirect the remote response file into our temporary directory.
+          local args=() arg
+          for arg in "$@"; do
+            [[ $arg != /tmp/uw-poll.json ]] || arg="$TEST_DIR/poll.json"
+            args+=("$arg")
+          done
+          argv_curl "${args[@]}"
+        }
+        cat() { command cat "$TEST_DIR/poll.json"; }
+        export -f source usagewidget curl argv_curl cat
+        HOST=test
+        eval "$(sed -n '/^echo "Verifying..."/,/^echo "Deploy OK."/p' "$ROOT/server/deploy/redeploy.sh")" >"$TEST_DIR/result"
+        [[ $(wc -l <"$ARGV_TEST_CALLS") -eq 1 ]] ;;
     esac
     grep -Fxq 'OTHER=preserved' "$ENV_FILE"
     [[ ! -e "$ARGV_TEST_FAILURE" ]]

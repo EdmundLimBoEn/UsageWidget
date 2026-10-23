@@ -486,3 +486,69 @@ func TestCreditsRepeatedReplenishmentAfterRestart(t *testing.T) {
 		}
 	}
 }
+
+// Credit re-arming and baselines must roll back with the alert queue transaction.
+func TestCreditsStateRollsBackWithPendingAlerts(t *testing.T) {
+	for _, decrease := range []bool{false, true} {
+		name := "replenishment"
+		before, after := 1, 3
+		if decrease {
+			name, before, after = "rearm", 3, 1
+		}
+		t.Run(name, func(t *testing.T) {
+			store := openTestStore(t)
+			if err := store.UpsertDevice("phone", "fixture-token", ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SetCreditsState("codex", before); err != nil {
+				t.Fatal(err)
+			}
+			key := creditsEventKey("codex", 3)
+			if decrease {
+				if err := store.RecordEvent(key); err != nil {
+					t.Fatal(err)
+				}
+			}
+			seedWindow(t, store, "codex.session", 5, nil)
+			now := time.Now().UTC()
+			snap := creditsSnap("codex", after, now)
+			snap.Providers[0].Windows = []Window{{ID: "codex.session", UsedPercent: 42, RemainingPercent: 58}}
+			if _, err := store.db.Exec(`CREATE TRIGGER reject_pending BEFORE INSERT ON pending_alerts BEGIN SELECT RAISE(FAIL, 'queue unavailable'); END`); err != nil {
+				t.Fatal(err)
+			}
+			engine := NewEventEngine(store)
+			if _, err := engine.ProcessDetailed(snap, testSettings(), now); err == nil {
+				t.Fatal("expected queue failure")
+			}
+			assertCredits := func(count int, claimed bool) {
+				t.Helper()
+				state, ok, err := store.GetWindowState(creditsWindowID("codex"))
+				if err != nil || !ok || state.CreditsAvailable == nil || *state.CreditsAvailable != count {
+					t.Fatalf("credit baseline: %+v, %v, %v", state, ok, err)
+				}
+				if got, err := store.EventNotified(key); err != nil || got != claimed {
+					t.Fatalf("credit claim: got %v want %v, err=%v", got, claimed, err)
+				}
+			}
+			assertCredits(before, decrease)
+			if pending, err := store.pendingAlerts(); err != nil || len(pending) != 0 {
+				t.Fatalf("failed transaction left pending alerts: %v, %v", pending, err)
+			}
+			if _, err := store.db.Exec(`DROP TRIGGER reject_pending`); err != nil {
+				t.Fatal(err)
+			}
+			result, err := engine.ProcessDetailed(snap, testSettings(), now)
+			want := 2 // Window crossing and credit replenishment.
+			if decrease {
+				want = 1
+			}
+			if err != nil || len(result.Emitted) != want {
+				t.Fatalf("retry: %+v, %v", result, err)
+			}
+			assertCredits(after, !decrease)
+			if pending, err := store.pendingAlerts(); err != nil || len(pending) != want {
+				t.Fatalf("retry pending alerts: %v, %v", pending, err)
+			}
+		})
+	}
+}
