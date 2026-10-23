@@ -76,7 +76,7 @@ ssh -o BatchMode=yes "$HOST" '
   set -e
   set -a; source /etc/usagewidget/env; set +a
   code=$(curl -sS -o /tmp/uw-poll.json -w "%{http_code}" -X POST \
-    -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/poll)
+    -H @- http://127.0.0.1:8377/v1/poll <<<"Authorization: Bearer $USAGEWIDGET_TOKEN")
   echo "poll HTTP $code: $(cat /tmp/uw-poll.json)"
   [[ "$code" == 200 ]]
   usagewidget health

@@ -65,13 +65,16 @@ api() {
   require_token
   local method="$1" path="$2"
   shift 2
+  local max_time=30
+  # Allow the server's 300-second shared poll deadline plus response overhead.
+  [[ $path != /v1/poll ]] || max_time=330
   # Optional: allow extra success codes via USAGEWIDGET_OK_CODES (space-separated)
   local ok_codes="${USAGEWIDGET_OK_CODES:-200 204}"
   local url="${USAGEWIDGET_URL}${path}"
   local tmp
   tmp="$(mktemp)"
   local code
-  code="$(curl -sS -o "$tmp" -w "%{http_code}" -X "$method" \
+  code="$(curl -sS --connect-timeout 5 --max-time "$max_time" -o "$tmp" -w "%{http_code}" -X "$method" \
     -H @- \
     -H "Accept: application/json" \
     "$@" \

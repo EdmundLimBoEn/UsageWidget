@@ -66,9 +66,9 @@ $tailscale serve --bg --https=443 --set-path=/usagewidget http://127.0.0.1:8377 
 
 set -a; source "$ENV_FILE"; set +a
 for _ in {1..30}; do
-  curl -fsS -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/health >/dev/null 2>&1 && break
+  curl -fsS -H @- http://127.0.0.1:8377/v1/health <<<"Authorization: Bearer $USAGEWIDGET_TOKEN" >/dev/null 2>&1 && break
   sleep 1
 done
-curl -fsS -H "Authorization: Bearer $USAGEWIDGET_TOKEN" http://127.0.0.1:8377/v1/health >/dev/null || die "installed server failed its health check"
+curl -fsS -H @- http://127.0.0.1:8377/v1/health <<<"Authorization: Bearer $USAGEWIDGET_TOKEN" >/dev/null || die "installed server failed its health check"
 printf 'UsageWidget is healthy at %s\n' "$public_url"
 USAGEWIDGET_TOKEN="$USAGEWIDGET_TOKEN" exec "$ROOT/bin/usagewidget-qr" -url "$public_url"
