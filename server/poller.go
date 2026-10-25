@@ -332,13 +332,8 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 			continue
 		}
 		result.Delivery.Alerts.Succeeded++
-		if event.DangerPolicyFingerprint != "" {
-			if err := p.store.RecordDangerDelivery(alert.DeviceID, event.WindowID, event.DangerResetEpoch, event.DangerPolicyFingerprint, time.Now().UTC()); err != nil {
-				log.Printf("poller: persist danger delivery: %v", err)
-			}
-		}
-		if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
-			log.Printf("poller: acknowledge alert: %v", err)
+		if err := p.store.completeAlert(alert, time.Now().UTC()); err != nil {
+			log.Printf("poller: complete alert: %v", err)
 		}
 	}
 
