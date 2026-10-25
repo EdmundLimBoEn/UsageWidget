@@ -719,17 +719,31 @@ private actor ConnectionTestRoutes {
     }
 }
 
-private final class ConnectionTestProtocol: URLProtocol, @unchecked Sendable {
+private final class ConnectionTestProtocol: URLProtocol {
+    // URLProtocol's Sendable conformance is unavailable in the Apple SDK.
+    // Transfer only this load's callback target; one task delivers its response,
+    // and stopLoading does not access or mutate any task-owned state.
+    private struct ResponseTarget: @unchecked Sendable {
+        let protocolInstance: ConnectionTestProtocol
+
+        func finish(status: Int, data: Data, url: URL) {
+            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!
+            let client = protocolInstance.client
+            client?.urlProtocol(protocolInstance, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(protocolInstance, didLoad: data)
+            client?.urlProtocolDidFinishLoading(protocolInstance)
+        }
+    }
+
     static let routes = ConnectionTestRoutes()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        let request = request
+        let target = ResponseTarget(protocolInstance: self)
         Task {
-            let (status, data) = await Self.routes.respond(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
+            let (status, data) = await ConnectionTestProtocol.routes.respond(request)
+            target.finish(status: status, data: data, url: request.url!)
         }
     }
     override func stopLoading() {}
@@ -786,6 +800,8 @@ final class AppModelConnectionCacheTests: XCTestCase {
         let result = await XCTWaiter.fulfillment(of: [started], timeout: 3)
         XCTAssertEqual(result, .completed)
         try await model.saveConnection(url: second.serverURL, token: second.token)
+        XCTAssertEqual(model.snapshot?.providers.map(\.id), [URL(string: second.serverURL)!.host!])
+        XCTAssertNil(model.errorMessage)
         let expectedProviders = model.snapshot?.providers.map(\.id)
         let expectedPreferences = model.preferences
         model.errorMessage = "Current connection message"
