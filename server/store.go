@@ -813,13 +813,17 @@ type pendingAlert struct {
 const pendingAlertRetention = 24 * time.Hour
 const pendingAlertBatchSize = 100
 
-func (s *Store) expireOldAlerts() error {
-	_, err := s.eventDB().Exec("DELETE FROM pending_alerts WHERE created_at <= ?", time.Now().Add(-pendingAlertRetention).Unix())
+func (s *Store) expireOldAlerts(now time.Time) error {
+	// Reset expiry must run even when a provider is stale, absent or errored.
+	_, err := s.eventDB().Exec(`DELETE FROM pending_alerts WHERE created_at <= ?
+		OR (json_extract(payload, '$.Type') IN ('early_threshold', 'danger_threshold', 'danger_reminder')
+			AND julianday(json_extract(payload, '$.ResetsAt')) <= julianday(?))`,
+		now.Add(-pendingAlertRetention).Unix(), now.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 func (s *Store) pendingAlerts() ([]pendingAlert, error) {
-	if err := s.expireOldAlerts(); err != nil {
+	if err := s.expireOldAlerts(time.Now()); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.Query(`SELECT p.payload, d.device_id, d.apns_token

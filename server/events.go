@@ -62,7 +62,7 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 	defer tx.Rollback()
 	local := *e.store
 	local.eventTx = tx
-	if err := local.expireOldAlerts(); err != nil {
+	if err := local.expireOldAlerts(now); err != nil {
 		return EventProcessResult{}, err
 	}
 	engine := NewEventEngine(&local)
