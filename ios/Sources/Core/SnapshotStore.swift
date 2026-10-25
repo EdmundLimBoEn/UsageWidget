@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct DisplayPreferences: Codable, Equatable, Sendable {
     public var providerOrder: [String]
@@ -42,23 +43,35 @@ public final class SnapshotStore: @unchecked Sendable {
         return SnapshotStore(suiteName: name)
     }
 
-    public func saveSnapshot(_ snapshot: Snapshot) throws {
-        let data = try JSONCoding.encoder.encode(snapshot)
-        defaults.set(data, forKey: Key.snapshot)
+    // Hash the complete pair: token rotation on the same URL is a new connection.
+    // Unscoped legacy values cannot be attributed safely and are never read.
+    private func cacheKey(_ key: String, connection: ConnectionCredentials?) -> String {
+        guard let connection else { return key + ".unconfigured" }
+        let url = Data(connection.serverURL.utf8)
+        var data = Data("\(url.count):".utf8)
+        data.append(url)
+        data.append(Data(connection.token.utf8))
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        return key + "." + digest
     }
 
-    public func loadSnapshot() -> Snapshot? {
-        guard let data = defaults.data(forKey: Key.snapshot) else { return nil }
+    public func saveSnapshot(_ snapshot: Snapshot, connection: ConnectionCredentials? = nil) throws {
+        let data = try JSONCoding.encoder.encode(snapshot)
+        defaults.set(data, forKey: cacheKey(Key.snapshot, connection: connection))
+    }
+
+    public func loadSnapshot(connection: ConnectionCredentials? = nil) -> Snapshot? {
+        guard let data = defaults.data(forKey: cacheKey(Key.snapshot, connection: connection)) else { return nil }
         return try? JSONCoding.decoder.decode(Snapshot.self, from: data)
     }
 
-    public func savePreferences(_ prefs: DisplayPreferences) throws {
+    public func savePreferences(_ prefs: DisplayPreferences, connection: ConnectionCredentials? = nil) throws {
         let data = try JSONCoding.encoder.encode(prefs)
-        defaults.set(data, forKey: Key.prefs)
+        defaults.set(data, forKey: cacheKey(Key.prefs, connection: connection))
     }
 
-    public func loadPreferences() -> DisplayPreferences {
-        guard let data = defaults.data(forKey: Key.prefs),
+    public func loadPreferences(connection: ConnectionCredentials? = nil) -> DisplayPreferences {
+        guard let data = defaults.data(forKey: cacheKey(Key.prefs, connection: connection)),
               let prefs = try? JSONCoding.decoder.decode(DisplayPreferences.self, from: data) else {
             return DisplayPreferences()
         }
