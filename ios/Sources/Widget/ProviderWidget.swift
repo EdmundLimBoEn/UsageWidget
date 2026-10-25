@@ -32,26 +32,32 @@ struct UsageTimelineProvider: TimelineProvider {
 
     private static func loadEntry() async -> ProviderEntry {
         let store = SnapshotStore.shared
-        let prefs = store.loadPreferences()
-        let cached = store.loadSnapshot()
 
         let creds: ConnectionCredentials
         do {
             guard let saved = try KeychainStore.shared.load() else {
-                return ProviderEntry(date: Date(), snapshot: cached, preferences: prefs, fetchError: FriendlyError.notSetUp)
+                return ProviderEntry(date: Date(), snapshot: nil, preferences: DisplayPreferences(), fetchError: FriendlyError.notSetUp)
             }
             creds = saved
         } catch {
             // e.g. errSecInteractionNotAllowed before first unlock: not the same as "never set up".
-            return ProviderEntry(date: Date(), snapshot: cached, preferences: prefs, fetchError: FriendlyError.message(for: error))
+            return ProviderEntry(date: Date(), snapshot: nil, preferences: DisplayPreferences(), fetchError: FriendlyError.message(for: error))
         }
 
+        let prefs = store.loadPreferences(connection: creds)
+        let cached = store.loadSnapshot(connection: creds)
         do {
             let client = try APIClient.make(credentials: creds, timeout: 8)
             let snap = try await client.fetchSnapshot()
-            try store.saveSnapshot(snap)
+            guard (try? KeychainStore.shared.load()) == creds else {
+                return ProviderEntry(date: Date(), snapshot: nil, preferences: DisplayPreferences(), fetchError: nil)
+            }
+            try store.saveSnapshot(snap, connection: creds)
             return ProviderEntry(date: Date(), snapshot: snap, preferences: prefs, fetchError: nil)
         } catch {
+            guard (try? KeychainStore.shared.load()) == creds else {
+                return ProviderEntry(date: Date(), snapshot: nil, preferences: DisplayPreferences(), fetchError: nil)
+            }
             var stale = cached
             if stale != nil {
                 stale?.stale = true

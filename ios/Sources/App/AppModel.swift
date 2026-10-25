@@ -58,13 +58,15 @@ final class AppModel {
 
     private let keychain: any CredentialStoring
     private let store: SnapshotStore
+    private let session: URLSession
+    private var connectionGeneration = UUID()
+    private var connectionAttempt = UUID()
     private(set) var credentials: ConnectionCredentials?
 
-    init(keychain: any CredentialStoring = KeychainStore.shared, store: SnapshotStore = .shared) {
+    init(keychain: any CredentialStoring = KeychainStore.shared, store: SnapshotStore = .shared, session: URLSession = .shared) {
         self.keychain = keychain
         self.store = store
-        self.preferences = store.loadPreferences()
-        self.snapshot = store.loadSnapshot()
+        self.session = session
         if let creds = try? keychain.load() {
             self.credentials = creds
             self.isConfigured = true
@@ -76,6 +78,8 @@ final class AppModel {
                 store.mirrorCredentials(nil)
             }
         }
+        self.preferences = store.loadPreferences(connection: credentials)
+        self.snapshot = store.loadSnapshot(connection: credentials)
     }
 
     var visibleProviders: [Provider] {
@@ -108,21 +112,41 @@ final class AppModel {
 
     func client() throws -> APIClient {
         guard let credentials else { throw APIError.invalidBaseURL }
-        return try APIClient.make(credentials: credentials)
+        return try APIClient.make(credentials: credentials, session: session)
     }
 
     func saveConnection(url: String, token: String) async throws {
+        let attempt = UUID()
+        connectionAttempt = attempt
         let creds = ConnectionCredentials(serverURL: url, token: token)
-        let client = try APIClient.make(credentials: creds)
-        let health = try await client.fetchHealth()
+        let client = try APIClient.make(credentials: creds, session: session)
+        let health: Health
+        do {
+            health = try await client.fetchHealth()
+        } catch {
+            guard connectionAttempt == attempt else { return }
+            throw error
+        }
+        guard connectionAttempt == attempt else { return }
         try keychain.save(creds)
+        connectionGeneration = UUID()
+        let generation = connectionGeneration
         store.mirrorCredentials(nil)
         self.credentials = creds
+        self.snapshot = store.loadSnapshot(connection: creds)
+        self.preferences = store.loadPreferences(connection: creds)
+        self.settings = ServerSettings()
+        self.readiness = nil
+        self.statusMessage = nil
+        self.isLoading = false
+        self.isTestingAction = false
+        WidgetCenter.shared.reloadAllTimelines()
         self.isConfigured = true
         self.isPreviewingSample = false
         self.health = health
         self.errorMessage = nil
         await refresh()
+        guard connectionGeneration == generation else { return }
         await registerTokensIfNeeded()
     }
 
@@ -136,21 +160,23 @@ final class AppModel {
     func exitSamplePreview() {
         guard !isConfigured else { return }
         isPreviewingSample = false
-        snapshot = store.loadSnapshot()
+        snapshot = store.loadSnapshot(connection: credentials)
         errorMessage = nil
         statusMessage = nil
     }
 
     func refresh() async {
+        let generation = connectionGeneration
         guard isConfigured else { return }
         isLoading = true
-        defer { isLoading = false }
+        defer { if connectionGeneration == generation { isLoading = false } }
         do {
             let client = try client()
             async let snapTask = client.fetchSnapshot()
             async let healthTask = client.fetchHealth()
             async let settingsTask = client.fetchSettings()
             let (snap, health, settings) = try await (snapTask, healthTask, settingsTask)
+            guard connectionGeneration == generation else { return }
             self.snapshot = snap
             self.health = health
             self.settings = settings
@@ -158,12 +184,13 @@ final class AppModel {
                 providerOrder: settings.providerOrder,
                 hiddenProviders: settings.hiddenProviders
             )
-            try store.saveSnapshot(snap)
-            try store.savePreferences(preferences)
+            try store.saveSnapshot(snap, connection: credentials)
+            try store.savePreferences(preferences, connection: credentials)
             errorMessage = nil
             WidgetCenter.shared.reloadAllTimelines()
         } catch {
-            if let cached = store.loadSnapshot() {
+            guard connectionGeneration == generation else { return }
+            if let cached = store.loadSnapshot(connection: credentials) {
                 snapshot = cached
             }
             errorMessage = String(describing: error)
@@ -171,8 +198,9 @@ final class AppModel {
     }
 
     func applySettings() async {
+        let generation = connectionGeneration
         guard isConfigured else {
-            try? store.savePreferences(preferences)
+            try? store.savePreferences(preferences, connection: credentials)
             WidgetCenter.shared.reloadAllTimelines()
             return
         }
@@ -182,39 +210,52 @@ final class AppModel {
             next.providerOrder = preferences.providerOrder
             next.hiddenProviders = preferences.hiddenProviders
             let updated = try await client.updateSettings(next)
+            guard connectionGeneration == generation else { return }
             settings = updated
             preferences = DisplayPreferences(
                 providerOrder: updated.providerOrder,
                 hiddenProviders: updated.hiddenProviders
             )
-            try store.savePreferences(preferences)
+            try store.savePreferences(preferences, connection: credentials)
             WidgetCenter.shared.reloadAllTimelines()
             errorMessage = nil
             await refresh()
         } catch {
+            guard connectionGeneration == generation else { return }
             errorMessage = String(describing: error)
         }
     }
 
     func saveSettings(_ draft: ServerSettings) async throws {
-        let updated = try await client().updateSettings(draft)
+        let generation = connectionGeneration
+        let updated: ServerSettings
+        do {
+            updated = try await client().updateSettings(draft)
+        } catch {
+            guard connectionGeneration == generation else { return }
+            throw error
+        }
+        guard connectionGeneration == generation else { return }
         settings = updated
         preferences = DisplayPreferences(providerOrder: updated.providerOrder, hiddenProviders: updated.hiddenProviders)
-        try store.savePreferences(preferences)
+        try store.savePreferences(preferences, connection: credentials)
         WidgetCenter.shared.reloadAllTimelines()
         await refresh()
     }
 
     func refreshReadiness() async {
+        let generation = connectionGeneration
         do {
             let client = try client()
             let deviceID = store.deviceID()
             async let healthTask = client.fetchHealth()
             async let readinessTask = client.fetchReadiness(deviceID: deviceID)
             let (latestHealth, latestReadiness) = try await (healthTask, readinessTask)
+            guard connectionGeneration == generation else { return }
             health = latestHealth
             readiness = latestReadiness
             let local = await UNUserNotificationCenter.current().notificationSettings()
+            guard connectionGeneration == generation else { return }
             switch local.authorizationStatus {
             case .authorized: notificationStatus = "authorized"
             case .provisional: notificationStatus = "provisional"
@@ -224,16 +265,24 @@ final class AppModel {
             @unknown default: notificationStatus = "unknown"
             }
             errorMessage = nil
-        } catch { errorMessage = String(describing: error) }
+        } catch {
+            guard connectionGeneration == generation else { return }
+            errorMessage = String(describing: error)
+        }
     }
 
     func runReadinessTest() async {
-        isTestingAction = true; defer { isTestingAction = false }
+        let generation = connectionGeneration
+        isTestingAction = true; defer { if connectionGeneration == generation { isTestingAction = false } }
         do {
             let result = try await client().testReadiness(deviceID: store.deviceID())
+            guard connectionGeneration == generation else { return }
             statusMessage = result.alertAccepted ? "APNs accepted the device test" : "The device test was not accepted"
             await refreshReadiness()
-        } catch { errorMessage = String(describing: error) }
+        } catch {
+            guard connectionGeneration == generation else { return }
+            errorMessage = String(describing: error)
+        }
     }
 
     func moveProvider(from source: IndexSet, to destination: Int) {
@@ -260,17 +309,20 @@ final class AppModel {
     }
 
     func registerTokensIfNeeded(apnsToken: String? = nil, widgetToken: String? = nil) async {
+        let generation = connectionGeneration
         do {
             let client = try client()
             let deviceID = store.deviceID()
             let widget = widgetToken ?? store.pendingWidgetToken()
             let reg = DeviceRegistration(deviceID: deviceID, apnsToken: apnsToken, widgetToken: widget)
             _ = try await client.registerDevice(reg)
+            guard connectionGeneration == generation else { return }
             if widget != nil {
                 store.setPendingWidgetToken(nil)
             }
             errorMessage = nil
         } catch {
+            guard connectionGeneration == generation else { return }
             if isConfigured {
                 errorMessage = "Device registration failed: \(error)"
             }
@@ -278,11 +330,13 @@ final class AppModel {
     }
 
     func forcePoll() async {
+        let generation = connectionGeneration
         isTestingAction = true
-        defer { isTestingAction = false }
+        defer { if connectionGeneration == generation { isTestingAction = false } }
         do {
             let client = try client()
             let result = try await client.forcePoll()
+            guard connectionGeneration == generation else { return }
             if result.success {
                 statusMessage = "Polled — \(result.events) event(s)" +
                     (result.snapshotChanged ? ", snapshot changed" : "")
@@ -293,6 +347,7 @@ final class AppModel {
             }
             await refresh()
         } catch {
+            guard connectionGeneration == generation else { return }
             errorMessage = String(describing: error)
             statusMessage = nil
         }

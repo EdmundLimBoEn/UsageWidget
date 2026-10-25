@@ -664,3 +664,175 @@ final class KeychainPairingTests: XCTestCase {
         }
     }
 }
+
+final class ConnectionCacheTests: XCTestCase {
+    func testCacheSeparatesURLsAndTokenRotationsAndSurvivesRelaunch() throws {
+        let name = "usagewidget.tests.\(UUID().uuidString)"
+        let store = SnapshotStore(suiteName: name)
+        defer { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
+        let first = ConnectionCredentials(serverURL: "https://a.example", token: "test-a")
+        let otherURL = ConnectionCredentials(serverURL: "https://b.example", token: "test-a")
+        let otherToken = ConnectionCredentials(serverURL: first.serverURL, token: "test-b")
+        let prefs = DisplayPreferences(providerOrder: ["codex"], hiddenProviders: ["grok"])
+        try store.saveSnapshot(SampleCapacity.snapshot, connection: first)
+        try store.savePreferences(prefs, connection: first)
+        let relaunched = SnapshotStore(suiteName: name)
+        XCTAssertNotNil(relaunched.loadSnapshot(connection: first))
+        XCTAssertEqual(relaunched.loadPreferences(connection: first), prefs)
+        for connection in [otherURL, otherToken] {
+            XCTAssertNil(relaunched.loadSnapshot(connection: connection))
+            XCTAssertEqual(relaunched.loadPreferences(connection: connection), DisplayPreferences())
+        }
+        // Old installations have no evidence of which connection wrote these values.
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defaults.set(try JSONCoding.encoder.encode(SampleCapacity.snapshot), forKey: "snapshot.json")
+        defaults.set(try JSONCoding.encoder.encode(prefs), forKey: "displayPreferences.json")
+        XCTAssertNil(relaunched.loadSnapshot(connection: otherURL))
+        XCTAssertEqual(relaunched.loadPreferences(connection: otherURL), DisplayPreferences())
+        XCTAssertNil(relaunched.loadSnapshot())
+    }
+}
+
+private actor ConnectionResponseGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor ConnectionTestRoutes {
+    typealias Handler = @Sendable (URLRequest) async -> (Int, Data)
+    private var handlers: [String: Handler] = [:]
+    func set(_ host: String, handler: @escaping Handler) { handlers[host] = handler }
+    func respond(_ request: URLRequest) async -> (Int, Data) {
+        guard let handler = handlers[request.url!.host!] else { return (500, Data()) }
+        return await handler(request)
+    }
+}
+
+private final class ConnectionTestProtocol: URLProtocol, @unchecked Sendable {
+    static let routes = ConnectionTestRoutes()
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Task {
+            let (status, data) = await Self.routes.respond(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+    override func stopLoading() {}
+}
+
+@MainActor
+final class AppModelConnectionCacheTests: XCTestCase {
+    func testSwitchWithFailedRefreshDoesNotDisplayPreviousCache() async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        let first = ConnectionCredentials(serverURL: "https://\(UUID().uuidString).example", token: "test-a")
+        let second = ConnectionCredentials(serverURL: "https://\(UUID().uuidString).example", token: "test-b")
+        let store = SnapshotStore.temporary()
+        try store.saveSnapshot(SampleCapacity.snapshot, connection: first)
+        try store.savePreferences(DisplayPreferences(hiddenProviders: ["codex"]), connection: first)
+        let model = AppModel(keychain: InMemoryCredentialStore(first), store: store, session: session)
+        XCTAssertNotNil(model.snapshot)
+        await route(second, failSnapshot: true)
+        try await model.saveConnection(url: second.serverURL, token: second.token)
+        XCTAssertNil(model.snapshot)
+        XCTAssertEqual(model.preferences, DisplayPreferences())
+        XCTAssertNil(store.loadSnapshot(connection: second))
+        XCTAssertNotNil(store.loadSnapshot(connection: first))
+    }
+
+    func testOldRefreshSuccessAndFailureCannotOverwriteNewConnection() async throws {
+        for failOld in [false, true] {
+            try await checkDelayedResponse(path: "/v1/snapshot", failOld: failOld)
+        }
+    }
+
+    func testOldSettingsResponseCannotOverwriteNewConnection() async throws {
+        try await checkDelayedResponse(path: "/v1/settings", failOld: false)
+    }
+
+    private func checkDelayedResponse(path: String, failOld: Bool) async throws {
+        let session = makeSession()
+        defer { session.invalidateAndCancel() }
+        let first = ConnectionCredentials(serverURL: "https://\(UUID().uuidString).example", token: "test-a")
+        let second = ConnectionCredentials(serverURL: "https://\(UUID().uuidString).example", token: "test-b")
+        let store = SnapshotStore.temporary()
+        let model = AppModel(keychain: InMemoryCredentialStore(first), store: store, session: session)
+        let gate = ConnectionResponseGate()
+        let started = expectation(description: "Old response held in flight")
+        await route(first, failSnapshot: failOld, heldPath: path, gate: gate, started: started)
+        await route(second)
+        let oldRequest = Task {
+            if path == "/v1/settings" {
+                await model.applySettings()
+            } else {
+                await model.refresh()
+            }
+        }
+        let result = await XCTWaiter.fulfillment(of: [started], timeout: 3)
+        XCTAssertEqual(result, .completed)
+        try await model.saveConnection(url: second.serverURL, token: second.token)
+        let expectedProviders = model.snapshot?.providers.map(\.id)
+        let expectedPreferences = model.preferences
+        model.errorMessage = "Current connection message"
+        await gate.release()
+        await oldRequest.value
+        XCTAssertEqual(model.snapshot?.providers.map(\.id), expectedProviders)
+        XCTAssertEqual(model.preferences, expectedPreferences)
+        XCTAssertEqual(model.errorMessage, "Current connection message")
+        XCTAssertEqual(store.loadSnapshot(connection: second)?.providers.map(\.id), expectedProviders)
+        XCTAssertEqual(store.loadPreferences(connection: second), expectedPreferences)
+        XCTAssertNil(store.loadSnapshot(connection: first))
+    }
+
+    private func makeSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ConnectionTestProtocol.self]
+        return URLSession(configuration: config)
+    }
+
+    private func route(_ connection: ConnectionCredentials, failSnapshot: Bool = false,
+                       heldPath: String? = nil, gate: ConnectionResponseGate? = nil,
+                       started: XCTestExpectation? = nil) async {
+        let host = URL(string: connection.serverURL)!.host!
+        await ConnectionTestProtocol.routes.set(host) { request in
+            let path = request.url!.path
+            if path == heldPath {
+                started?.fulfill()
+                await gate?.wait()
+            }
+            switch path {
+            case "/v1/health":
+                return (200, Data(#"{"service":"ok","codexbar":true,"database":true,"polling":true,"apns":false}"#.utf8))
+            case "/v1/snapshot":
+                if failSnapshot { return (503, Data()) }
+                let snapshot = Snapshot(fetchedAt: Date(), stale: false,
+                                        providers: [Provider(id: host, name: "Test")], pollIntervalMinutes: 5)
+                return (200, try! JSONCoding.encoder.encode(snapshot))
+            case "/v1/settings":
+                var settings = ServerSettings()
+                settings.providerOrder = [host]
+                settings.hiddenProviders = [host]
+                return (200, try! JSONCoding.encoder.encode(settings))
+            case "/v1/devices":
+                return (200, try! JSONCoding.encoder.encode(DeviceRegistration(deviceID: "test-device")))
+            default:
+                return (404, Data())
+            }
+        }
+    }
+}
