@@ -301,6 +301,7 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 	for _, id := range settings.HiddenProviders {
 		hidden[canonicalProviderID(id)] = true
 	}
+	var failedAlerts []pendingAlert
 	for _, alert := range pending {
 		event := alert.Event
 		rule := settings.EffectiveRule(event.ProviderID, event.WindowID)
@@ -326,9 +327,7 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 			}
 			// Rotate any surviving delivery, including one inherited by a
 			// replacement token, so persistent failures cannot monopolize a batch.
-			if err := p.store.deferAlert(event.Key, alert.DeviceID); err != nil {
-				log.Printf("poller: defer alert: %v", err)
-			}
+			failedAlerts = append(failedAlerts, alert)
 			continue
 		}
 		result.Delivery.Alerts.Succeeded++
@@ -340,6 +339,10 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 		if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
 			log.Printf("poller: acknowledge alert: %v", err)
 		}
+	}
+
+	if err := p.store.deferAlerts(failedAlerts); err != nil {
+		log.Printf("poller: defer alerts: %v", err)
 	}
 
 	if changed {
