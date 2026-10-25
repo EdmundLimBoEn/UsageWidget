@@ -14,6 +14,8 @@ import (
 // Allow the full collection budget plus time to persist and dispatch the result.
 const sharedPollTimeout = crossUsageFetchTimeout + 50*time.Second
 
+const widgetDeliveryBudget = 30 * time.Second
+
 type PollResult struct {
 	retryable       bool      // Internal scheduling metadata, never a public diagnostic.
 	PolledAt        time.Time `json:"polledAt"`
@@ -301,7 +303,21 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 	for _, id := range settings.HiddenProviders {
 		hidden[canonicalProviderID(id)] = true
 	}
+	alertDeadline := time.Now().Add(sharedPollTimeout)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(alertDeadline) {
+		alertDeadline = deadline
+	}
+	if changed {
+		// Preserve widget headroom even after a slow collection. If that is
+		// all the time left, leave the entire alert batch for the next poll.
+		alertDeadline = alertDeadline.Add(-widgetDeliveryBudget)
+	}
+	alertCtx, cancelAlerts := context.WithDeadline(ctx, alertDeadline)
+	defer cancelAlerts()
 	for _, alert := range pending {
+		if alertCtx.Err() != nil {
+			break
+		}
 		event := alert.Event
 		rule := settings.EffectiveRule(event.ProviderID, event.WindowID)
 		if !settings.NotificationsEnabled || !rule.Enabled || hidden[canonicalProviderID(event.ProviderID)] ||
@@ -315,7 +331,7 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 		}
 		event.Silent = settings.QuietHours.Contains(time.Now())
 		result.Delivery.Alerts.Attempted++
-		err := p.notifier.SendAlert(ctx, alert.Token, event)
+		err := p.notifier.SendAlert(alertCtx, alert.Token, event)
 		if err != nil {
 			result.Delivery.Alerts.Failed++
 			var apnsErr *APNSError
@@ -343,12 +359,30 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 	}
 
 	if changed {
+		widgetCtx, cancelWidgets := context.WithTimeout(ctx, widgetDeliveryBudget)
+		defer cancelWidgets()
+		remainingWidgets := 0
 		for _, device := range devices {
+			if device.WidgetToken != "" {
+				remainingWidgets++
+			}
+		}
+		widgetDeadline, _ := widgetCtx.Deadline()
+		for _, device := range devices {
+			if widgetCtx.Err() != nil {
+				break
+			}
 			if device.WidgetToken == "" {
 				continue
 			}
+			// Share the remaining batch time fairly. Slow requests must leave
+			// time for later devices, whose refreshes are not queued for retry.
+			deviceCtx, cancelDevice := context.WithTimeout(widgetCtx, time.Until(widgetDeadline)/time.Duration(remainingWidgets))
+			remainingWidgets--
 			result.Delivery.WidgetRefresh.Attempted++
-			if err := p.notifier.SendWidgetRefresh(ctx, device.WidgetToken); err != nil {
+			err := p.notifier.SendWidgetRefresh(deviceCtx, device.WidgetToken)
+			cancelDevice()
+			if err != nil {
 				log.Printf("poller: widget refresh to %s: %v", device.DeviceID, err)
 				var apnsErr *APNSError
 				if errors.As(err, &apnsErr) && apnsErr.TerminalDeviceToken() {
