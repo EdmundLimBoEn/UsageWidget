@@ -299,6 +299,13 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 		result.Detail = "could not load notification settings"
 		return result
 	}
+	_, payload, hasSnapshot, err := p.store.LatestSnapshot()
+	var snapshot Snapshot
+	if err != nil || (hasSnapshot && json.Unmarshal(payload, &snapshot) != nil) {
+		result.Status = DeliveryWarning
+		result.Detail = "could not load snapshot for alert validation"
+		return result
+	}
 	hidden := make(map[string]bool, len(settings.HiddenProviders))
 	for _, id := range settings.HiddenProviders {
 		hidden[canonicalProviderID(id)] = true
@@ -314,6 +321,7 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 	}
 	alertCtx, cancelAlerts := context.WithDeadline(ctx, alertDeadline)
 	defer cancelAlerts()
+	var deferredAlerts []pendingAlert
 	for _, alert := range pending {
 		if alertCtx.Err() != nil {
 			break
@@ -329,6 +337,17 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 			}
 			continue
 		}
+		discard, deferDelivery := validateQueuedAlert(event, snapshot, hasSnapshot, rule, time.Now())
+		if discard {
+			if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
+				log.Printf("poller: discard obsolete alert: %v", err)
+			}
+			continue
+		}
+		if deferDelivery {
+			deferredAlerts = append(deferredAlerts, alert)
+			continue
+		}
 		event.Silent = settings.QuietHours.Contains(time.Now())
 		result.Delivery.Alerts.Attempted++
 		err := p.notifier.SendAlert(alertCtx, alert.Token, event)
@@ -342,9 +361,7 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 			}
 			// Rotate any surviving delivery, including one inherited by a
 			// replacement token, so persistent failures cannot monopolize a batch.
-			if err := p.store.deferAlert(event.Key, alert.DeviceID); err != nil {
-				log.Printf("poller: defer alert: %v", err)
-			}
+			deferredAlerts = append(deferredAlerts, alert)
 			continue
 		}
 		result.Delivery.Alerts.Succeeded++
@@ -356,6 +373,10 @@ func (p *Poller) dispatch(ctx context.Context, changed bool) dispatchResult {
 		if err := p.store.acknowledgeAlert(event.Key, alert.DeviceID); err != nil {
 			log.Printf("poller: acknowledge alert: %v", err)
 		}
+	}
+
+	if err := p.store.deferAlerts(deferredAlerts); err != nil {
+		log.Printf("poller: defer alerts: %v", err)
 	}
 
 	if changed {
@@ -444,4 +465,42 @@ func (p *Poller) markStale() {
 	if err := p.store.SaveSnapshot(fetchedAt, updated); err != nil {
 		log.Printf("poller: mark stale: %v", err)
 	}
+}
+
+// Validate immediately before sending: a reset can pass while earlier alerts
+// are in flight. Stale data cannot establish whether a queued alert is valid.
+func validateQueuedAlert(event Event, snapshot Snapshot, hasSnapshot bool, rule AlertRule, now time.Time) (discard, deferDelivery bool) {
+	threshold := event.Type == "early_threshold" || event.Type == "danger_threshold" || event.Type == "danger_reminder"
+	if threshold && event.ResetsAt != nil && !event.ResetsAt.After(now) {
+		return true, false
+	}
+	if !hasSnapshot {
+		return false, false
+	}
+	for _, provider := range snapshot.Providers {
+		if canonicalProviderID(provider.ID) != canonicalProviderID(event.ProviderID) {
+			continue
+		}
+		if snapshot.Stale || provider.Stale || provider.Error != "" {
+			return false, true
+		}
+		if !threshold {
+			return false, false
+		}
+		for _, window := range provider.Windows {
+			if window.ID != event.WindowID {
+				continue
+			}
+			if (event.ResetsAt == nil) != (window.ResetsAt == nil) ||
+				(event.ResetsAt != nil && !event.ResetsAt.Equal(*window.ResetsAt)) {
+				return true, false
+			}
+			if event.Type == "early_threshold" {
+				return window.UsedPercent < rule.EarlyThresholdPct, false
+			}
+			return window.RemainingPercent > rule.DangerThresholdPct, false
+		}
+		return true, false
+	}
+	return false, true
 }
