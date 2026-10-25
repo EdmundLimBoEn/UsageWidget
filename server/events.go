@@ -62,7 +62,7 @@ func (e *EventEngine) ProcessDetailed(snap Snapshot, s Settings, now time.Time) 
 	defer tx.Rollback()
 	local := *e.store
 	local.eventTx = tx
-	if err := local.expireOldAlerts(); err != nil {
+	if err := local.expireOldAlerts(now); err != nil {
 		return EventProcessResult{}, err
 	}
 	engine := NewEventEngine(&local)
@@ -88,6 +88,8 @@ func (e *EventEngine) processDetailed(snap Snapshot, s Settings, now time.Time) 
 	}
 
 	var result EventProcessResult
+	var recipients []Device
+	recipientsLoaded := false
 	for _, p := range snap.Providers {
 		if hidden[canonicalProviderID(p.ID)] || p.Stale || p.Error != "" {
 			continue
@@ -128,14 +130,19 @@ func (e *EventEngine) processDetailed(snap Snapshot, s Settings, now time.Time) 
 				}
 				if !dangerEmitted && w.RemainingPercent <= rule.DangerThresholdPct && rule.RepeatIntervalMinutes > 0 {
 					epoch, fingerprint := resetEpoch(w.ResetsAt), policyFingerprint(rule)
-					devices, err := e.store.ListDevices()
-					if err != nil {
-						return EventProcessResult{}, err
-					}
-					for _, device := range devices {
-						if device.APNsToken == "" {
-							continue
+					if !recipientsLoaded {
+						devices, err := e.store.ListDevices()
+						if err != nil {
+							return EventProcessResult{}, err
 						}
+						for _, device := range devices {
+							if device.APNsToken != "" {
+								recipients = append(recipients, device)
+							}
+						}
+						recipientsLoaded = true
+					}
+					for _, device := range recipients {
 						claimed, err := e.store.DangerDeliveryDue(device.DeviceID, w.ID, epoch, fingerprint, now, time.Duration(rule.RepeatIntervalMinutes)*time.Minute)
 						if err != nil {
 							return EventProcessResult{}, err
