@@ -77,6 +77,68 @@ map_arch() {
 }
 
 read_env() { local key=$1; [[ -r $ENV_FILE ]] || return 1; sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1; }
+# Decode EnvironmentFile values without evaluating shell expansions or commands.
+# Keep this separate from read_env to limit the change to rollback path resolution.
+read_systemd_env() {
+  local key=$1
+  [[ -r $ENV_FILE ]] || return 1
+  awk -v wanted="$key" '
+    function finish() {
+      if (name == wanted && state != "key" && state != "comment") result = value
+      state = "key"; name = ""; value = ""; pending = ""
+    }
+    BEGIN { state = "key"; single = sprintf("%c", 39) }
+    {
+      line = $0 "\n"
+      for (i = 1; i <= length(line); i++) {
+        c = substr(line, i, 1)
+        if (state == "comment") {
+          if (c == "\n") finish()
+        } else if (state == "key") {
+          if (c == "\n") finish()
+          else if (name == "" && c ~ /[ \t\r]/) continue
+          else if (name == "" && (c == "#" || c == ";")) state = "comment"
+          else if (c == "=") {
+            sub(/[ \t\r]+$/, "", name); state = "before"
+          } else name = name c
+        } else if (state == "before") {
+          if (c == "\n") finish()
+          else if (c ~ /[ \t\r]/) continue
+          else if (c == single) state = "single"
+          else if (c == "\"") state = "double"
+          else if (c == "\\") state = "escape"
+          else { value = value c; state = "plain" }
+        } else if (state == "plain") {
+          if (c == "\n") finish()
+          else if (c == "\\") { value = value pending; pending = ""; state = "escape" }
+          else if (c ~ /[ \t\r]/) pending = pending c
+          else { value = value pending c; pending = "" }
+        } else if (state == "escape") {
+          if (c != "\n") value = value c
+          state = "plain"
+        } else if (state == "single") {
+          if (c == single) state = "before"
+          else value = value c
+        } else if (state == "double") {
+          if (c == "\"") state = "before"
+          else if (c == "\\") state = "double_escape"
+          else value = value c
+        } else if (state == "double_escape") {
+          if (c != "\n") {
+            if (c != "\"" && c != "\\" && c != "$" && c != "`") value = value "\\"
+            value = value c
+          }
+          state = "double"
+        }
+      }
+    }
+    END {
+      if (state != "key" && state != "comment") finish()
+      printf "%s", result
+    }
+  ' "$ENV_FILE"
+}
+
 health_ok() {
   local token code expected_version="${1:-}"
   token="$(read_env USAGEWIDGET_TOKEN || true)"; [[ ${#token} -ge 32 ]] || return 1
@@ -250,7 +312,7 @@ write_initial_env() {
 
 install_release() {
   [[ -r $MANIFEST ]] || die "release manifest missing"
-  local version release_dir previous_target=""
+  local version release_dir previous_target="" rollback_dir="" db_path suffix
   version="${REQUESTED_VERSION:-$(jq -r '.version' "$MANIFEST")}"; [[ $version != null && -n $version ]] || die "release version is missing"
   [[ -x $SCRIPT_DIR/bin/usagewidgetd && -x $SCRIPT_DIR/bin/usagewidget-collector ]] || die "run the installer from an extracted UsageWidget release bundle"
   if [[ -r $SCRIPT_DIR/CHECKSUMS.sha256 ]]; then (cd "$SCRIPT_DIR" && sha256sum -c CHECKSUMS.sha256 >/dev/null) || die "release bundle checksum verification failed"; fi
@@ -262,6 +324,26 @@ install_release() {
   install -m 0644 "$MANIFEST" "$release_dir/release-manifest.json"
   [[ -L $PREFIX/current ]] && previous_target="$(readlink -f "$PREFIX/current")"
   [[ -n $previous_target ]] && ln -sfn "$previous_target" "$PREFIX/previous"
+  if [[ -n $previous_target ]]; then
+    db_path="$(read_systemd_env DB_PATH)" || die "cannot read database path from $ENV_FILE"
+    db_path="${db_path:-$DATA_DIR/usagewidget.db}"
+    [[ $db_path == /* ]] || db_path="$DATA_DIR/$db_path"
+    install -d -m 0700 "$BACKUP_DIR"
+    rollback_dir="$(mktemp -d "$BACKUP_DIR/rollback.XXXXXX")"
+    systemctl stop usagewidget || die "cannot stop daemon for database backup"
+    # With the sole writer stopped, preserve the complete SQLite file set,
+    # including any uncheckpointed WAL or hot journal left after a crash.
+    for suffix in '' -wal -shm -journal; do
+      if [[ -e $db_path$suffix ]]; then
+        if ! cp -p -- "$db_path$suffix" "$rollback_dir/database$suffix"; then
+          # No release switch or database mutation has happened yet.
+          systemctl start usagewidget || die "cannot preserve rollback database; cannot restart existing daemon; partial backup retained at $rollback_dir"
+          rm -rf -- "$rollback_dir"
+          die "cannot preserve rollback database; existing daemon restarted"
+        fi
+      fi
+    done
+  fi
   ln -sfn "$release_dir" "$PREFIX/current.new"; mv -Tf "$PREFIX/current.new" "$PREFIX/current"
   ln -sfn "$PREFIX/current/bin/usagewidgetd" /usr/local/bin/usagewidgetd
   ln -sfn "$PREFIX/current/bin/usagewidget-collector" /usr/local/bin/usagewidget-collector
@@ -273,9 +355,24 @@ install_release() {
   printf '[Service]\nUser=%s\nGroup=usagewidget\n' "$COLLECTOR_USER" >/etc/systemd/system/usagewidget-collector.service.d/user.conf
   systemctl daemon-reload; systemctl enable usagewidget-collector usagewidget
   if ! systemctl restart usagewidget-collector usagewidget || ! wait_for_health 30 "$version"; then
-    if [[ -n $previous_target ]]; then warn "restart or version health check failed; rolling back to $previous_target"; ln -sfn "$previous_target" "$PREFIX/current.new"; mv -Tf "$PREFIX/current.new" "$PREFIX/current"; systemctl restart usagewidget-collector usagewidget; fi
+    if [[ -n $previous_target ]]; then
+      warn "restart or version health check failed; rolling back to $previous_target"
+      systemctl stop usagewidget || die "cannot stop failed release; database backup retained at $rollback_dir"
+      # Never let the old binary open the migrated database or its sidecars.
+      for suffix in '' -wal -shm -journal; do
+        rm -f -- "$db_path$suffix"
+        if [[ -e $rollback_dir/database$suffix ]]; then
+          cp -p -- "$rollback_dir/database$suffix" "$db_path$suffix" || die "cannot restore database; backup retained at $rollback_dir"
+        fi
+      done
+      ln -sfn "$previous_target" "$PREFIX/current.new"; mv -Tf "$PREFIX/current.new" "$PREFIX/current"
+      systemctl restart usagewidget-collector usagewidget
+      wait_for_health 30 || die "rolled-back release failed health check; database backup retained at $rollback_dir"
+      rm -rf -- "$rollback_dir"
+    fi
     die "installed version failed to restart or pass its local version health check"
   fi
+  if [[ -n $rollback_dir ]]; then rm -rf -- "$rollback_dir"; fi
 }
 
 configure_serve() {

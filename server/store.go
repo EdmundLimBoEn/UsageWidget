@@ -824,13 +824,17 @@ type pendingAlert struct {
 const pendingAlertRetention = 24 * time.Hour
 const pendingAlertBatchSize = 100
 
-func (s *Store) expireOldAlerts() error {
-	_, err := s.eventDB().Exec("DELETE FROM pending_alerts WHERE created_at <= ?", time.Now().Add(-pendingAlertRetention).Unix())
+func (s *Store) expireOldAlerts(now time.Time) error {
+	// Reset expiry must run even when a provider is stale, absent or errored.
+	_, err := s.eventDB().Exec(`DELETE FROM pending_alerts WHERE created_at <= ?
+		OR (json_extract(payload, '$.Type') IN ('early_threshold', 'danger_threshold', 'danger_reminder')
+			AND julianday(json_extract(payload, '$.ResetsAt')) <= julianday(?))`,
+		now.Add(-pendingAlertRetention).Unix(), now.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 func (s *Store) pendingAlerts() ([]pendingAlert, error) {
-	if err := s.expireOldAlerts(); err != nil {
+	if err := s.expireOldAlerts(time.Now()); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.Query(`SELECT p.payload, d.device_id, d.apns_token, d.registration_generation
@@ -888,13 +892,26 @@ func (s *Store) completeAlert(alert pendingAlert, now time.Time) error {
 	return tx.Commit()
 }
 
-// deferAlert moves a failed delivery behind the rest of the queue without
-// changing its payload or retention deadline. Updating the rowid is atomic.
-func (s *Store) deferAlert(key, deviceID string) error {
-	_, err := s.db.Exec(`UPDATE pending_alerts
-		SET rowid = (SELECT MAX(rowid) + 1 FROM pending_alerts)
-		WHERE event_key = ? AND device_id = ?`, key, deviceID)
-	return err
+// deferAlerts moves failed deliveries behind the rest of the queue in order,
+// without changing their payloads or retention deadlines. Call after network
+// delivery so the single write transaction stays short.
+func (s *Store) deferAlerts(alerts []pendingAlert) error {
+	if len(alerts) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, alert := range alerts {
+		if _, err := tx.Exec(`UPDATE pending_alerts
+			SET rowid = (SELECT MAX(rowid) + 1 FROM pending_alerts)
+			WHERE event_key = ? AND device_id = ?`, alert.Event.Key, alert.DeviceID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // rejectAlert clears a terminal token and its queued deliveries only if that
