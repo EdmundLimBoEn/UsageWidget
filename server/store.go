@@ -14,7 +14,7 @@ import (
 
 type Store struct {
 	db         *sql.DB
-	eventTx    *sql.Tx // Used only by the event engine transaction-local copy.
+	eventTx    *sql.Tx // Used only by transaction-local copies.
 	maxDevices int
 }
 
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS device_test_results (
 );
 `
 
-const CurrentSchemaVersion = 2
+const CurrentSchemaVersion = 3
 
 var defaultSettings = map[string]string{
 	"poll_interval_minutes":           "5",
@@ -184,6 +184,15 @@ func OpenStoreWithDeviceLimit(dbPath string, maxDevices int) (*Store, error) {
 			tx.Rollback()
 			db.Close()
 			return nil, err
+		}
+	}
+	if version < 3 {
+		// A generation identifies a device's lifetime, independent of token refreshes.
+		if _, err := tx.Exec(`ALTER TABLE devices ADD COLUMN registration_generation TEXT NOT NULL DEFAULT '';
+			UPDATE devices SET registration_generation = lower(hex(randomblob(16)));`); err != nil {
+			tx.Rollback()
+			db.Close()
+			return nil, fmt.Errorf("store: migrate registration generations: %w", err)
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?) ON CONFLICT(version) DO NOTHING`, CurrentSchemaVersion, time.Now().UTC().Format(time.RFC3339)); err != nil {
@@ -331,7 +340,7 @@ func (s *Store) DangerDeliveryDue(deviceID, windowID, resetEpoch, fingerprint st
 }
 
 func (s *Store) RecordDangerDelivery(deviceID, windowID, resetEpoch, fingerprint string, now time.Time) error {
-	_, err := s.db.Exec(`INSERT INTO alert_delivery_state(device_id,window_id,reset_epoch,policy_fingerprint,last_delivered_at) VALUES(?,?,?,?,?) ON CONFLICT(device_id,window_id,reset_epoch,policy_fingerprint) DO UPDATE SET last_delivered_at=excluded.last_delivered_at`, deviceID, windowID, resetEpoch, fingerprint, now.UTC().Format(time.RFC3339Nano))
+	_, err := s.eventDB().Exec(`INSERT INTO alert_delivery_state(device_id,window_id,reset_epoch,policy_fingerprint,last_delivered_at) SELECT ?,?,?,?,? WHERE EXISTS (SELECT 1 FROM devices WHERE device_id=?) ON CONFLICT(device_id,window_id,reset_epoch,policy_fingerprint) DO UPDATE SET last_delivered_at=excluded.last_delivered_at`, deviceID, windowID, resetEpoch, fingerprint, now.UTC().Format(time.RFC3339Nano), deviceID)
 	if err != nil {
 		return fmt.Errorf("store: record danger delivery: %w", err)
 	}
@@ -513,12 +522,13 @@ func (s *Store) UpsertDevice(deviceID, apnsToken, widgetToken string) error {
 
 // Nil tokens preserve existing values; pointers to empty strings clear them.
 func (s *Store) upsertDevice(deviceID string, apnsToken, widgetToken *string) error {
+	// Generate a new identity only on insertion; updates preserve the device lifetime.
 	result, err := s.db.Exec(
-		`INSERT INTO devices (device_id, apns_token, widget_token, updated_at)
-		 SELECT ?, COALESCE(?, ''), COALESCE(?, ''), ?
+		`INSERT INTO devices (device_id, apns_token, widget_token, updated_at, registration_generation)
+		 SELECT ?, COALESCE(?, ''), COALESCE(?, ''), ?, lower(hex(randomblob(16)))
 		 WHERE (SELECT COUNT(*) FROM devices) < ? OR EXISTS (SELECT 1 FROM devices WHERE device_id = ?)
 		 ON CONFLICT(device_id) DO UPDATE SET apns_token = COALESCE(?, devices.apns_token), widget_token = COALESCE(?, devices.widget_token), updated_at = excluded.updated_at`,
-		deviceID, apnsToken, widgetToken, time.Now().UTC().Format(time.RFC3339), s.maxDevices, deviceID, apnsToken, widgetToken,
+		deviceID, apnsToken, widgetToken, time.Now().UTC().Format(time.RFC3339Nano), s.maxDevices, deviceID, apnsToken, widgetToken,
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert device: %w", err)
@@ -805,9 +815,10 @@ func (s *Store) enqueueAlert(event Event) error {
 }
 
 type pendingAlert struct {
-	Event    Event
-	DeviceID string
-	Token    string
+	Event                  Event
+	DeviceID               string
+	Token                  string
+	RegistrationGeneration string
 }
 
 const pendingAlertRetention = 24 * time.Hour
@@ -826,7 +837,7 @@ func (s *Store) pendingAlerts() ([]pendingAlert, error) {
 	if err := s.expireOldAlerts(time.Now()); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`SELECT p.payload, d.device_id, d.apns_token
+	rows, err := s.db.Query(`SELECT p.payload, d.device_id, d.apns_token, d.registration_generation
         FROM pending_alerts p JOIN devices d ON d.device_id = p.device_id
         WHERE d.apns_token != '' ORDER BY p.rowid LIMIT ?`, pendingAlertBatchSize)
 	if err != nil {
@@ -837,7 +848,7 @@ func (s *Store) pendingAlerts() ([]pendingAlert, error) {
 	for rows.Next() {
 		var alert pendingAlert
 		var payload string
-		if err := rows.Scan(&payload, &alert.DeviceID, &alert.Token); err != nil {
+		if err := rows.Scan(&payload, &alert.DeviceID, &alert.Token, &alert.RegistrationGeneration); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(payload), &alert.Event); err != nil {
@@ -851,6 +862,34 @@ func (s *Store) pendingAlerts() ([]pendingAlert, error) {
 func (s *Store) acknowledgeAlert(key, deviceID string) error {
 	_, err := s.db.Exec(`DELETE FROM pending_alerts WHERE event_key = ? AND device_id = ?`, key, deviceID)
 	return err
+}
+
+// completeAlert acknowledges a successful send and records its cadence atomically.
+// A response for an earlier registration must not affect the current device.
+func (s *Store) completeAlert(alert pendingAlert, now time.Time) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`DELETE FROM pending_alerts WHERE event_key=? AND device_id=?
+		AND EXISTS (SELECT 1 FROM devices WHERE device_id=? AND apns_token=? AND registration_generation=?)`,
+		alert.Event.Key, alert.DeviceID, alert.DeviceID, alert.Token, alert.RegistrationGeneration)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 && alert.Event.DangerPolicyFingerprint != "" {
+		local := *s
+		local.eventTx = tx
+		if err := local.RecordDangerDelivery(alert.DeviceID, alert.Event.WindowID, alert.Event.DangerResetEpoch, alert.Event.DangerPolicyFingerprint, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // deferAlerts moves failed deliveries behind the rest of the queue in order,

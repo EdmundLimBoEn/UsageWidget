@@ -60,6 +60,9 @@ func TestDangerReminderStateSurvivesRestartAndPolicyChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC)
+	if err := store.UpsertDevice("phone", "alert", ""); err != nil {
+		t.Fatal(err)
+	}
 	due, err := store.DangerDeliveryDue("phone", "codex.primary", "epoch-1", "policy-a", now, time.Hour)
 	if err != nil || !due {
 		t.Fatalf("initial due=%v err=%v", due, err)
