@@ -134,11 +134,17 @@ struct ProviderWidgetView: View {
         let overflow = entry.providerCount > maxRows ? max(0, visible.count - maxRows) : 0
         let shown = Array(visible.prefix(maxRows))
 
-        VStack(alignment: .leading, spacing: familyKind == .large ? 12 : 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Capacity")
                     .font(familyKind == .small ? .caption.weight(.semibold) : .headline)
                 Spacer()
+                if overflow > 0 && familyKind != .large {
+                    Text("+\(overflow)")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("\(overflow) more providers")
+                }
                 ageLabel
             }
 
@@ -152,7 +158,8 @@ struct ProviderWidgetView: View {
                 ForEach(shown) { provider in
                     ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true, compact: familyKind == .small)
                 }
-                if overflow > 0 {
+                // Small/medium have no room for an extra row; the header carries the count instead.
+                if overflow > 0 && familyKind == .large {
                     OverflowRow(count: overflow)
                 }
                 Spacer(minLength: 0)
