@@ -66,24 +66,14 @@ if "PrivacyInfo.xcprivacy in Resources" not in pbx:
     fail("project.pbxproj must copy PrivacyInfo.xcprivacy into target resources")
 
 assets = root / "ios/Resources/Assets.xcassets"
-brand_names = ("codex", "claude", "grok", "cursor", "openai", "anthropic", "chatgpt", "copilot", "gemini", "xai")
-image_ext = {".svg", ".png", ".pdf", ".jpg", ".jpeg", ".webp"}
-for imageset in assets.glob("Provider*.imageset"):
-    for child in imageset.iterdir():
-        if child.suffix.lower() in image_ext:
-            fail(f"brand-capable image remains in {child.relative_to(root)}")
-        lower = child.name.lower()
-        if any(name in lower for name in brand_names):
-            fail(f"brand filename remains in {child.relative_to(root)}")
-
-for path in assets.rglob("*"):
-    if not path.is_file():
-        continue
-    lower = path.name.lower()
-    if path.suffix.lower() in image_ext and any(name in lower for name in brand_names):
-        if "appicon" in str(path).lower():
-            continue
-        fail(f"brand image file remains at {path.relative_to(root)}")
+# Provider logos are shipped on purpose (owner decision, PR #41) as in-app marks
+# only. Every Provider*.imageset must have its SVG; trademark checks on store
+# metadata below still apply.
+expected_logos = ("ProviderClaude", "ProviderCodex", "ProviderCopilot", "ProviderCursor", "ProviderGemini", "ProviderGrok")
+for name in expected_logos:
+    imageset = assets / f"{name}.imageset"
+    if not imageset.is_dir() or not any(c.suffix.lower() == ".svg" for c in imageset.iterdir()):
+        fail(f"missing provider logo SVG in {imageset.relative_to(root)}")
 
 version_dir = root / "metadata/version/1.0"
 if not version_dir.is_dir():
@@ -165,5 +155,5 @@ for path in (root / "ios/Sources").rglob("*.swift"):
 if errors:
     print("\n".join(f"FAIL: {item}" for item in errors), file=sys.stderr)
     sys.exit(1)
-print("ok: privacy manifest, project wiring, trademarks, metadata 1.0, dashboard-only delivery")
+print("ok: privacy manifest, project wiring, provider logos, store-metadata trademarks, metadata 1.0, dashboard-only delivery")
 PY

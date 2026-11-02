@@ -1,33 +1,48 @@
 import WidgetKit
 import SwiftUI
+import AppIntents
+
+/// Widget configuration: how many providers to show (1-4). The family caps it
+/// (small fits 1, medium 2, large 4), so users size the widget down for fewer.
+struct CapacityWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Capacity"
+    static let description = IntentDescription("Choose how many providers the widget shows.")
+
+    @Parameter(title: "Providers shown", default: 4, inclusiveRange: (1, 4))
+    var providerCount: Int
+
+    init() {}
+    init(providerCount: Int) { self.providerCount = providerCount }
+}
 
 struct ProviderEntry: TimelineEntry {
     let date: Date
     let snapshot: Snapshot?
     let preferences: DisplayPreferences
     let fetchError: String?
+    var providerCount: Int = 4
 }
 
-struct UsageTimelineProvider: TimelineProvider {
+struct UsageTimelineProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> ProviderEntry {
         ProviderEntry(date: Date(), snapshot: Self.sampleSnapshot, preferences: DisplayPreferences(), fetchError: nil)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (ProviderEntry) -> Void) {
-        let finish = UncheckedBox(completion)
-        Task {
-            finish.value(await Self.loadEntry())
+    func snapshot(for configuration: CapacityWidgetIntent, in context: Context) async -> ProviderEntry {
+        if context.isPreview {
+            return ProviderEntry(date: Date(), snapshot: Self.sampleSnapshot, preferences: DisplayPreferences(), fetchError: nil, providerCount: configuration.providerCount)
         }
+        var entry = await Self.loadEntry()
+        entry.providerCount = configuration.providerCount
+        return entry
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<ProviderEntry>) -> Void) {
-        let finish = UncheckedBox(completion)
-        Task {
-            let entry = await Self.loadEntry()
-            let minutes = max(entry.snapshot?.pollIntervalMinutes ?? 5, 1)
-            let next = Date().addingTimeInterval(TimeInterval(minutes * 60))
-            finish.value(Timeline(entries: [entry], policy: .after(next)))
-        }
+    func timeline(for configuration: CapacityWidgetIntent, in context: Context) async -> Timeline<ProviderEntry> {
+        var entry = await Self.loadEntry()
+        entry.providerCount = configuration.providerCount
+        let minutes = max(entry.snapshot?.pollIntervalMinutes ?? 5, 1)
+        let next = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        return Timeline(entries: [entry], policy: .after(next))
     }
 
     private static func loadEntry() async -> ProviderEntry {
@@ -80,13 +95,13 @@ struct ProviderUsageWidget: Widget {
     let kind = "ProviderUsageWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: UsageTimelineProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: CapacityWidgetIntent.self, provider: UsageTimelineProvider()) { entry in
             ProviderWidgetView(entry: entry)
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Capacity")
         .description("Remaining AI capacity and when it resets.")
-        .supportedFamilies([.systemLarge])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
         .pushHandler(UsageWidgetPushHandler.self)
     }
 }
@@ -95,8 +110,19 @@ struct ProviderWidgetView: View {
     let entry: ProviderEntry
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.widgetFamily) private var widgetFamily
 
-    private var maxRows: Int { CapacityLayout.widgetRowLimit(for: dynamicTypeSize) }
+    private var familyKind: WidgetFamilyKind {
+        switch widgetFamily {
+        case .systemSmall: .small
+        case .systemMedium: .medium
+        default: .large
+        }
+    }
+
+    private var maxRows: Int {
+        CapacityLayout.widgetRowCount(requested: entry.providerCount, family: familyKind, dynamicType: dynamicTypeSize)
+    }
 
     var body: some View {
         let visible = ProviderDisplay.orderedVisible(
@@ -104,14 +130,21 @@ struct ProviderWidgetView: View {
             order: entry.preferences.providerOrder,
             hidden: entry.preferences.hiddenSet
         )
-        let overflow = max(0, visible.count - maxRows)
+        // Only flag overflow when the family or text size cut the user's choice short.
+        let overflow = entry.providerCount > maxRows ? max(0, visible.count - maxRows) : 0
         let shown = Array(visible.prefix(maxRows))
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Capacity")
-                    .font(.headline)
+                    .font(familyKind == .small ? .caption.weight(.semibold) : .headline)
                 Spacer()
+                if overflow > 0 && familyKind != .large {
+                    Text("+\(overflow)")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("\(overflow) more providers")
+                }
                 ageLabel
             }
 
@@ -123,9 +156,10 @@ struct ProviderWidgetView: View {
                 Spacer()
             } else {
                 ForEach(shown) { provider in
-                    ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true)
+                    ProviderWidgetRow(provider: provider, isStale: entry.snapshot?.stale == true, compact: familyKind == .small)
                 }
-                if overflow > 0 {
+                // Small/medium have no room for an extra row; the header carries the count instead.
+                if overflow > 0 && familyKind == .large {
                     OverflowRow(count: overflow)
                 }
                 Spacer(minLength: 0)
@@ -163,18 +197,19 @@ struct ProviderWidgetView: View {
 struct ProviderWidgetRow: View {
     let provider: Provider
     let isStale: Bool
+    var compact: Bool = false
 
     private var primary: UsageWindow? { provider.windows.first }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                ProviderMark(size: 24, cornerRadius: 7)
+                ProviderMark(providerID: provider.id, size: compact ? 18 : 22)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(provider.name)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                    if let primary {
+                    if let primary, !compact {
                         Text(ForecastText.string(for: primary) ?? resetText(primary))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -203,9 +238,6 @@ struct ProviderWidgetRow: View {
                     .lineLimit(1)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
