@@ -502,9 +502,50 @@ public enum ForecastText {
 
 public enum ProviderCatalog {
     public static let defaultOrder = ["cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"]
+
+    static let displayNames: [String: String] = [
+        "cursor": "Cursor", "codex": "Codex", "claude_code": "Claude Code", "copilot": "Copilot",
+        "gemini_cli": "Gemini CLI", "grok": "Grok", "devin": "Devin",
+    ]
+
+    /// Human name for a provider id, used when the server no longer returns it (e.g. hidden).
+    public static func displayName(for id: String) -> String {
+        if let name = displayNames[id] { return name }
+        return id.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+}
+
+public struct ProviderSettingsRow: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let isVisible: Bool
 }
 
 public enum ProviderDisplay {
+    /// Every provider for the settings list, including hidden ones, in user order.
+    /// The server omits hidden providers from the snapshot, so hidden ids that are
+    /// missing from `providers` still get a row (shown off) so they can be turned back on.
+    public static func settingsRows(
+        providers: [Provider],
+        order: [String],
+        hidden: [String]
+    ) -> [ProviderSettingsRow] {
+        let hiddenSet = Set(hidden)
+        var names: [String: String] = [:]
+        for p in providers where names[p.id] == nil { names[p.id] = p.name }
+        var seen = Set<String>()
+        var rows: [ProviderSettingsRow] = []
+        let known = Set(names.keys).union(hiddenSet)
+        for id in order + providers.map(\.id) + hidden where known.contains(id) && seen.insert(id).inserted {
+            rows.append(ProviderSettingsRow(
+                id: id,
+                name: names[id] ?? ProviderCatalog.displayName(for: id),
+                isVisible: !hiddenSet.contains(id)
+            ))
+        }
+        return rows
+    }
+
     /// Visible providers in user order, then any remaining visible ones.
     public static func orderedVisible(
         providers: [Provider],
