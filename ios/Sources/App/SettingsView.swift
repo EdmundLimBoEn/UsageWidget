@@ -52,7 +52,7 @@ struct SettingsView: View {
                 if let providers = model.snapshot?.providers {
                     ForEach(providerRows(providers), id: \.id) { row in
                         HStack {
-                            ProviderMark(size: 28, cornerRadius: 8)
+                            ProviderMark(providerID: row.id, size: 26)
                             Text(row.name)
                                 .foregroundStyle(row.isVisible ? .primary : .secondary)
                             Spacer()

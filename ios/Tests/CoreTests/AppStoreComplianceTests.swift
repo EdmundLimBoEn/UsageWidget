@@ -33,10 +33,13 @@ final class AppStoreComplianceTests: XCTestCase {
         )
     }
 
-    func testProviderImagesetsDoNotShipBrandLogos() {
-        for name in ["ProviderCodex", "ProviderClaude", "ProviderGrok", "ProviderCursor"] {
-            XCTAssertNil(UIImage(named: name), "\(name) must not remain as a brand logo asset")
+    func testProviderLogosShipForCatalogProviders() {
+        for id in ["cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok"] {
+            let name = ProviderLogoAsset.name(for: id)
+            XCTAssertNotNil(name, "\(id) should map to a logo")
+            XCTAssertNotNil(UIImage(named: name ?? ""), "\(name ?? id) logo asset missing")
         }
+        XCTAssertNil(ProviderLogoAsset.name(for: "devin"), "unknown logos fall back to the gauge symbol")
     }
 }
 
@@ -98,6 +101,17 @@ final class DynamicTypeTests: XCTestCase {
     func testCardHeaderStacksOnlyAtAccessibilitySizes() {
         XCTAssertFalse(CapacityLayout.stacksCardHeader(for: .xxxLarge))
         XCTAssertTrue(CapacityLayout.stacksCardHeader(for: .accessibility1))
+    }
+
+    func testWidgetRowCountFollowsConfigurationAndFamily() {
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 4, family: .small, dynamicType: .large), 1)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 4, family: .medium, dynamicType: .large), 2)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 1, family: .medium, dynamicType: .large), 1)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 3, family: .large, dynamicType: .large), 3)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 4, family: .large, dynamicType: .large), 4)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 9, family: .large, dynamicType: .large), 4)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 0, family: .large, dynamicType: .large), 1)
+        XCTAssertEqual(CapacityLayout.widgetRowCount(requested: 4, family: .large, dynamicType: .accessibility1), 2)
     }
 
     func testProviderMarkScalesButIsCapped() {

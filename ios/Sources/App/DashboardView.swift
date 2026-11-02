@@ -5,40 +5,37 @@ struct DashboardView: View {
     @State private var showDiagnostics = false
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 14) {
+        List {
+            Section {
                 if model.homeSurface == .samplePreview {
                     sampleBanner
                 }
-
                 freshnessButton
+            }
 
-                if model.visibleProviders.isEmpty {
+            if model.visibleProviders.isEmpty {
+                Section {
                     if model.snapshot != nil {
                         ContentUnavailableView(
                             "No providers to show",
                             systemImage: "eye.slash",
                             description: Text("Providers are hidden or not in this collection.")
                         )
-                        .frame(minHeight: 360)
                     } else {
                         ContentUnavailableView(
                             "No usage yet",
                             systemImage: "gauge.with.dots.needle.0percent",
                             description: Text("Refresh after the server collects its first snapshot.")
                         )
-                        .frame(minHeight: 360)
-                    }
-                } else {
-                    ForEach(model.visibleProviders) { provider in
-                        ProviderCapacityCard(provider: provider)
                     }
                 }
+            } else {
+                ForEach(model.visibleProviders) { provider in
+                    ProviderCapacitySection(provider: provider)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
         }
-        .background(Color(uiColor: .systemGroupedBackground))
+        .listStyle(.insetGrouped)
         .navigationTitle("Capacity")
         .toolbar {
             if model.homeSurface != .samplePreview {
@@ -82,8 +79,6 @@ struct DashboardView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Sample data. This dashboard shows example capacity, not your usage.")
     }
@@ -111,8 +106,7 @@ struct DashboardView: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            .padding(14)
-            .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(model.homeSurface == .samplePreview)
@@ -160,7 +154,8 @@ struct DashboardView: View {
     }
 }
 
-struct ProviderCapacityCard: View {
+/// One provider as a plain list section: header row, then one row per usage window.
+struct ProviderCapacitySection: View {
     let provider: Provider
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -168,27 +163,30 @@ struct ProviderCapacityCard: View {
     private var leadingWindow: UsageWindow? { provider.windows.first }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if CapacityLayout.stacksCardHeader(for: dynamicTypeSize) {
-                VStack(alignment: .leading, spacing: 8) {
+        Section {
+            Group {
+                if CapacityLayout.stacksCardHeader(for: dynamicTypeSize) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 11) {
+                            ProviderMark(providerID: provider.id, size: 30)
+                            nameBlock
+                        }
+                        if let window = leadingWindow {
+                            percentBlock(window, alignment: .leading)
+                        }
+                    }
+                } else {
                     HStack(spacing: 11) {
-                        ProviderMark(size: 34, cornerRadius: 9)
+                        ProviderMark(providerID: provider.id, size: 30)
                         nameBlock
-                    }
-                    if let window = leadingWindow {
-                        percentBlock(window, alignment: .leading)
-                    }
-                }
-            } else {
-                HStack(spacing: 11) {
-                    ProviderMark(size: 34, cornerRadius: 9)
-                    nameBlock
-                    Spacer()
-                    if let window = leadingWindow {
-                        percentBlock(window, alignment: .trailing)
+                        Spacer()
+                        if let window = leadingWindow {
+                            percentBlock(window, alignment: .trailing)
+                        }
                     }
                 }
             }
+            .accessibilityElement(children: .contain)
 
             if let error = provider.error, !error.isEmpty,
                !provider.stale || provider.windows.isEmpty {
@@ -202,16 +200,11 @@ struct ProviderCapacityCard: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(spacing: 13) {
-                    ForEach(provider.windows) { window in
-                        CapacityWindowRow(window: window)
-                    }
+                ForEach(provider.windows) { window in
+                    CapacityWindowRow(window: window)
                 }
             }
         }
-        .padding(16)
-        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .accessibilityElement(children: .contain)
     }
 
     private var nameBlock: some View {
