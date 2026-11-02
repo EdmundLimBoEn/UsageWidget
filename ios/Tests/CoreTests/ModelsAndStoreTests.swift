@@ -122,6 +122,31 @@ final class ModelsAndStoreTests: XCTestCase {
         XCTAssertEqual(ordered.first?.name, "Codex")
     }
 
+    func testSettingsRowsKeepHiddenProvidersMissingFromSnapshot() {
+        // Server drops hidden providers from the snapshot; settings must still list them as off.
+        let providers = [Provider(id: "cursor", name: "Cursor"), Provider(id: "grok", name: "Grok")]
+        let rows = ProviderDisplay.settingsRows(
+            providers: providers,
+            order: ["cursor", "codex", "grok", "devin"],
+            hidden: ["codex"]
+        )
+        XCTAssertEqual(rows.map(\.id), ["cursor", "codex", "grok"])
+        XCTAssertEqual(rows.map(\.isVisible), [true, false, true])
+        XCTAssertEqual(rows[1].name, "Codex")
+    }
+
+    func testSettingsRowsShowsHiddenProviderStillInSnapshotAsOff() {
+        let rows = ProviderDisplay.settingsRows(
+            providers: [Provider(id: "custom_tool", name: "Custom")],
+            order: [],
+            hidden: ["custom_tool", "other_thing"]
+        )
+        XCTAssertEqual(rows, [
+            ProviderSettingsRow(id: "custom_tool", name: "Custom", isVisible: false),
+            ProviderSettingsRow(id: "other_thing", name: "Other Thing", isVisible: false),
+        ])
+    }
+
     func testDefaultProviderOrderIsCatalog() {
         XCTAssertEqual(DisplayPreferences().providerOrder, ["cursor", "codex", "claude_code", "copilot", "gemini_cli", "grok", "devin"])
         XCTAssertEqual(ServerSettings().providerOrder, ProviderCatalog.defaultOrder)

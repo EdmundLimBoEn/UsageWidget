@@ -54,6 +54,7 @@ struct SettingsView: View {
                         HStack {
                             ProviderMark(size: 28, cornerRadius: 8)
                             Text(row.name)
+                                .foregroundStyle(row.isVisible ? .primary : .secondary)
                             Spacer()
                             Toggle(
                                 "Visible",
@@ -136,17 +137,12 @@ struct SettingsView: View {
         }
     }
 
-    private struct Row: Identifiable {
-        let id: String
-        let name: String
-    }
-
-    private func providerRows(_ providers: [Provider]) -> [Row] {
-        ProviderDisplay.orderedVisible(
+    private func providerRows(_ providers: [Provider]) -> [ProviderSettingsRow] {
+        ProviderDisplay.settingsRows(
             providers: providers,
             order: model.preferences.providerOrder,
-            hidden: []
-        ).map { Row(id: $0.id, name: $0.name) }
+            hidden: model.preferences.hiddenProviders
+        )
     }
 
     private func requestNotifications() async {
