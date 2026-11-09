@@ -23,7 +23,7 @@ if (-not (Test-Path -LiteralPath $configPath)) {
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
     $token = -join ($bytes | ForEach-Object { $_.ToString("x2") })
     $config = [ordered]@{ USAGEWIDGET_TOKEN=$token; USAGEWIDGET_PUBLIC_URL=$publicUrl; DB_PATH=(Join-Path $dataDirectory "usagewidget.db"); LISTEN_ADDR="127.0.0.1:8377" }
-    if ($null -ne $crossUsage) {
+    if ($null -ne $crossUsage -and [string]::IsNullOrWhiteSpace($CrossUsageUrl)) {
         $config.CROSSUSAGE_BIN = $crossUsage.Source
         $resources = Join-Path (Split-Path -Parent $crossUsage.Source) "resources"
         if (Test-Path -LiteralPath (Join-Path $resources "bundled_plugins") -PathType Container) {
