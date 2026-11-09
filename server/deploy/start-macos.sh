@@ -26,7 +26,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   token="$(openssl rand -hex 32)"
   {
     printf 'USAGEWIDGET_TOKEN=%q\n' "$token"
-    if [[ -n "$crossusage" ]]; then
+    if [[ -n "$crossusage" && -z $REQUESTED_CROSSUSAGE_URL ]]; then
       printf 'CROSSUSAGE_BIN=%q\n' "$crossusage"
       resources="$(cd "$(dirname "$crossusage")" && pwd)/resources"
       if [[ -d $resources/bundled_plugins ]]; then

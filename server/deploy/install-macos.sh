@@ -27,7 +27,7 @@ if [[ ! -f $ENV_FILE ]]; then
   {
     printf 'USAGEWIDGET_TOKEN=%q\n' "$token"
     printf 'USAGEWIDGET_PUBLIC_URL=%q\n' "$public_url"
-    if [[ -n $crossusage ]]; then
+    if [[ -n $crossusage && -z $CROSSUSAGE_SOURCE_URL ]]; then
       printf 'CROSSUSAGE_BIN=%q\n' "$crossusage"
       resources="$(cd "$(dirname "$crossusage")" && pwd)/resources"
       if [[ -d $resources/bundled_plugins ]]; then

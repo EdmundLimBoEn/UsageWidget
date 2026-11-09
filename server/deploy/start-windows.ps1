@@ -49,7 +49,7 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
         $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
     }
 } else {
-    if ([string]::IsNullOrWhiteSpace($CrossUsageBin)) {
+    if ([string]::IsNullOrWhiteSpace($CrossUsageBin) -and [string]::IsNullOrWhiteSpace($CrossUsageUrl)) {
         $command = Get-Command crossusage-cli -ErrorAction SilentlyContinue
         if ($null -eq $command) {
             $command = Get-Command crossusage-cli.exe -ErrorAction SilentlyContinue
