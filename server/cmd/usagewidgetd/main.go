@@ -42,7 +42,7 @@ func main() {
 
 	mainServer := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           api.Handler(),
+		Handler:           server.WithManualPollWriteDeadline(api.Handler()),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      95 * time.Second,
