@@ -1,8 +1,3 @@
-# Linux checks for everything that does not need a Mac: Go server tests,
-# the App Review worker (tests + wrangler dry-run bundle), shell tests, and the
-# install worker test. Also runs the Windows daemon collection smoke. Needs no
-# secrets and deploys nothing.
-
 name: CI
 
 on:

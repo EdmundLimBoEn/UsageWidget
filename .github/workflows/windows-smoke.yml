@@ -1,6 +1,3 @@
-# Native Windows daemon smoke: parse installers, build usagewidgetd, and
-# collect through POST /v1/poll. Needs no secrets and publishes nothing.
-
 name: Windows smoke
 
 on:
