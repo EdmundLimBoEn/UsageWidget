@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -130,8 +131,8 @@ func (c *apnsClient) push(ctx context.Context, deviceToken, pushType, topic, pri
 }
 
 func (c *apnsClient) pushWithToken(ctx context.Context, deviceToken, pushType, topic, priority string, body []byte, token string) error {
-	url := "https://" + c.host + "/3/device/" + deviceToken
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	requestURL := "https://" + c.host + "/3/device/" + deviceToken
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("apns: build request: %w", err)
 	}
@@ -142,6 +143,11 @@ func (c *apnsClient) pushWithToken(ctx context.Context, deviceToken, pushType, t
 
 	resp, err := c.http.Do(req)
 	if err != nil {
+		// http.Client includes the push token in its URL error; retain only a
+		// redacted URL while preserving the transport cause and classification.
+		if urlErr, ok := err.(*url.Error); ok {
+			err = &url.Error{Op: urlErr.Op, URL: "[redacted]", Err: urlErr.Err}
+		}
 		return fmt.Errorf("apns: send: %w", err)
 	}
 	defer resp.Body.Close()

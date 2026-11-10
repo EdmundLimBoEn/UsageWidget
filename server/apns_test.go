@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,9 +11,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
+	"log"
 	"math/big"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +139,79 @@ func TestAPNSErrorTerminalDeviceTokenClassification(t *testing.T) {
 	}
 	if (&APNSError{Reason: "TooManyRequests"}).TerminalDeviceToken() {
 		t.Fatal("transient APNs failures must retain device tokens")
+	}
+}
+
+func TestAPNSTransportErrorsRedactPushTokens(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error
+	}{
+		{"timeout", context.DeadlineExceeded},
+		{"canceled", context.Canceled},
+		{"dns", &net.DNSError{Err: "no such host", Name: "apns.test", IsNotFound: true}},
+		{"tls", &x509.UnknownAuthorityError{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const pushToken = "synthetic-push-token-must-not-be-logged"
+			requests := 0
+			client := &apnsClient{
+				key: testKey(t), keyID: "K", teamID: "T", bundleID: "bundle", host: "apns.test",
+				http: &http.Client{Transport: apnsRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests++
+					if req.URL.Path != "/3/device/"+pushToken {
+						t.Error("push request lost its destination token")
+					}
+					return nil, tc.cause
+				})},
+			}
+			for _, send := range []func() error{
+				func() error { return client.SendAlert(context.Background(), pushToken, Event{}) },
+				func() error { return client.SendWidgetRefresh(context.Background(), pushToken) },
+			} {
+				err := send()
+				if err == nil {
+					t.Fatal("expected transport failure")
+				}
+				if strings.Contains(err.Error(), pushToken) {
+					t.Error("transport error exposes push token")
+				}
+				if !errors.Is(err, tc.cause) {
+					t.Error("transport error lost its underlying cause")
+				}
+				var urlErr *url.Error
+				if !errors.As(err, &urlErr) || strings.Contains(urlErr.URL, pushToken) {
+					t.Error("expected URL error with redacted URL")
+				}
+				var netErr net.Error
+				if !errors.As(err, &netErr) || netErr.Timeout() != (tc.name == "timeout") {
+					t.Error("transport error lost timeout classification")
+				}
+				if !strings.Contains(err.Error(), tc.cause.Error()) {
+					t.Error("transport error lost diagnostic details")
+				}
+			}
+
+			store := openTestStore(t)
+			if err := store.UpsertDevice("phone", "", pushToken); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(previous)
+			poller := NewPoller(store, nil, client, nil)
+			result := poller.dispatch(context.Background(), true)
+			if result.Delivery.WidgetRefresh.Failed != 1 || requests != 3 {
+				t.Fatal("expected all three pushes to fail in the transport")
+			}
+			if !strings.Contains(logs.String(), "poller: widget refresh to phone: apns: send:") {
+				t.Error("expected widget transport failure in poller logs")
+			}
+			if strings.Contains(logs.String(), pushToken) {
+				t.Error("poller log exposes push token")
+			}
+		})
 	}
 }
 
