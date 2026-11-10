@@ -149,6 +149,8 @@ func OpenStoreWithDeviceLimit(dbPath string, maxDevices int) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open db: %w", err)
 	}
+	// Serialize access so concurrent writes wait instead of failing with SQLITE_BUSY.
+	db.SetMaxOpenConns(1)
 	tx, err := db.Begin()
 	if err != nil {
 		db.Close()
