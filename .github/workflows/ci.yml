@@ -1,6 +1,7 @@
 # Linux checks for everything that does not need a Mac: Go server tests,
 # the App Review worker (tests + wrangler dry-run bundle), shell tests, and the
-# install worker test. Needs no secrets and deploys nothing.
+# install worker test. Also runs the Windows daemon collection smoke. Needs no
+# secrets and deploys nothing.
 
 name: CI
 
@@ -100,3 +101,7 @@ jobs:
           done
       - name: Install worker test
         run: node tests/install_worker_test.mjs
+
+  windows-smoke:
+    name: Windows smoke
+    uses: ./.github/workflows/windows-smoke.yml
