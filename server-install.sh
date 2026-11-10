@@ -78,7 +78,7 @@ map_arch() {
 
 read_env() { local key=$1; [[ -r $ENV_FILE ]] || return 1; sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1; }
 # Decode EnvironmentFile values without evaluating shell expansions or commands.
-# Keep this separate from read_env to limit the change to rollback path resolution.
+# Keep this separate from read_env for database path resolution.
 read_systemd_env() {
   local key=$1
   [[ -r $ENV_FILE ]] || return 1
@@ -437,8 +437,11 @@ do_doctor() {
 }
 
 do_backup() {
-  need sqlite3; install -d -m 0700 -o root -g root "$BACKUP_DIR"; local stamp work archive; stamp="$(date -u +%Y%m%dT%H%M%SZ)"; work="$(mktemp -d)"; archive="$BACKUP_DIR/usagewidget-$stamp.tar.gz"
-  sqlite3 "$DATA_DIR/usagewidget.db" ".backup '$work/usagewidget.db'"; install -m 0600 "$ENV_FILE" "$work/env"
+  need sqlite3; install -d -m 0700 -o root -g root "$BACKUP_DIR"; local stamp work archive db_path; stamp="$(date -u +%Y%m%dT%H%M%SZ)"; work="$(mktemp -d)"; archive="$BACKUP_DIR/usagewidget-$stamp.tar.gz"
+  db_path="$(read_systemd_env DB_PATH)"
+  db_path="${db_path:-$DATA_DIR/usagewidget.db}"
+  [[ $db_path == /* ]] || db_path="$DATA_DIR/$db_path"
+  sqlite3 "$db_path" ".backup '$work/usagewidget.db'"; install -m 0600 "$ENV_FILE" "$work/env"
   if $INCLUDE_APNS; then local key; key="$(read_env APNS_KEY_PATH || true)"; [[ -n $key && -r $key ]] && install -m 0600 "$key" "$work/apns-key.p8"; fi
   tar -czf "$archive" -C "$work" .; rm -rf -- "$work"; say "$archive"
 }
@@ -447,12 +450,16 @@ do_restore() {
   [[ -n $RESTORE_FILE ]] || RESTORE_FILE="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'usagewidget-*.tar.gz' -print | sort | tail -1)"
   [[ -f $RESTORE_FILE ]] || die "backup archive not found"
   if tar -tzf "$RESTORE_FILE" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then die "backup contains unsafe paths"; fi
-  local work listing
+  local work listing db_path restore_env="$ENV_FILE"
   listing="$(tar -tvf "$RESTORE_FILE")" || die "cannot list backup archive"
   if grep -qvE '^[-d]' <<<"$listing"; then die "backup contains unsupported entry types"; fi
   # main requires root; keep the fresh staging directory root-owned during extraction.
   work="$(mktemp -d)"; tar -xzf "$RESTORE_FILE" --no-same-owner -C "$work"; [[ -f $work/usagewidget.db && ! -L $work/usagewidget.db ]] || die "backup has no database"
-  systemctl stop usagewidget; install -m 0600 -o usagewidget -g usagewidget "$work/usagewidget.db" "$DATA_DIR/usagewidget.db"; [[ -f $work/env && ! -L $work/env ]] && install -m 0600 -o root -g usagewidget "$work/env" "$ENV_FILE"; [[ -f $work/apns-key.p8 && ! -L $work/apns-key.p8 ]] && install -m 0640 -o root -g usagewidget "$work/apns-key.p8" "$CONFIG_DIR/AuthKey.p8"; systemctl start usagewidget; rm -rf -- "$work"; wait_for_health 30 || die "restored server failed health check"; say "Restore complete"
+  [[ -f $work/env && ! -L $work/env ]] && restore_env="$work/env"
+  db_path="$(ENV_FILE="$restore_env" read_systemd_env DB_PATH || true)"
+  db_path="${db_path:-$DATA_DIR/usagewidget.db}"
+  [[ $db_path == /* ]] || db_path="$DATA_DIR/$db_path"
+  systemctl stop usagewidget; install -m 0600 -o usagewidget -g usagewidget "$work/usagewidget.db" "$db_path"; [[ -f $work/env && ! -L $work/env ]] && install -m 0600 -o root -g usagewidget "$work/env" "$ENV_FILE"; [[ -f $work/apns-key.p8 && ! -L $work/apns-key.p8 ]] && install -m 0640 -o root -g usagewidget "$work/apns-key.p8" "$CONFIG_DIR/AuthKey.p8"; systemctl start usagewidget; rm -rf -- "$work"; wait_for_health 30 || die "restored server failed health check"; say "Restore complete"
 }
 
 do_rotate_token() {

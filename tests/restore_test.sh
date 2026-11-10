@@ -83,8 +83,12 @@ assert_rejected fifo
 
 [[ $DEFAULT_BACKUP_DIR == /var/backups/usagewidget ]]
 BACKUP_DIR="$TEST_DIR/backups"
-# sqlite3's backup content is irrelevant to directory ownership and permissions.
-sqlite3() { return 0; }
+# Model sqlite3's backup command; archive extraction and installation stay real.
+sqlite3() {
+  local destination=${2#".backup '"}
+  destination=${destination%"'"}
+  cp -- "$1" "$destination"
+}
 for _ in fresh existing; do
   : >"$OPERATIONS"
   do_backup >"$TEST_DIR/output"
@@ -92,5 +96,44 @@ for _ in fresh existing; do
   [[ $(stat -c %a "$BACKUP_DIR") == 700 ]]
   chmod 0777 "$BACKUP_DIR"
 done
+
+# Exercise database selection with distinct contents at the default and custom paths.
+for path_style in plain double single relative escaped unset empty; do
+  configured_db="$TEST_DIR/custom database.db"
+  case "$path_style" in
+    plain) printf 'DB_PATH=%s\n' "$configured_db" ;;
+    double) printf 'DB_PATH="%s"\n' "$configured_db" ;;
+    single) printf "DB_PATH='%s'\n" "$configured_db" ;;
+    relative) configured_db="$DATA_DIR/relative database.db"; printf 'DB_PATH="relative database.db"\n' ;;
+    escaped) configured_db="$DATA_DIR/relative database.db"; printf '%s\n' 'DB_PATH=relative\ database.db' ;;
+    unset) configured_db="$DATA_DIR/usagewidget.db"; printf 'OTHER=fixture\n' ;;
+    empty) configured_db="$DATA_DIR/usagewidget.db"; printf 'DB_PATH=\n' ;;
+  esac >"$ENV_FILE"
+  cp "$ENV_FILE" "$TEST_DIR/expected-env"
+  printf 'obsolete default\n' >"$DATA_DIR/usagewidget.db"
+  printf 'configured database\n' >"$configured_db"
+  do_backup >"$TEST_DIR/output"
+  RESTORE_FILE=$(cat "$TEST_DIR/output")
+  [[ $(command tar -xOzf "$RESTORE_FILE" ./usagewidget.db) == 'configured database' ]]
+
+  # Restore must use the archived environment even when the current one differs.
+  printf 'DB_PATH="%s/current database.db"\n' "$TEST_DIR" >"$ENV_FILE"
+  printf 'current database\n' >"$TEST_DIR/current database.db"
+  printf 'changed since backup\n' >"$configured_db"
+  (do_restore) >"$TEST_DIR/output" 2>&1
+  [[ $(cat "$configured_db") == 'configured database' ]]
+  [[ $(cat "$TEST_DIR/current database.db") == 'current database' ]]
+  cmp "$TEST_DIR/expected-env" "$ENV_FILE"
+  if [[ $configured_db != "$DATA_DIR/usagewidget.db" ]]; then
+    [[ $(cat "$DATA_DIR/usagewidget.db") == 'obsolete default' ]]
+  fi
+done
+
+# Archives without an environment retain the current configured destination.
+printf 'DB_PATH="%s/current database.db"\n' "$TEST_DIR" >"$ENV_FILE"
+RESTORE_FILE="$TEST_DIR/database-only.tar.gz"
+tar -czf "$RESTORE_FILE" -C "$TEST_DIR/archive" usagewidget.db
+(do_restore) >"$TEST_DIR/output" 2>&1
+cmp "$TEST_DIR/archive/usagewidget.db" "$TEST_DIR/current database.db"
 
 echo 'restore tests passed'
